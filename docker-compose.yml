@@ -1,0 +1,48 @@
+# CodeReview Arena (code-review-arena)
+services:
+  api:
+    build: .
+    image: code-review-arena-api:local
+    command: arena serve --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      ARENA_DB_PATH: /app/data/arena.db
+      ARENA_RUNS_DIR: /app/runs
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    volumes:
+      - ./runs:/app/runs
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  dashboard:
+    build: ./dashboard
+    image: code-review-arena-dashboard:local
+    ports:
+      - "3000:3000"
+    environment:
+      ARENA_API_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: arena
+      POSTGRES_USER: arena
+      POSTGRES_PASSWORD: arena
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

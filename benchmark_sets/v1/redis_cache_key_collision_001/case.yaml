@@ -1,0 +1,35 @@
+id: redis_cache_key_collision_001
+title: Redis tenant cache key collision
+category: reliability
+severity: high
+stack: [python, redis, multi-tenant]
+description: >
+  Search caching now keys only on user ID, dropping tenant and query isolation.
+input:
+  diff: pr.diff
+  before_dir: before
+  after_dir: after
+  tests_dir: tests
+ground_truth:
+  primary_bug:
+    summary: Under-specified Redis keys leak cached search data across tenants and queries.
+    files:
+      - path: app/search_cache.py
+        line_ranges: [{start: 1, end: 2}]
+    concepts: [cache key collision, tenant isolation, data leakage]
+    must_mention: [tenant_id, query, cache]
+    acceptable_fix_keywords: [tenant_id, query, cache_key]
+scoring:
+  weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
+  false_positive_penalty: 5
+  invalid_json_penalty: 20
+execution:
+  run_tests: true
+  test_command: "pytest -q tests"
+  timeout_seconds: 30
+  docker_image: null
+validation:
+  patch_required: true
+  tests_required: true
+  structural_validators: [redis_cache_key_has_tenant_scope]
+metrics: {beta: 1.0}

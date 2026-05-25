@@ -1,0 +1,22 @@
+from app.rag.models import RetrievedDocument
+
+
+def wrap_retrieved_context(documents: list[RetrievedDocument]) -> str:
+    blocks = []
+    for document in documents:
+        blocks.append(
+            f"[UNTRUSTED_RETRIEVED_CONTEXT id={document.id}]\n"
+            f"{document.text}\n"
+            "[/UNTRUSTED_RETRIEVED_CONTEXT]"
+        )
+    return "\n".join(blocks)
+
+
+def build_prompt(
+    *, system_instructions: str, retrieved: list[RetrievedDocument]
+) -> str:
+    context_block = wrap_retrieved_context(retrieved)
+    return (
+        f"SYSTEM_INSTRUCTIONS:\n{system_instructions}\n\n"
+        f"RETRIEVED_CONTEXT_DATA:\n{context_block}"
+    )

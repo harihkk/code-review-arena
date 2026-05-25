@@ -1,0 +1,35 @@
+id: security_fastapi_multitenant_admin_bypass_001
+title: FastAPI tenant-scoped admin authorization bypass
+category: security
+severity: high
+stack: [python, fastapi, auth, multi-tenant]
+description: >
+  A pull request wires a tenant admin reset route to authenticated-user checks only,
+  removing enforcement that the caller is an administrator for the target tenant.
+input:
+  diff: pr.diff
+  before_dir: before
+  after_dir: after
+  tests_dir: tests
+ground_truth:
+  primary_bug:
+    summary: Tenant admin route does not verify tenant-scoped administrator privileges.
+    files:
+      - path: app/routes/tenant_admin.py
+        line_ranges: [{start: 9, end: 13}]
+    concepts: [authorization, multi-tenant, privilege escalation, tenant admin]
+    must_mention: [tenant, admin, authorization]
+    acceptable_fix_keywords: [require_tenant_admin, tenant_admin, is_admin, "HTTPException", "403"]
+scoring:
+  weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
+  false_positive_penalty: 5
+  invalid_json_penalty: 20
+execution:
+  run_tests: true
+  test_command: "pytest -q tests"
+  timeout_seconds: 30
+validation:
+  patch_required: true
+  tests_required: true
+  structural_validators: [fastapi_tenant_admin_authorization]
+metrics: {beta: 1.0}

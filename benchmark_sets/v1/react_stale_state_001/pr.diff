@@ -1,0 +1,13 @@
+diff --git a/src/components/Notifications.tsx b/src/components/Notifications.tsx
+--- a/src/components/Notifications.tsx
++++ b/src/components/Notifications.tsx
+@@ -5,7 +5,7 @@ export function Notifications() {
+ 
+   async function receive(message: string) {
+     await Promise.resolve();
+-    setMessages(previous => [...previous, message]);
++    setMessages([...messages, message]);
+   }
+ 
+   return <button onClick={() => receive("new")}>{messages.length}</button>;
+

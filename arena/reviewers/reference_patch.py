@@ -1,0 +1,155 @@
+"""Load static reference.patch artifacts shipped with each benchmark case."""
+
+from __future__ import annotations
+
+import json
+import time
+from pathlib import Path
+
+from arena.core.models import CaseContext, Finding, ReviewerResponse, ReviewResult
+from arena.patching.patch_parser import touched_files
+from arena.reviewers.base import BaseReviewer
+from arena.reviewers.response_parser import parse_review_response
+
+REFERENCE_PATCH_FILENAME = "reference.patch"
+
+# Reviewer-visible localization hints per case (not used to synthesize patch bytes).
+LOCALIZATION_HINTS: dict[str, tuple[str, str, str, tuple[int, int], str]] = {
+    "security_fastapi_multitenant_admin_bypass_001": (
+        "Tenant admin route lacks tenant-scoped administrator authorization.",
+        "authorization multi-tenant tenant admin tenant_id privilege escalation",
+        "app/routes/tenant_admin.py",
+        (9, 13),
+        "Enforce tenant-scoped admin authorization on the reset route.",
+    ),
+    "distributed_kafka_duplicate_event_001": (
+        "Kafka payment handler does not guard duplicate event delivery.",
+        "idempotency duplicate event event_id at-least-once delivery kafka",
+        "consumer/payments.py",
+        (5, 6),
+        "Deduplicate events by event_id before mutating the ledger.",
+    ),
+    "rag_fabricated_citation_001": (
+        "Generated citations are not validated against retrieved context.",
+        "citation validation retrieved context fabricated citation valid_ids",
+        "rag/answer.py",
+        (1, 2),
+        "Reject citation IDs that are not present in retrieved chunks.",
+    ),
+    "async_balance_race_001": (
+        "Concurrent balance updates are not atomic.",
+        "race condition concurrent balance lock atomic lost write",
+        "app/balance.py",
+        (8, 11),
+        "Guard balance mutations with an asyncio lock.",
+    ),
+    "idempotency_key_tenant_scope_001": (
+        "Idempotency cache keys are not scoped per tenant.",
+        "idempotency tenant tenant_id scope cache collision multi-tenant",
+        "app/idempotency.py",
+        (5, 9),
+        "Scope idempotency lookup and storage by tenant plus key.",
+    ),
+    "security_sql_join_ownership_leak_001": (
+        "Document lookup omits organization ownership enforcement.",
+        "authorization tenant organization_id document ownership sql",
+        "app/documents.py",
+        (1, 16),
+        "Require organization ownership in the document lookup path.",
+    ),
+    "security_jwt_audience_validation_001": (
+        "JWT verification omits audience and issuer checks.",
+        "jwt audience issuer aud iss token validation authentication",
+        "app/auth/jwt_verifier.py",
+        (4, 5),
+        "Validate audience and issuer claims during token verification.",
+    ),
+    "distributed_out_of_order_event_001": (
+        "Projector applies stale events without a version guard.",
+        "event ordering version stale out-of-order projection",
+        "app/projector.py",
+        (10, 14),
+        "Ignore events when their version is not newer than current state.",
+    ),
+    "api_pagination_cursor_skip_001": (
+        "Cursor pagination lacks a stable id tiebreaker.",
+        "pagination cursor created_at id tiebreaker duplicate timestamp",
+        "app/pagination.py",
+        (8, 21),
+        "Use a composite cursor of created_at and record id.",
+    ),
+    "rag_prompt_injection_policy_override_001": (
+        "Retrieved context is merged into trusted system instructions.",
+        "prompt injection rag untrusted retrieved context policy override",
+        "app/rag/prompt_builder.py",
+        (4, 8),
+        "Isolate retrieved context as untrusted data separate from system instructions.",
+    ),
+}
+
+
+class ReferencePatchReviewer(BaseReviewer):
+    name = "reference-patch"
+    model = None
+
+    def _reference_patch_path(self, context: CaseContext) -> Path | None:
+        if context.case_dir is None:
+            return None
+        return context.case_dir / REFERENCE_PATCH_FILENAME
+
+    def review(self, context: CaseContext) -> ReviewerResponse:
+        started = time.perf_counter()
+        patch_path = self._reference_patch_path(context)
+        patch_text = ""
+        if patch_path is not None and patch_path.is_file():
+            patch_text = patch_path.read_text(encoding="utf-8")
+        hints = LOCALIZATION_HINTS.get(context.case.id)
+        if hints is None:
+            title = f"Reference patch review for {context.case.id}"
+            summary = (
+                f"No localization hints configured for {context.case.id}. "
+                f"Apply the shipped reference patch when available."
+            )
+            path = touched_files(patch_text)[0] if patch_text.strip() else "unknown"
+            line_range = (1, 1)
+            fix = "Apply the reference patch for this case."
+        else:
+            title, terms, path, line_range, fix = hints
+            if patch_text.strip():
+                touched = touched_files(patch_text)
+                if touched:
+                    path = touched[0]
+            summary = (
+                f"{title} This concerns {terms}. "
+                "The reference.patch artifact contains the canonical known-good repair."
+            )
+        finding = Finding(
+            title=title,
+            summary=summary,
+            category=context.case.category,
+            severity=context.case.severity,
+            file=path,
+            line_start=line_range[0],
+            line_end=line_range[1],
+            evidence="Reference patch baseline loaded from the case directory.",
+            suggested_fix=fix,
+            suggested_patch=patch_text if patch_text.strip() else None,
+            patch_confidence=0.99 if patch_text.strip() else None,
+            confidence=0.99,
+        )
+        result = ReviewResult(
+            findings=[finding],
+            overall_risk=context.case.severity,
+            review_summary=(
+                f"Reference-patch baseline for {context.case.id} "
+                f"({'patch present' if patch_text.strip() else 'patch missing'})."
+            ),
+        )
+        raw = json.dumps(result.model_dump())
+        parsed, attempts = parse_review_response(raw)
+        return ReviewerResponse(
+            raw_response=raw,
+            parsed_response=parsed,
+            parse_attempts=attempts,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+        )

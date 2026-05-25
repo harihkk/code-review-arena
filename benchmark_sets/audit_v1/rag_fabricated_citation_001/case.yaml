@@ -1,0 +1,35 @@
+id: rag_fabricated_citation_001
+title: RAG citations not validated against retrieved chunks
+category: ai-quality
+severity: high
+stack: [python, rag, llm]
+description: >
+  A pull request returns model citations directly without checking that citation IDs
+  exist in the retrieved source chunks.
+input:
+  diff: pr.diff
+  before_dir: before
+  after_dir: after
+  tests_dir: tests
+ground_truth:
+  primary_bug:
+    summary: Generated citation IDs are not validated against retrieved context.
+    files:
+      - path: rag/answer.py
+        line_ranges: [{start: 1, end: 2}]
+    concepts: [citation, grounding, hallucination, retrieved context]
+    must_mention: [citation, retrieved, valid]
+    acceptable_fix_keywords: [valid_ids, retrieved_chunks, citation_ids, reject, not in]
+scoring:
+  weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
+  false_positive_penalty: 5
+  invalid_json_penalty: 20
+execution:
+  run_tests: true
+  test_command: "pytest -q tests"
+  timeout_seconds: 30
+validation:
+  patch_required: true
+  tests_required: true
+  structural_validators: [rag_citation_ids_validated]
+metrics: {beta: 1.0}

@@ -1,0 +1,733 @@
+{
+  "run_id": "2026-05-25_14-49-53",
+  "benchmark_set": "v1",
+  "reviewer": "mock",
+  "model": "perfect",
+  "started_at": "2026-05-25T14:49:51.970439",
+  "completed_at": "2026-05-25T14:49:53.235650",
+  "metadata": {
+    "prompt_version": "v1",
+    "benchmark_version": "v1",
+    "temperature": 0.0,
+    "git_commit": null
+  },
+  "case_results": [
+    {
+      "case_id": "fastapi_auth_bypass_001",
+      "title": "FastAPI admin authorization bypass",
+      "category": "security",
+      "severity": "high",
+      "ground_truth_summary": "Missing authorization check on admin endpoint.",
+      "response": {
+        "raw_response": "{\"findings\": [{\"title\": \"Missing authorization check on admin endpoint.\", \"summary\": \"Missing authorization check on admin endpoint. This concerns authorization role-based access control privilege escalation admin role authorization.\", \"category\": \"security\", \"severity\": \"high\", \"file\": \"app/routes/admin.py\", \"line_start\": 10, \"line_end\": 14, \"evidence\": \"The newly changed production path introduces the seeded behavior.\", \"suggested_fix\": \"Use require_admin and enforce RBAC.\", \"confidence\": 0.99}], \"overall_risk\": \"high\", \"review_summary\": \"Mock perfect review for fastapi_auth_bypass_001.\"}",
+        "parsed_response": {
+          "findings": [
+            {
+              "title": "Missing authorization check on admin endpoint.",
+              "summary": "Missing authorization check on admin endpoint. This concerns authorization role-based access control privilege escalation admin role authorization.",
+              "category": "security",
+              "severity": "high",
+              "file": "app/routes/admin.py",
+              "line_start": 10,
+              "line_end": 14,
+              "evidence": "The newly changed production path introduces the seeded behavior.",
+              "suggested_fix": "Use require_admin and enforce RBAC.",
+              "confidence": 0.99
+            }
+          ],
+          "overall_risk": "high",
+          "review_summary": "Mock perfect review for fastapi_auth_bypass_001."
+        },
+        "invalid_output": false,
+        "parse_attempts": 1,
+        "latency_ms": 0,
+        "input_tokens": 0,
+        "output_tokens": 149,
+        "estimated_cost": 0.0,
+        "tool_usage": []
+      },
+      "scored_findings": [
+        {
+          "finding": {
+            "title": "Missing authorization check on admin endpoint.",
+            "summary": "Missing authorization check on admin endpoint. This concerns authorization role-based access control privilege escalation admin role authorization.",
+            "category": "security",
+            "severity": "high",
+            "file": "app/routes/admin.py",
+            "line_start": 10,
+            "line_end": 14,
+            "evidence": "The newly changed production path introduces the seeded behavior.",
+            "suggested_fix": "Use require_admin and enforce RBAC.",
+            "confidence": 0.99
+          },
+          "is_true_positive": true,
+          "false_positive_reason": null
+        }
+      ],
+      "breakdown": {
+        "concept_match": 35.0,
+        "file_match": 20.0,
+        "line_overlap": 15.0,
+        "severity_match": 10.0,
+        "fix_quality": 15.0,
+        "no_false_positives": 5.0,
+        "false_positive_penalty": 0.0,
+        "invalid_json_penalty": 0.0,
+        "total": 100.0
+      },
+      "score": 100.0,
+      "bug_found": true,
+      "correct_file": true,
+      "correct_line": true,
+      "line_match": "full",
+      "false_positive_count": 0,
+      "test_output": "command=pytest -q tests\nexit_code=1\nduration_ms=314\nF                                                                        [100%]\n=================================== FAILURES ===================================\n_______________________ test_member_cannot_delete_users ________________________\n\n    def test_member_cannot_delete_users():\n        result = delete_user(42, {\"id\": 7, \"role\": \"member\"})\n>       assert result is None, \"a member must not be allowed to delete users\"\nE       AssertionError: a member must not be allowed to delete users\nE       assert {'deleted_by': 7, 'deleted_user_id': 42} is None\n\ntests/test_admin.py:6: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_admin.py::test_member_cannot_delete_users - AssertionError:...\n1 failed in 0.13s"
+    },
+    {
+      "case_id": "spring_boot_null_handling_001",
+      "title": "Spring Boot missing order null handling",
+      "category": "correctness",
+      "severity": "medium",
+      "ground_truth_summary": "Missing records now cause an Optional runtime exception instead of a 404.",
+      "response": {
+        "raw_response": "{\"findings\": [{\"title\": \"Missing records now cause an Optional runtime exception instead of a 404.\", \"summary\": \"Missing records now cause an Optional runtime exception instead of a 404. This concerns missing record Optional not found findById empty exception.\", \"category\": \"correctness\", \"severity\": \"medium\", \"file\": \"src/main/java/com/acme/orders/OrderService.java\", \"line_start\": 6, \"line_end\": 8, \"evidence\": \"The newly changed production path introduces the seeded behavior.\", \"suggested_fix\": \"Use orElseThrow with NOT_FOUND.\", \"confidence\": 0.99}], \"overall_risk\": \"medium\", \"review_summary\": \"Mock perfect review for spring_boot_null_handling_001.\"}",
+        "parsed_response": {
+          "findings": [
+            {
+              "title": "Missing records now cause an Optional runtime exception instead of a 404.",
+              "summary": "Missing records now cause an Optional runtime exception instead of a 404. This concerns missing record Optional not found findById empty exception.",
+              "category": "correctness",
+              "severity": "medium",
+              "file": "src/main/java/com/acme/orders/OrderService.java",
+              "line_start": 6,
+              "line_end": 8,
+              "evidence": "The newly changed production path introduces the seeded behavior.",
+              "suggested_fix": "Use orElseThrow with NOT_FOUND.",
+              "confidence": 0.99
+            }
+          ],
+          "overall_risk": "medium",
+          "review_summary": "Mock perfect review for spring_boot_null_handling_001."
+        },
+        "invalid_output": false,
+        "parse_attempts": 1,
+        "latency_ms": 0,
+        "input_tokens": 0,
+        "output_tokens": 164,
+        "estimated_cost": 0.0,
+        "tool_usage": []
+      },
+      "scored_findings": [
+        {
+          "finding": {
+            "title": "Missing records now cause an Optional runtime exception instead of a 404.",
+            "summary": "Missing records now cause an Optional runtime exception instead of a 404. This concerns missing record Optional not found findById empty exception.",
+            "category": "correctness",
+            "severity": "medium",
+            "file": "src/main/java/com/acme/orders/OrderService.java",
+            "line_start": 6,
+            "line_end": 8,
+            "evidence": "The newly changed production path introduces the seeded behavior.",
+            "suggested_fix": "Use orElseThrow with NOT_FOUND.",
+            "confidence": 0.99
+          },
+          "is_true_positive": true,
+          "false_positive_reason": null
+        }
+      ],
+      "breakdown": {
+        "concept_match": 35.0,
+        "file_match": 20.0,
+        "line_overlap": 15.0,
+        "severity_match": 10.0,
+        "fix_quality": 15.0,
+        "no_false_positives": 5.0,
+        "false_positive_penalty": 0.0,
+        "invalid_json_penalty": 0.0,
+        "total": 100.0
+      },
+      "score": 100.0,
+      "bug_found": true,
+      "correct_file": true,
+      "correct_line": true,
+      "line_match": "full",
+      "false_positive_count": 0,
+      "test_output": ""
+    },
+    {
+      "case_id": "graphql_n_plus_one_001",
+      "title": "GraphQL customer resolver N+1 regression",
+      "category": "performance",
+      "severity": "medium",
+      "ground_truth_summary": "Customer lookups inside the order map introduce N+1 database queries.",
+      "response": {
+        "raw_response": "{\"findings\": [{\"title\": \"Customer lookups inside the order map introduce N+1 database queries.\", \"summary\": \"Customer lookups inside the order map introduce N+1 database queries. This concerns N+1 batching database query customer loop query.\", \"category\": \"performance\", \"severity\": \"medium\", \"file\": \"src/resolvers/orders.ts\", \"line_start\": 4, \"line_end\": 10, \"evidence\": \"The newly changed production path introduces the seeded behavior.\", \"suggested_fix\": \"Restore DataLoader loadMany batching.\", \"confidence\": 0.99}], \"overall_risk\": \"medium\", \"review_summary\": \"Mock perfect review for graphql_n_plus_one_001.\"}",
+        "parsed_response": {
+          "findings": [
+            {
+              "title": "Customer lookups inside the order map introduce N+1 database queries.",
+              "summary": "Customer lookups inside the order map introduce N+1 database queries. This concerns N+1 batching database query customer loop query.",
+              "category": "performance",
+              "severity": "medium",
+              "file": "src/resolvers/orders.ts",
+              "line_start": 4,
+              "line_end": 10,
+              "evidence": "The newly changed production path introduces the seeded behavior.",
+              "suggested_fix": "Restore DataLoader loadMany batching.",
+              "confidence": 0.99
+            }
+          ],
+          "overall_risk": "medium",
+          "review_summary": "Mock perfect review for graphql_n_plus_one_001."
+        },
+        "invalid_output": false,
+        "parse_attempts": 1,
+        "latency_ms": 0,
+        "input_tokens": 0,
+        "output_tokens": 154,
+        "estimated_cost": 0.0,
+        "tool_usage": []
+      },
+      "scored_findings": [
+        {
+          "finding": {
+            "title": "Customer lookups inside the order map introduce N+1 database queries.",
+            "summary": "Customer lookups inside the order map introduce N+1 database queries. This concerns N+1 batching database query customer loop query.",
+            "category": "performance",
+            "severity": "medium",
+            "file": "src/resolvers/orders.ts",
+            "line_start": 4,
+            "line_end": 10,
+            "evidence": "The newly changed production path introduces the seeded behavior.",
+            "suggested_fix": "Restore DataLoader loadMany batching.",
+            "confidence": 0.99
+          },
+          "is_true_positive": true,
+          "false_positive_reason": null
+        }
+      ],
+      "breakdown": {
+        "concept_match": 35.0,
+        "file_match": 20.0,
+        "line_overlap": 15.0,
+        "severity_match": 10.0,
+        "fix_quality": 15.0,
+        "no_false_positives": 5.0,
+        "false_positive_penalty": 0.0,
+        "invalid_json_penalty": 0.0,
+        "total": 100.0
+      },
+      "score": 100.0,
+      "bug_found": true,
+      "correct_file": true,
+      "correct_line": true,
+      "line_match": "full",
+      "false_positive_count": 0,
+      "test_output": ""
+    },
+    {
+      "case_id": "react_stale_state_001",
+      "title": "React asynchronous stale state update",
+      "category": "frontend",
+      "severity": "medium",
+      "ground_truth_summary": "Async updates close over stale messages state and can drop notifications.",
+      "response": {
+        "raw_response": "{\"findings\": [{\"title\": \"Async updates close over stale messages state and can drop notifications.\", \"summary\": \"Async updates close over stale messages state and can drop notifications. This concerns stale state functional update asynchronous update messages stale state.\", \"category\": \"frontend\", \"severity\": \"medium\", \"file\": \"src/components/Notifications.tsx\", \"line_start\": 6, \"line_end\": 9, \"evidence\": \"The newly changed production path introduces the seeded behavior.\", \"suggested_fix\": \"Use functional setMessages(previous => [...previous, message]).\", \"confidence\": 0.99}], \"overall_risk\": \"medium\", \"review_summary\": \"Mock perfect review for react_stale_state_001.\"}",
+        "parsed_response": {
+          "findings": [
+            {
+              "title": "Async updates close over stale messages state and can drop notifications.",
+              "summary": "Async updates close over stale messages state and can drop notifications. This concerns stale state functional update asynchronous update messages stale state.",
+              "category": "frontend",
+              "severity": "medium",
+              "file": "src/components/Notifications.tsx",
+              "line_start": 6,
+              "line_end": 9,
+              "evidence": "The newly changed production path introduces the seeded behavior.",
+              "suggested_fix": "Use functional setMessages(previous => [...previous, message]).",
+              "confidence": 0.99
+            }
+          ],
+          "overall_risk": "medium",
+          "review_summary": "Mock perfect review for react_stale_state_001."
+        },
+        "invalid_output": false,
+        "parse_attempts": 1,
+        "latency_ms": 0,
+        "input_tokens": 0,
+        "output_tokens": 169,
+        "estimated_cost": 0.0,
+        "tool_usage": []
+      },
+      "scored_findings": [
+        {
+          "finding": {
+            "title": "Async updates close over stale messages state and can drop notifications.",
+            "summary": "Async updates close over stale messages state and can drop notifications. This concerns stale state functional update asynchronous update messages stale state.",
+            "category": "frontend",
+            "severity": "medium",
+            "file": "src/components/Notifications.tsx",
+            "line_start": 6,
+            "line_end": 9,
+            "evidence": "The newly changed production path introduces the seeded behavior.",
+            "suggested_fix": "Use functional setMessages(previous => [...previous, message]).",
+            "confidence": 0.99
+          },
+          "is_true_positive": true,
+          "false_positive_reason": null
+        }
+      ],
+      "breakdown": {
+        "concept_match": 35.0,
+        "file_match": 20.0,
+        "line_overlap": 15.0,
+        "severity_match": 10.0,
+        "fix_quality": 15.0,
+        "no_false_positives": 5.0,
+        "false_positive_penalty": 0.0,
+        "invalid_json_penalty": 0.0,
+        "total": 100.0
+      },
+      "score": 100.0,
+      "bug_found": true,
+      "correct_file": true,
+      "correct_line": true,
+      "line_match": "full",
+      "false_positive_count": 0,
+      "test_output": ""
+    },
+    {
+      "case_id": "kafka_idempotency_bug_001",
+      "title": "Kafka duplicate payment application",
+      "category": "distributed-systems",
+      "severity": "high",
+      "ground_truth_summary": "Payment updates are no longer idempotent for duplicate Kafka events.",
+      "response": {
+        "raw_response": "{\"findings\": [{\"title\": \"Payment updates are no longer idempotent for duplicate Kafka events.\", \"summary\": \"Payment updates are no longer idempotent for duplicate Kafka events. This concerns idempotency duplicate event at-least-once delivery event_id duplicate credit.\", \"category\": \"distributed-systems\", \"severity\": \"high\", \"file\": \"consumer/payments.py\", \"line_start\": 4, \"line_end\": 6, \"evidence\": \"The newly changed production path introduces the seeded behavior.\", \"suggested_fix\": \"Persist processed_event_ids keyed by event_id for idempotency.\", \"confidence\": 0.99}], \"overall_risk\": \"high\", \"review_summary\": \"Mock perfect review for kafka_idempotency_bug_001.\"}",
+        "parsed_response": {
+          "findings": [
+            {
+              "title": "Payment updates are no longer idempotent for duplicate Kafka events.",
+              "summary": "Payment updates are no longer idempotent for duplicate Kafka events. This concerns idempotency duplicate event at-least-once delivery event_id duplicate credit.",
+              "category": "distributed-systems",
+              "severity": "high",
+              "file": "consumer/payments.py",
+              "line_start": 4,
+              "line_end": 6,
+              "evidence": "The newly changed production path introduces the seeded behavior.",
+              "suggested_fix": "Persist processed_event_ids keyed by event_id for idempotency.",
+              "confidence": 0.99
+            }
+          ],
+          "overall_risk": "high",
+          "review_summary": "Mock perfect review for kafka_idempotency_bug_001."
+        },
+        "invalid_output": false,
+        "parse_attempts": 1,
+        "latency_ms": 0,
+        "input_tokens": 0,
+        "output_tokens": 167,
+        "estimated_cost": 0.0,
+        "tool_usage": []
+      },
+      "scored_findings": [
+        {
+          "finding": {
+            "title": "Payment updates are no longer idempotent for duplicate Kafka events.",
+            "summary": "Payment updates are no longer idempotent for duplicate Kafka events. This concerns idempotency duplicate event at-least-once delivery event_id duplicate credit.",
+            "category": "distributed-systems",
+            "severity": "high",
+            "file": "consumer/payments.py",
+            "line_start": 4,
+            "line_end": 6,
+            "evidence": "The newly changed production path introduces the seeded behavior.",
+            "suggested_fix": "Persist processed_event_ids keyed by event_id for idempotency.",
+            "confidence": 0.99
+          },
+          "is_true_positive": true,
+          "false_positive_reason": null
+        }
+      ],
+      "breakdown": {
+        "concept_match": 35.0,
+        "file_match": 20.0,
+        "line_overlap": 15.0,
+        "severity_match": 10.0,
+        "fix_quality": 15.0,
+        "no_false_positives": 5.0,
+        "false_positive_penalty": 0.0,
+        "invalid_json_penalty": 0.0,
+        "total": 100.0
+      },
+      "score": 100.0,
+      "bug_found": true,
+      "correct_file": true,
+      "correct_line": true,
+      "line_match": "full",
+      "false_positive_count": 0,
+      "test_output": "command=pytest -q tests\nexit_code=1\nduration_ms=179\nF                                                                        [100%]\n=================================== FAILURES ===================================\n_________________ test_duplicate_kafka_delivery_is_idempotent __________________\n\n    def test_duplicate_kafka_delivery_is_idempotent():\n        ledger = Ledger()\n        consumer = PaymentConsumer(ledger)\n        event = {\"event_id\": \"evt-9\", \"account_id\": \"acct-1\", \"amount\": 100}\n        consumer.handle(event)\n        consumer.handle(event)\n>       assert ledger.balance == 100\nE       assert 200 == 100\nE        +  where 200 = <test_payments.Ledger object at 0x109004140>.balance\n\ntests/test_payments.py:18: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_payments.py::test_duplicate_kafka_delivery_is_idempotent - ...\n1 failed in 0.01s"
+    },
+    {
+      "case_id": "redis_cache_key_collision_001",
+      "title": "Redis tenant cache key collision",
+      "category": "reliability",
+      "severity": "high",
+      "ground_truth_summary": "Under-specified Redis keys leak cached search data across tenants and queries.",
+      "response": {
+        "raw_response": "{\"findings\": [{\"title\": \"Under-specified Redis keys leak cached search data across tenants and queries.\", \"summary\": \"Under-specified Redis keys leak cached search data across tenants and queries. This concerns cache key collision tenant isolation data leakage tenant_id query cache.\", \"category\": \"reliability\", \"severity\": \"high\", \"file\": \"app/search_cache.py\", \"line_start\": 1, \"line_end\": 2, \"evidence\": \"The newly changed production path introduces the seeded behavior.\", \"suggested_fix\": \"Include tenant_id and query in cache_key.\", \"confidence\": 0.99}], \"overall_risk\": \"high\", \"review_summary\": \"Mock perfect review for redis_cache_key_collision_001.\"}",
+        "parsed_response": {
+          "findings": [
+            {
+              "title": "Under-specified Redis keys leak cached search data across tenants and queries.",
+              "summary": "Under-specified Redis keys leak cached search data across tenants and queries. This concerns cache key collision tenant isolation data leakage tenant_id query cache.",
+              "category": "reliability",
+              "severity": "high",
+              "file": "app/search_cache.py",
+              "line_start": 1,
+              "line_end": 2,
+              "evidence": "The newly changed production path introduces the seeded behavior.",
+              "suggested_fix": "Include tenant_id and query in cache_key.",
+              "confidence": 0.99
+            }
+          ],
+          "overall_risk": "high",
+          "review_summary": "Mock perfect review for redis_cache_key_collision_001."
+        },
+        "invalid_output": false,
+        "parse_attempts": 1,
+        "latency_ms": 0,
+        "input_tokens": 0,
+        "output_tokens": 165,
+        "estimated_cost": 0.0,
+        "tool_usage": []
+      },
+      "scored_findings": [
+        {
+          "finding": {
+            "title": "Under-specified Redis keys leak cached search data across tenants and queries.",
+            "summary": "Under-specified Redis keys leak cached search data across tenants and queries. This concerns cache key collision tenant isolation data leakage tenant_id query cache.",
+            "category": "reliability",
+            "severity": "high",
+            "file": "app/search_cache.py",
+            "line_start": 1,
+            "line_end": 2,
+            "evidence": "The newly changed production path introduces the seeded behavior.",
+            "suggested_fix": "Include tenant_id and query in cache_key.",
+            "confidence": 0.99
+          },
+          "is_true_positive": true,
+          "false_positive_reason": null
+        }
+      ],
+      "breakdown": {
+        "concept_match": 35.0,
+        "file_match": 20.0,
+        "line_overlap": 15.0,
+        "severity_match": 10.0,
+        "fix_quality": 15.0,
+        "no_false_positives": 5.0,
+        "false_positive_penalty": 0.0,
+        "invalid_json_penalty": 0.0,
+        "total": 100.0
+      },
+      "score": 100.0,
+      "bug_found": true,
+      "correct_file": true,
+      "correct_line": true,
+      "line_match": "full",
+      "false_positive_count": 0,
+      "test_output": "command=pytest -q tests\nexit_code=1\nduration_ms=180\nF                                                                        [100%]\n=================================== FAILURES ===================================\n______________________ test_results_do_not_cross_tenants _______________________\n\n    def test_results_do_not_cross_tenants():\n        redis = Redis()\n        loader = lambda tenant, user, query: f\"{tenant}:{query}\"\n        assert search(redis, \"north\", \"7\", \"open\", loader) == \"north:open\"\n>       assert search(redis, \"south\", \"7\", \"private\", loader) == \"south:private\"\nE       AssertionError: assert 'north:open' == 'south:private'\nE         \nE         - south:private\nE         + north:open\n\ntests/test_search_cache.py:19: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_search_cache.py::test_results_do_not_cross_tenants - Assert...\n1 failed in 0.01s"
+    },
+    {
+      "case_id": "sql_permission_leak_001",
+      "title": "SQL organization ownership leak",
+      "category": "security",
+      "severity": "high",
+      "ground_truth_summary": "Document access omits organization ownership filtering.",
+      "response": {
+        "raw_response": "{\"findings\": [{\"title\": \"Document access omits organization ownership filtering.\", \"summary\": \"Document access omits organization ownership filtering. This concerns authorization tenant isolation data exposure organization_id document ownership.\", \"category\": \"security\", \"severity\": \"high\", \"file\": \"sql/documents.sql\", \"line_start\": 3, \"line_end\": 3, \"evidence\": \"The newly changed production path introduces the seeded behavior.\", \"suggested_fix\": \"Require organization_id ownership tenant filtering.\", \"confidence\": 0.99}], \"overall_risk\": \"high\", \"review_summary\": \"Mock perfect review for sql_permission_leak_001.\"}",
+        "parsed_response": {
+          "findings": [
+            {
+              "title": "Document access omits organization ownership filtering.",
+              "summary": "Document access omits organization ownership filtering. This concerns authorization tenant isolation data exposure organization_id document ownership.",
+              "category": "security",
+              "severity": "high",
+              "file": "sql/documents.sql",
+              "line_start": 3,
+              "line_end": 3,
+              "evidence": "The newly changed production path introduces the seeded behavior.",
+              "suggested_fix": "Require organization_id ownership tenant filtering.",
+              "confidence": 0.99
+            }
+          ],
+          "overall_risk": "high",
+          "review_summary": "Mock perfect review for sql_permission_leak_001."
+        },
+        "invalid_output": false,
+        "parse_attempts": 1,
+        "latency_ms": 0,
+        "input_tokens": 0,
+        "output_tokens": 155,
+        "estimated_cost": 0.0,
+        "tool_usage": []
+      },
+      "scored_findings": [
+        {
+          "finding": {
+            "title": "Document access omits organization ownership filtering.",
+            "summary": "Document access omits organization ownership filtering. This concerns authorization tenant isolation data exposure organization_id document ownership.",
+            "category": "security",
+            "severity": "high",
+            "file": "sql/documents.sql",
+            "line_start": 3,
+            "line_end": 3,
+            "evidence": "The newly changed production path introduces the seeded behavior.",
+            "suggested_fix": "Require organization_id ownership tenant filtering.",
+            "confidence": 0.99
+          },
+          "is_true_positive": true,
+          "false_positive_reason": null
+        }
+      ],
+      "breakdown": {
+        "concept_match": 35.0,
+        "file_match": 20.0,
+        "line_overlap": 15.0,
+        "severity_match": 10.0,
+        "fix_quality": 15.0,
+        "no_false_positives": 5.0,
+        "false_positive_penalty": 0.0,
+        "invalid_json_penalty": 0.0,
+        "total": 100.0
+      },
+      "score": 100.0,
+      "bug_found": true,
+      "correct_file": true,
+      "correct_line": true,
+      "line_match": "full",
+      "false_positive_count": 0,
+      "test_output": ""
+    },
+    {
+      "case_id": "rag_fake_citation_001",
+      "title": "RAG unsupported citation emission",
+      "category": "ai-quality",
+      "severity": "medium",
+      "ground_truth_summary": "Generated citation IDs are not validated against retrieved context.",
+      "response": {
+        "raw_response": "{\"findings\": [{\"title\": \"Generated citation IDs are not validated against retrieved context.\", \"summary\": \"Generated citation IDs are not validated against retrieved context. This concerns citation validation retrieved context fabricated citation citation_ids retrieved_chunks validate.\", \"category\": \"ai-quality\", \"severity\": \"medium\", \"file\": \"rag/answer.py\", \"line_start\": 1, \"line_end\": 2, \"evidence\": \"The newly changed production path introduces the seeded behavior.\", \"suggested_fix\": \"Validate citation_ids against valid_ids from retrieved_chunks.\", \"confidence\": 0.99}], \"overall_risk\": \"medium\", \"review_summary\": \"Mock perfect review for rag_fake_citation_001.\"}",
+        "parsed_response": {
+          "findings": [
+            {
+              "title": "Generated citation IDs are not validated against retrieved context.",
+              "summary": "Generated citation IDs are not validated against retrieved context. This concerns citation validation retrieved context fabricated citation citation_ids retrieved_chunks validate.",
+              "category": "ai-quality",
+              "severity": "medium",
+              "file": "rag/answer.py",
+              "line_start": 1,
+              "line_end": 2,
+              "evidence": "The newly changed production path introduces the seeded behavior.",
+              "suggested_fix": "Validate citation_ids against valid_ids from retrieved_chunks.",
+              "confidence": 0.99
+            }
+          ],
+          "overall_risk": "medium",
+          "review_summary": "Mock perfect review for rag_fake_citation_001."
+        },
+        "invalid_output": false,
+        "parse_attempts": 1,
+        "latency_ms": 0,
+        "input_tokens": 0,
+        "output_tokens": 168,
+        "estimated_cost": 0.0,
+        "tool_usage": []
+      },
+      "scored_findings": [
+        {
+          "finding": {
+            "title": "Generated citation IDs are not validated against retrieved context.",
+            "summary": "Generated citation IDs are not validated against retrieved context. This concerns citation validation retrieved context fabricated citation citation_ids retrieved_chunks validate.",
+            "category": "ai-quality",
+            "severity": "medium",
+            "file": "rag/answer.py",
+            "line_start": 1,
+            "line_end": 2,
+            "evidence": "The newly changed production path introduces the seeded behavior.",
+            "suggested_fix": "Validate citation_ids against valid_ids from retrieved_chunks.",
+            "confidence": 0.99
+          },
+          "is_true_positive": true,
+          "false_positive_reason": null
+        }
+      ],
+      "breakdown": {
+        "concept_match": 35.0,
+        "file_match": 20.0,
+        "line_overlap": 15.0,
+        "severity_match": 10.0,
+        "fix_quality": 15.0,
+        "no_false_positives": 5.0,
+        "false_positive_penalty": 0.0,
+        "invalid_json_penalty": 0.0,
+        "total": 100.0
+      },
+      "score": 100.0,
+      "bug_found": true,
+      "correct_file": true,
+      "correct_line": true,
+      "line_match": "full",
+      "false_positive_count": 0,
+      "test_output": "command=pytest -q tests\nexit_code=1\nduration_ms=178\nF                                                                        [100%]\n=================================== FAILURES ===================================\n________________ test_generated_citations_must_exist_in_context ________________\n\n    def test_generated_citations_must_exist_in_context():\n        generator = lambda _chunks: {\"text\": \"Claim\", \"citation_ids\": [\"invented\"]}\n        try:\n            build_answer(generator, [{\"id\": \"source-1\", \"text\": \"Evidence\"}])\n        except ValueError:\n            return\n>       raise AssertionError(\"unsupported citation was accepted\")\nE       AssertionError: unsupported citation was accepted\n\ntests/test_answer.py:10: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_answer.py::test_generated_citations_must_exist_in_context\n1 failed in 0.01s"
+    },
+    {
+      "case_id": "async_race_condition_001",
+      "title": "Asynchronous balance lost update",
+      "category": "correctness",
+      "severity": "high",
+      "ground_truth_summary": "Concurrent balance mutations are non-atomic and can lose writes.",
+      "response": {
+        "raw_response": "{\"findings\": [{\"title\": \"Concurrent balance mutations are non-atomic and can lose writes.\", \"summary\": \"Concurrent balance mutations are non-atomic and can lose writes. This concerns race condition atomic update lost write concurrent balance lock.\", \"category\": \"correctness\", \"severity\": \"high\", \"file\": \"app/balance.py\", \"line_start\": 8, \"line_end\": 11, \"evidence\": \"The newly changed production path introduces the seeded behavior.\", \"suggested_fix\": \"Guard updates with asyncio.Lock for an atomic operation.\", \"confidence\": 0.99}], \"overall_risk\": \"high\", \"review_summary\": \"Mock perfect review for async_race_condition_001.\"}",
+        "parsed_response": {
+          "findings": [
+            {
+              "title": "Concurrent balance mutations are non-atomic and can lose writes.",
+              "summary": "Concurrent balance mutations are non-atomic and can lose writes. This concerns race condition atomic update lost write concurrent balance lock.",
+              "category": "correctness",
+              "severity": "high",
+              "file": "app/balance.py",
+              "line_start": 8,
+              "line_end": 11,
+              "evidence": "The newly changed production path introduces the seeded behavior.",
+              "suggested_fix": "Guard updates with asyncio.Lock for an atomic operation.",
+              "confidence": 0.99
+            }
+          ],
+          "overall_risk": "high",
+          "review_summary": "Mock perfect review for async_race_condition_001."
+        },
+        "invalid_output": false,
+        "parse_attempts": 1,
+        "latency_ms": 0,
+        "input_tokens": 0,
+        "output_tokens": 157,
+        "estimated_cost": 0.0,
+        "tool_usage": []
+      },
+      "scored_findings": [
+        {
+          "finding": {
+            "title": "Concurrent balance mutations are non-atomic and can lose writes.",
+            "summary": "Concurrent balance mutations are non-atomic and can lose writes. This concerns race condition atomic update lost write concurrent balance lock.",
+            "category": "correctness",
+            "severity": "high",
+            "file": "app/balance.py",
+            "line_start": 8,
+            "line_end": 11,
+            "evidence": "The newly changed production path introduces the seeded behavior.",
+            "suggested_fix": "Guard updates with asyncio.Lock for an atomic operation.",
+            "confidence": 0.99
+          },
+          "is_true_positive": true,
+          "false_positive_reason": null
+        }
+      ],
+      "breakdown": {
+        "concept_match": 35.0,
+        "file_match": 20.0,
+        "line_overlap": 15.0,
+        "severity_match": 10.0,
+        "fix_quality": 15.0,
+        "no_false_positives": 5.0,
+        "false_positive_penalty": 0.0,
+        "invalid_json_penalty": 0.0,
+        "total": 100.0
+      },
+      "score": 100.0,
+      "bug_found": true,
+      "correct_file": true,
+      "correct_line": true,
+      "line_match": "full",
+      "false_positive_count": 0,
+      "test_output": "command=pytest -q tests\nexit_code=1\nduration_ms=193\nF                                                                        [100%]\n=================================== FAILURES ===================================\n______________ test_concurrent_balance_updates_do_not_lose_writes ______________\n\n    def test_concurrent_balance_updates_do_not_lose_writes():\n        async def scenario():\n            service = BalanceService()\n            await asyncio.gather(service.add(10), service.add(20))\n            return service.balance\n    \n>       assert asyncio.run(scenario()) == 30\nE       assert 20 == 30\nE        +  where 20 = <function run at 0x107260a40>(<coroutine object test_concurrent_balance_updates_do_not_lose_writes.<locals>.scenario at 0x1073c1b60>)\nE        +    where <function run at 0x107260a40> = asyncio.run\nE        +    and   <coroutine object test_concurrent_balance_updates_do_not_lose_writes.<locals>.scenario at 0x1073c1b60> = <function test_concurrent_balance_updates_do_not_lose_writes.<locals>.scenario at 0x1073da520>()\n\ntests/test_balance.py:12: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_balance.py::test_concurrent_balance_updates_do_not_lose_writes\n1 failed in 0.02s"
+    },
+    {
+      "case_id": "api_contract_regression_001",
+      "title": "Profile response contract regression",
+      "category": "api-compatibility",
+      "severity": "high",
+      "ground_truth_summary": "Renamed response fields break existing clients expecting snake_case keys.",
+      "response": {
+        "raw_response": "{\"findings\": [{\"title\": \"Renamed response fields break existing clients expecting snake_case keys.\", \"summary\": \"Renamed response fields break existing clients expecting snake_case keys. This concerns backward compatibility response schema API contract snake_case camelCase client.\", \"category\": \"api-compatibility\", \"severity\": \"high\", \"file\": \"app/routes/profile.py\", \"line_start\": 2, \"line_end\": 6, \"evidence\": \"The newly changed production path introduces the seeded behavior.\", \"suggested_fix\": \"Retain user_id or use an alias with a versioned response.\", \"confidence\": 0.99}], \"overall_risk\": \"high\", \"review_summary\": \"Mock perfect review for api_contract_regression_001.\"}",
+        "parsed_response": {
+          "findings": [
+            {
+              "title": "Renamed response fields break existing clients expecting snake_case keys.",
+              "summary": "Renamed response fields break existing clients expecting snake_case keys. This concerns backward compatibility response schema API contract snake_case camelCase client.",
+              "category": "api-compatibility",
+              "severity": "high",
+              "file": "app/routes/profile.py",
+              "line_start": 2,
+              "line_end": 6,
+              "evidence": "The newly changed production path introduces the seeded behavior.",
+              "suggested_fix": "Retain user_id or use an alias with a versioned response.",
+              "confidence": 0.99
+            }
+          ],
+          "overall_risk": "high",
+          "review_summary": "Mock perfect review for api_contract_regression_001."
+        },
+        "invalid_output": false,
+        "parse_attempts": 1,
+        "latency_ms": 0,
+        "input_tokens": 0,
+        "output_tokens": 170,
+        "estimated_cost": 0.0,
+        "tool_usage": []
+      },
+      "scored_findings": [
+        {
+          "finding": {
+            "title": "Renamed response fields break existing clients expecting snake_case keys.",
+            "summary": "Renamed response fields break existing clients expecting snake_case keys. This concerns backward compatibility response schema API contract snake_case camelCase client.",
+            "category": "api-compatibility",
+            "severity": "high",
+            "file": "app/routes/profile.py",
+            "line_start": 2,
+            "line_end": 6,
+            "evidence": "The newly changed production path introduces the seeded behavior.",
+            "suggested_fix": "Retain user_id or use an alias with a versioned response.",
+            "confidence": 0.99
+          },
+          "is_true_positive": true,
+          "false_positive_reason": null
+        }
+      ],
+      "breakdown": {
+        "concept_match": 35.0,
+        "file_match": 20.0,
+        "line_overlap": 15.0,
+        "severity_match": 10.0,
+        "fix_quality": 15.0,
+        "no_false_positives": 5.0,
+        "false_positive_penalty": 0.0,
+        "invalid_json_penalty": 0.0,
+        "total": 100.0
+      },
+      "score": 100.0,
+      "bug_found": true,
+      "correct_file": true,
+      "correct_line": true,
+      "line_match": "full",
+      "false_positive_count": 0,
+      "test_output": "command=pytest -q tests\nexit_code=1\nduration_ms=181\nF                                                                        [100%]\n=================================== FAILURES ===================================\n______________ test_existing_client_receives_snake_case_contract _______________\n\n    def test_existing_client_receives_snake_case_contract():\n>       assert \"user_id\" in serialize_profile(User())\nE       AssertionError: assert 'user_id' in {'avatarUrl': None, 'displayName': 'Ada', 'userId': 'u-1'}\nE        +  where {'avatarUrl': None, 'displayName': 'Ada', 'userId': 'u-1'} = serialize_profile(<test_profile.User object at 0x10b877230>)\nE        +    where <test_profile.User object at 0x10b877230> = User()\n\ntests/test_profile.py:11: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_profile.py::test_existing_client_receives_snake_case_contract\n1 failed in 0.01s"
+    }
+  ],
+  "total_score": 100.0,
+  "bugs_found": 10,
+  "correct_files": 10,
+  "correct_lines": 10,
+  "false_positives": 0,
+  "total_cost": 0.0,
+  "total_latency_ms": 0
+}

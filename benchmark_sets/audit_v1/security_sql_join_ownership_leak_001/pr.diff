@@ -1,0 +1,31 @@
+diff -ruN a/app/db.py b/app/db.py
+--- a/app/db.py
++++ b/app/db.py
+@@ -8,8 +8,5 @@
+     def add(self, document: Document) -> None:
+         self._documents[document.id] = document
+ 
+-    def fetch(self, document_id: str, organization_id: str) -> Document | None:
+-        document = self._documents.get(document_id)
+-        if document is None or document.organization_id != organization_id:
+-            return None
+-        return document
++    def fetch(self, document_id: str) -> Document | None:
++        return self._documents.get(document_id)
+diff -ruN a/app/documents.py b/app/documents.py
+--- a/app/documents.py
++++ b/app/documents.py
+@@ -3,7 +3,6 @@
+ FROM documents d
+ JOIN projects p ON p.id = d.project_id
+ WHERE d.id = :document_id
+-  AND d.organization_id = :organization_id
+ """
+ 
+ from app.db import DocumentRepository
+@@ -13,4 +12,4 @@
+ def get_document_for_user(
+     repo: DocumentRepository, document_id: str, user: User
+ ) -> Document | None:
+-    return repo.fetch(document_id, user.organization_id)
++    return repo.fetch(document_id)

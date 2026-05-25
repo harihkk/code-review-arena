@@ -1,0 +1,31 @@
+id: sql_permission_leak_001
+title: SQL organization ownership leak
+category: security
+severity: high
+stack: [sql, postgres, authorization]
+description: >
+  A document lookup no longer scopes the row to the caller's organization.
+input:
+  diff: pr.diff
+  before_dir: before
+  after_dir: after
+  tests_dir: tests
+ground_truth:
+  primary_bug:
+    summary: Document access omits organization ownership filtering.
+    files:
+      - path: sql/documents.sql
+        line_ranges: [{start: 3, end: 3}]
+    concepts: [authorization, tenant isolation, data exposure]
+    must_mention: [organization_id, document, ownership]
+    acceptable_fix_keywords: [organization_id, ownership, tenant]
+scoring:
+  weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
+  false_positive_penalty: 5
+  invalid_json_penalty: 20
+execution: {run_tests: false, timeout_seconds: 30, docker_image: null}
+validation:
+  patch_required: true
+  tests_required: false
+  structural_validators: [sql_has_tenant_or_owner_filter]
+metrics: {beta: 1.0}

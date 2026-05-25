@@ -1,0 +1,35 @@
+name: Manual Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      reviewer:
+        description: Reviewer adapter (mock:perfect, openai, anthropic, gemini)
+        required: true
+        default: mock:perfect
+        type: string
+      model:
+        description: Optional provider model
+        required: false
+        type: string
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev,openai,anthropic,gemini]"
+      - name: Run selected benchmark
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: arena run benchmark_sets/v1 --reviewer "${{ inputs.reviewer }}" --model "${{ inputs.model }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arena-report
+          path: runs/
+

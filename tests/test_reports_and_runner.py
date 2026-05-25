@@ -1,0 +1,197 @@
+from pathlib import Path
+
+import pytest
+
+from arena.benchmark.benchmark_runner import _reserve_run_dir, run_benchmark
+from arena.reports.audit_report import build_audit_report_data
+from arena.reports.html_report import render_html
+from arena.reports.json_report import read_json_report
+from arena.reports.leaderboard import leaderboard_rows
+from arena.reports.markdown_report import render_markdown
+from arena.reviewers.mock import MockReviewer
+
+
+@pytest.fixture
+def audit_benchmark_dir() -> Path:
+    return Path("benchmark_sets/audit_v1")
+
+
+def test_run_directory_reservation_never_reuses_an_existing_path(tmp_path):
+    first_id, first_dir = _reserve_run_dir(tmp_path)
+    second_id, second_dir = _reserve_run_dir(tmp_path)
+    assert first_dir.exists()
+    assert second_dir.exists()
+    assert first_id != second_id
+
+
+def test_runner_generates_reports_and_storage(benchmark_dir, tmp_path):
+    run = run_benchmark(
+        benchmark_dir,
+        MockReviewer("perfect"),
+        output_dir=tmp_path / "runs",
+        db_path=tmp_path / "arena.db",
+    )
+    run_dir = tmp_path / "runs" / run.run_id
+    assert run.total_score == 100
+    assert (run_dir / "run.json").exists()
+    assert (run_dir / "report.md").exists()
+    assert (run_dir / "report.html").exists()
+    assert read_json_report(run_dir / "run.json").bugs_found == 10
+    assert "Bugs Found | 10/10" in render_markdown(run)
+    assert "## False Positive Summary" in render_markdown(run)
+    assert "## Missed Bug Summary" in render_markdown(run)
+    assert "Case Traces" in render_html(run)
+    assert "Scoring breakdown" in render_html(run)
+    assert run.deterministic_metrics is None
+    assert not [item for item in run.case_results if item.test_output]
+
+
+def test_full_patch_run_generates_deterministic_reports(benchmark_dir, tmp_path):
+    run = run_benchmark(
+        benchmark_dir,
+        MockReviewer("perfect_patch"),
+        output_dir=tmp_path / "runs",
+        db_path=tmp_path / "arena.db",
+        mode="full",
+        allow_local_execution=True,
+    )
+    assert run.deterministic_metrics is not None
+    assert run.deterministic_metrics.detection_f_beta == 1
+    assert run.deterministic_metrics.validated_f_beta == 1
+    assert run.deterministic_metrics.deterministic_pass_rate == 1
+    assert run.deterministic_metrics.patch_apply_rate == 1
+    required = {
+        "fastapi_auth_bypass_001",
+        "kafka_idempotency_bug_001",
+        "redis_cache_key_collision_001",
+        "sql_permission_leak_001",
+        "rag_fake_citation_001",
+    }
+    assert all(
+        result.deterministic_pass for result in run.case_results if result.case_id in required
+    )
+    markdown = render_markdown(run)
+    assert "## Deterministic Validation Summary" in markdown
+    assert "Suggested Patch:" in markdown
+    assert "Structural Pass Rate" in markdown
+
+
+def _run_patch_mode(benchmark_dir, tmp_path, mode: str):
+    return run_benchmark(
+        benchmark_dir,
+        MockReviewer(mode),
+        output_dir=tmp_path / "runs",
+        db_path=tmp_path / "arena.db",
+        mode="full",
+        allow_local_execution=True,
+    )
+
+
+def test_validated_metrics_distinguish_detection_from_a_valid_fix(benchmark_dir, tmp_path):
+    perfect = _run_patch_mode(benchmark_dir, tmp_path, "perfect_patch")
+    bad = _run_patch_mode(benchmark_dir, tmp_path, "bad_patch")
+    missing = _run_patch_mode(benchmark_dir, tmp_path, "detects_no_patch")
+    malformed = _run_patch_mode(benchmark_dir, tmp_path, "malformed_patch")
+
+    assert perfect.deterministic_metrics is not None
+    assert bad.deterministic_metrics is not None
+    assert missing.deterministic_metrics is not None
+    assert malformed.deterministic_metrics is not None
+    assert perfect.deterministic_metrics.validated_f_beta == 1
+    assert bad.deterministic_metrics.detection_f_beta == 1
+    assert bad.deterministic_metrics.validated_f_beta < 1
+    assert bad.deterministic_metrics.deterministic_pass_rate == 0.1
+    assert missing.deterministic_metrics.detection_f_beta == 1
+    assert missing.deterministic_metrics.validated_f_beta == 0
+    assert malformed.deterministic_metrics.detection_f_beta == 1
+    assert malformed.deterministic_metrics.validated_f_beta == 0
+    assert malformed.deterministic_metrics.patch_apply_rate == 0
+
+
+def test_leaderboard_uses_validated_f_beta_as_the_primary_full_mode_metric(benchmark_dir, tmp_path):
+    for mode in ("bad_patch", "malformed_patch", "detects_no_patch", "perfect_patch"):
+        _run_patch_mode(benchmark_dir, tmp_path, mode)
+
+    validated = leaderboard_rows(tmp_path / "runs", metric="validated_f_beta", beta=1.0)
+    metrics_by_model = {row["model"]: row["metric_value"] for row in validated}
+    assert validated[0]["model"] == "perfect_patch"
+    assert metrics_by_model["perfect_patch"] == 1
+    assert metrics_by_model["bad_patch"] < metrics_by_model["perfect_patch"]
+    assert metrics_by_model["detects_no_patch"] == 0
+    assert metrics_by_model["malformed_patch"] == 0
+
+    detection = leaderboard_rows(tmp_path / "runs", metric="detection_f_beta", beta=1.0)
+    detection_by_model = {row["model"]: row["metric_value"] for row in detection}
+    assert detection_by_model["perfect_patch"] == 1
+    assert detection_by_model["bad_patch"] == 1
+    assert detection_by_model["detects_no_patch"] == 1
+    assert detection_by_model["malformed_patch"] == 1
+
+    legacy_alias = leaderboard_rows(tmp_path / "runs", metric="f_beta", beta=1.0)
+    alias_by_model = {row["model"]: row["metric_value"] for row in legacy_alias}
+    assert alias_by_model == detection_by_model
+
+    review_only = run_benchmark(
+        benchmark_dir,
+        MockReviewer("perfect"),
+        output_dir=tmp_path / "runs",
+        db_path=tmp_path / "arena.db",
+    )
+    assert review_only.deterministic_metrics is None
+    cost_ranked = leaderboard_rows(tmp_path / "runs", metric="cost_per_validated_fix")
+    assert cost_ranked[-1]["model"] == "perfect"
+    assert cost_ranked[-1]["metric_value"] is None
+
+
+def _run_audit_patch_mode(audit_benchmark_dir: Path, tmp_path, mode: str):
+    return run_benchmark(
+        audit_benchmark_dir,
+        MockReviewer(mode),
+        output_dir=tmp_path / "audit_runs",
+        db_path=tmp_path / "audit.db",
+        mode="full",
+        allow_local_execution=True,
+    )
+
+
+def test_keyword_gamer_scores_detection_without_validation(audit_benchmark_dir, tmp_path):
+    run = _run_audit_patch_mode(audit_benchmark_dir, tmp_path, "keyword_gamer")
+    metrics = run.deterministic_metrics
+    assert metrics is not None
+    assert metrics.detection_f_beta == 1
+    assert metrics.validated_f_beta == 0
+    assert metrics.deterministic_pass_rate == 0
+    assert all(not result.deterministic_pass for result in run.case_results)
+    failure_reasons = {reason for result in run.case_results for reason in result.failure_reasons}
+    assert failure_reasons & {
+        "structural_validation_failed",
+        "tests_failed",
+        "patch_apply_failed",
+    }
+
+
+def test_leaderboard_ranks_perfect_patch_above_keyword_gamer(audit_benchmark_dir, tmp_path):
+    _run_audit_patch_mode(audit_benchmark_dir, tmp_path, "keyword_gamer")
+    _run_audit_patch_mode(audit_benchmark_dir, tmp_path, "perfect_patch")
+
+    validated = leaderboard_rows(tmp_path / "audit_runs", metric="validated_f_beta", beta=1.0)
+    metrics_by_model = {row["model"]: row["metric_value"] for row in validated}
+    assert validated[0]["model"] == "perfect_patch"
+    assert metrics_by_model["perfect_patch"] == 1
+    assert metrics_by_model["keyword_gamer"] == 0
+
+    detection = leaderboard_rows(tmp_path / "audit_runs", metric="detection_f_beta", beta=1.0)
+    detection_by_model = {row["model"]: row["metric_value"] for row in detection}
+    assert detection_by_model["keyword_gamer"] == 1
+
+
+def test_audit_report_lists_keyword_gamer_as_detection_validation_gap(
+    audit_benchmark_dir, tmp_path
+):
+    run = _run_audit_patch_mode(audit_benchmark_dir, tmp_path, "keyword_gamer")
+    data = build_audit_report_data([run])
+    gap_reviewers = {f"{gap['reviewer']}:{gap['model']}" for gap in data["gaps"]}
+    assert "mock:keyword_gamer" in gap_reviewers
+    keyword_gap = next(gap for gap in data["gaps"] if gap["model"] == "keyword_gamer")
+    assert keyword_gap["detection_f_beta"] == 1
+    assert keyword_gap["validated_f_beta"] == 0

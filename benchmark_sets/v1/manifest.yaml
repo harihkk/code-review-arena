@@ -1,0 +1,14 @@
+version: v1
+name: CodeReview Arena seeded production bugs
+cases:
+  - fastapi_auth_bypass_001
+  - spring_boot_null_handling_001
+  - graphql_n_plus_one_001
+  - react_stale_state_001
+  - kafka_idempotency_bug_001
+  - redis_cache_key_collision_001
+  - sql_permission_leak_001
+  - rag_fake_citation_001
+  - async_race_condition_001
+  - api_contract_regression_001
+

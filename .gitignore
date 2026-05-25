@@ -1,0 +1,43 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Node / dashboard
+dashboard/node_modules/
+dashboard/.next/
+dashboard/out/
+dashboard/.turbo/
+dashboard/*.tsbuildinfo
+dashboard/.env*
+!dashboard/.env.example
+
+# Local runtime
+.env
+.env.*
+!.env.example
+data/
+runs/
+logs/
+tmp/
+*.db
+*.sqlite
+*.sqlite3
+
+# Generated reports (regenerate with arena audit-report)
+docs/reports/audit-v1-results.md
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

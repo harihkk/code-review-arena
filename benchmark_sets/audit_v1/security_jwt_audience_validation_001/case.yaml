@@ -1,0 +1,35 @@
+id: security_jwt_audience_validation_001
+title: JWT verifier skips audience and issuer checks
+category: security
+severity: high
+stack: [python, jwt, auth]
+description: >
+  A pull request verifies JWT signatures but stops validating audience and issuer claims,
+  allowing tokens minted for other services or issuers.
+input:
+  diff: pr.diff
+  before_dir: before
+  after_dir: after
+  tests_dir: tests
+ground_truth:
+  primary_bug:
+    summary: JWT verification omits audience and issuer validation.
+    files:
+      - path: app/auth/jwt_verifier.py
+        line_ranges: [{start: 4, end: 5}]
+    concepts: [jwt, audience, issuer, authentication]
+    must_mention: [audience, issuer, aud, iss]
+    acceptable_fix_keywords: [aud, iss, audience, issuer, expected_audience]
+scoring:
+  weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
+  false_positive_penalty: 5
+  invalid_json_penalty: 20
+execution:
+  run_tests: true
+  test_command: "pytest -q tests"
+  timeout_seconds: 30
+validation:
+  patch_required: true
+  tests_required: true
+  structural_validators: [jwt_audience_issuer_validated]
+metrics: {beta: 1.0}

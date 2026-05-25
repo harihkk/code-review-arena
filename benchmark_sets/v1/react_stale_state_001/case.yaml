@@ -1,0 +1,31 @@
+id: react_stale_state_001
+title: React asynchronous stale state update
+category: frontend
+severity: medium
+stack: [typescript, react, hooks]
+description: >
+  Concurrent asynchronous notifications can each append to the same captured message array.
+input:
+  diff: pr.diff
+  before_dir: before
+  after_dir: after
+  tests_dir: tests
+ground_truth:
+  primary_bug:
+    summary: Async updates close over stale messages state and can drop notifications.
+    files:
+      - path: src/components/Notifications.tsx
+        line_ranges: [{start: 6, end: 9}]
+    concepts: [stale state, functional update, asynchronous update]
+    must_mention: [messages, stale, state]
+    acceptable_fix_keywords: [setMessages, previous, functional]
+scoring:
+  weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
+  false_positive_penalty: 5
+  invalid_json_penalty: 20
+execution: {run_tests: false, timeout_seconds: 30, docker_image: null}
+validation:
+  patch_required: true
+  tests_required: false
+  structural_validators: [react_uses_functional_state_update]
+metrics: {beta: 1.0}

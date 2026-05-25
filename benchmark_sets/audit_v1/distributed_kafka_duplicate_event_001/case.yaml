@@ -1,0 +1,35 @@
+id: distributed_kafka_duplicate_event_001
+title: Kafka duplicate event double-applies payment
+category: distributed-systems
+severity: high
+stack: [python, kafka, payments]
+description: >
+  A pull request removes the processed-event guard so duplicate Kafka deliveries can
+  credit the same payment twice.
+input:
+  diff: pr.diff
+  before_dir: before
+  after_dir: after
+  tests_dir: tests
+ground_truth:
+  primary_bug:
+    summary: Duplicate Kafka events are no longer deduplicated before ledger mutation.
+    files:
+      - path: consumer/payments.py
+        line_ranges: [{start: 5, end: 6}]
+    concepts: [idempotency, duplicate event, at-least-once delivery, kafka]
+    must_mention: [event_id, duplicate, idempotency]
+    acceptable_fix_keywords: [processed_event, event_id, idempotency, already_processed]
+scoring:
+  weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
+  false_positive_penalty: 5
+  invalid_json_penalty: 20
+execution:
+  run_tests: true
+  test_command: "pytest -q tests"
+  timeout_seconds: 30
+validation:
+  patch_required: true
+  tests_required: true
+  structural_validators: [kafka_idempotency_guard]
+metrics: {beta: 1.0}

@@ -1,0 +1,23 @@
+diff --git a/app/routes/admin.py b/app/routes/admin.py
+--- a/app/routes/admin.py
++++ b/app/routes/admin.py
+@@ -1,12 +1,14 @@
+-from fastapi import APIRouter, Depends
++from fastapi import APIRouter, Depends, HTTPException
+ 
+ router = APIRouter()
+ 
+ 
+-def require_admin():
+-    return {"id": 1, "role": "admin"}
++def get_current_user():
++    return {"id": 1, "role": "member"}
+ 
+ 
+ @router.delete("/admin/users/{user_id}")
+-def delete_user(user_id: int, current_user=Depends(require_admin)):
++def delete_user(user_id: int, current_user=Depends(get_current_user)):
++    if not current_user:
++        raise HTTPException(status_code=401, detail="Login required")
+     return {"deleted_user_id": user_id, "deleted_by": current_user["id"]}
+

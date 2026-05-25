@@ -1,0 +1,29 @@
+diff -ruN a/app/pagination.py b/app/pagination.py
+--- a/app/pagination.py
++++ b/app/pagination.py
+@@ -2,14 +2,13 @@
+ 
+ 
+ def fetch_page(
+-    records: list[Record], *, cursor: tuple[int, str] | None, limit: int
+-) -> tuple[list[Record], tuple[int, str] | None]:
+-    ordered = sorted(records, key=lambda item: (item.created_at, item.id))
++    records: list[Record], *, cursor: int | None, limit: int
++) -> tuple[list[Record], int | None]:
++    ordered = sorted(records, key=lambda item: item.created_at)
+     start = 0
+     if cursor is not None:
+-        created_at, record_id = cursor
+         for index, item in enumerate(ordered):
+-            if (item.created_at, item.id) > (created_at, record_id):
++            if item.created_at > cursor:
+                 start = index
+                 break
+         else:
+@@ -18,5 +17,5 @@
+     if not page:
+         return [], None
+     last = page[-1]
+-    next_cursor = None if len(page) < limit else (last.created_at, last.id)
++    next_cursor = None if len(page) < limit else last.created_at
+     return page, next_cursor

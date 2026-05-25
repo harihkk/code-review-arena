@@ -1,0 +1,14 @@
+--- a/app/auth/jwt_verifier.py
++++ b/app/auth/jwt_verifier.py
+@@ -2,4 +2,10 @@
+ 
+ 
+ def verify_token(token: dict) -> bool:
+-    return bool(token.get("signature_valid"))
++    if not token.get("signature_valid"):
++        return False
++    if token.get("aud") != EXPECTED_AUDIENCE:
++        return False
++    if token.get("iss") != EXPECTED_ISSUER:
++        return False
++    return True

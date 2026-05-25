@@ -1,0 +1,17 @@
+diff --git a/app/balance.py b/app/balance.py
+--- a/app/balance.py
++++ b/app/balance.py
+@@ -4,10 +4,8 @@ class BalanceService:
+     def __init__(self):
+         self.balance = 0
+-        self.lock = asyncio.Lock()
+ 
+     async def add(self, amount: int) -> None:
+-        async with self.lock:
+-            current = self.balance
+-            await asyncio.sleep(0)
+-            self.balance = current + amount
++        current = self.balance
++        await asyncio.sleep(0)
++        self.balance = current + amount
+

@@ -1,0 +1,14 @@
+diff --git a/app/routes/profile.py b/app/routes/profile.py
+--- a/app/routes/profile.py
++++ b/app/routes/profile.py
+@@ -1,6 +1,6 @@
+ def serialize_profile(user):
+     return {
+-        "user_id": user.id,
+-        "display_name": user.display_name,
+-        "avatar_url": user.avatar_url,
++        "userId": user.id,
++        "displayName": user.display_name,
++        "avatarUrl": user.avatar_url,
+     }
+

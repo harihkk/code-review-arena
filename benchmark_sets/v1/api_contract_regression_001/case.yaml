@@ -1,0 +1,32 @@
+id: api_contract_regression_001
+title: Profile response contract regression
+category: api-compatibility
+severity: high
+stack: [python, fastapi, api]
+description: >
+  An existing API serializer changes response keys from snake_case to camelCase without versioning.
+input:
+  diff: pr.diff
+  before_dir: before
+  after_dir: after
+  tests_dir: tests
+ground_truth:
+  primary_bug:
+    summary: Renamed response fields break existing clients expecting snake_case keys.
+    files:
+      - path: app/routes/profile.py
+        line_ranges: [{start: 2, end: 6}]
+    concepts: [backward compatibility, response schema, API contract]
+    must_mention: [snake_case, camelCase, client]
+    acceptable_fix_keywords: [user_id, alias, version]
+scoring:
+  weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
+  false_positive_penalty: 5
+  invalid_json_penalty: 20
+execution:
+  run_tests: true
+  test_command: "pytest -q tests"
+  timeout_seconds: 30
+  docker_image: null
+validation: {patch_required: true, tests_required: true, structural_validators: []}
+metrics: {beta: 1.0}

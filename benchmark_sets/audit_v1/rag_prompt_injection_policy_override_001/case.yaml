@@ -1,0 +1,35 @@
+id: rag_prompt_injection_policy_override_001
+title: RAG prompt builder merges untrusted retrieved text into system instructions
+category: ai-quality
+severity: high
+stack: [python, rag, llm, security]
+description: >
+  A pull request concatenates retrieved document text directly after system instructions
+  without boundaries, allowing prompt-injection content to override policy.
+input:
+  diff: pr.diff
+  before_dir: before
+  after_dir: after
+  tests_dir: tests
+ground_truth:
+  primary_bug:
+    summary: Retrieved context is merged into trusted system instructions without isolation.
+    files:
+      - path: app/rag/prompt_builder.py
+        line_ranges: [{start: 4, end: 8}]
+    concepts: [prompt injection, rag, untrusted context, policy override]
+    must_mention: [untrusted, retrieved, system]
+    acceptable_fix_keywords: [untrusted, retrieved_context, wrap, separate]
+scoring:
+  weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
+  false_positive_penalty: 5
+  invalid_json_penalty: 20
+execution:
+  run_tests: true
+  test_command: "pytest -q tests"
+  timeout_seconds: 30
+validation:
+  patch_required: true
+  tests_required: true
+  structural_validators: [rag_retrieved_context_is_untrusted]
+metrics: {beta: 1.0}

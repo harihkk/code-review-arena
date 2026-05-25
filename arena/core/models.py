@@ -1,0 +1,316 @@
+"""Pydantic models shared across benchmark, reviewers, reports and API."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+Severity = Literal["critical", "high", "medium", "low"]
+Risk = Literal["critical", "high", "medium", "low", "none"]
+
+
+class LineRange(BaseModel):
+    start: int = Field(ge=1)
+    end: int = Field(ge=1)
+
+    @field_validator("end")
+    @classmethod
+    def end_not_before_start(cls, value: int, info: Any) -> int:
+        start = info.data.get("start")
+        if start is not None and value < start:
+            raise ValueError("line range end cannot precede start")
+        return value
+
+
+class GroundTruthFile(BaseModel):
+    path: str
+    line_ranges: list[LineRange]
+
+
+class PrimaryBug(BaseModel):
+    summary: str
+    files: list[GroundTruthFile]
+    concepts: list[str]
+    must_mention: list[str]
+    acceptable_fix_keywords: list[str]
+
+
+class GroundTruth(BaseModel):
+    primary_bug: PrimaryBug
+
+
+class CaseInput(BaseModel):
+    diff: str = "pr.diff"
+    before_dir: str = "before"
+    after_dir: str = "after"
+    tests_dir: str | None = "tests"
+
+
+class ScoreWeights(BaseModel):
+    concept_match: float = 35
+    file_match: float = 20
+    line_overlap: float = 15
+    severity_match: float = 10
+    fix_quality: float = 15
+    no_false_positives: float = 5
+
+    def total(self) -> float:
+        return float(sum(self.model_dump().values()))
+
+
+class ScoringConfig(BaseModel):
+    weights: ScoreWeights = Field(default_factory=ScoreWeights)
+    false_positive_penalty: float = 5
+    invalid_json_penalty: float = 20
+
+
+class ExecutionConfig(BaseModel):
+    run_tests: bool = False
+    test_command: str | list[str] | None = None
+    timeout_seconds: int = Field(default=30, ge=1)
+    docker_image: str | None = None
+    run_static_analysis: bool = False
+    static_analysis_command: str | None = None
+
+
+class ValidationConfig(BaseModel):
+    patch_required: bool = False
+    tests_required: bool = False
+    structural_validators: list[str] = Field(default_factory=list)
+    max_false_positives: int = Field(default=0, ge=0)
+
+
+class MetricsConfig(BaseModel):
+    beta: float = Field(default=1.0, gt=0)
+
+
+class BenchmarkCase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    title: str
+    category: str
+    severity: Severity
+    stack: list[str]
+    description: str
+    input: CaseInput
+    ground_truth: GroundTruth
+    scoring: ScoringConfig = Field(default_factory=ScoringConfig)
+    execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
+    validation: ValidationConfig = Field(default_factory=ValidationConfig)
+    metrics: MetricsConfig = Field(default_factory=MetricsConfig)
+    case_dir: Path | None = Field(default=None, exclude=True)
+
+
+class CaseManifest(BaseModel):
+    version: str
+    name: str
+    cases: list[str]
+
+
+class Finding(BaseModel):
+    title: str
+    summary: str
+    category: str
+    severity: Severity
+    file: str
+    line_start: int = Field(ge=1)
+    line_end: int = Field(ge=1)
+    evidence: str
+    suggested_fix: str | None = None
+    suggested_patch: str | None = None
+    replacement_code: str | None = None
+    patch_confidence: float | None = Field(default=None, ge=0, le=1)
+    confidence: float = Field(ge=0, le=1)
+
+    @field_validator("line_end")
+    @classmethod
+    def finding_end_not_before_start(cls, value: int, info: Any) -> int:
+        start = info.data.get("line_start")
+        if start is not None and value < start:
+            raise ValueError("finding line_end cannot precede line_start")
+        return value
+
+
+class ReviewResult(BaseModel):
+    findings: list[Finding]
+    overall_risk: Risk
+    review_summary: str
+
+
+class ReviewerCaseMetadata(BaseModel):
+    id: str
+    title: str
+    category: str
+    severity: Severity
+    stack: list[str]
+    description: str
+
+
+class CaseContext(BaseModel):
+    case: ReviewerCaseMetadata
+    diff: str
+    relevant_files: dict[str, str]
+    test_output: str = ""
+    static_analysis_output: str = ""
+    case_dir: Path | None = None
+
+
+class ReviewerResponse(BaseModel):
+    raw_response: str
+    parsed_response: ReviewResult | None = None
+    invalid_output: bool = False
+    parse_attempts: int = 1
+    latency_ms: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    estimated_cost: float = 0.0
+    tool_usage: list[str] = Field(default_factory=list)
+
+
+class ScoreBreakdown(BaseModel):
+    concept_match: float = 0
+    file_match: float = 0
+    line_overlap: float = 0
+    severity_match: float = 0
+    fix_quality: float = 0
+    no_false_positives: float = 0
+    false_positive_penalty: float = 0
+    invalid_json_penalty: float = 0
+    total: float = 0
+
+
+class ScoredFinding(BaseModel):
+    finding: Finding
+    is_true_positive: bool
+    false_positive_reason: str | None = None
+
+
+class DeterministicCaseScore(BaseModel):
+    case_id: str
+    detected_bug: bool
+    localized_correctly: bool
+    patch_provided: bool
+    patch_applied: bool
+    tests_ran: bool
+    tests_passed: bool | None = None
+    structural_validation_ran: bool
+    structural_validation_passed: bool | None = None
+    true_positive_count: int
+    false_positive_count: int
+    false_negative_count: int
+    precision: float
+    recall: float
+    f1: float
+    f_beta: float
+    patch_apply_score: float
+    execution_score: float
+    structural_score: float
+    deterministic_pass: bool
+    failure_reasons: list[str] = Field(default_factory=list)
+
+
+class DeterministicMetrics(BaseModel):
+    detection_precision: float = 0.0
+    detection_recall: float = 0.0
+    detection_f1: float = 0.0
+    detection_f_beta: float = 0.0
+    validated_precision: float = 0.0
+    validated_recall: float = 0.0
+    validated_f1: float = 0.0
+    validated_f_beta: float = 0.0
+    beta: float
+    deterministic_pass_rate: float = 0.0
+    patch_apply_rate: float | None = None
+    test_pass_rate: float | None = None
+    structural_pass_rate: float | None = None
+    false_positives_per_case: float
+    cost_per_validated_fix: float | None = None
+    latency_per_case_ms: float
+
+    @model_validator(mode="before")
+    @classmethod
+    def load_legacy_metric_names(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        converted = dict(value)
+        converted.setdefault("detection_precision", converted.get("precision", 0.0))
+        converted.setdefault("detection_recall", converted.get("recall", 0.0))
+        converted.setdefault("detection_f1", converted.get("f1", 0.0))
+        converted.setdefault("detection_f_beta", converted.get("f_beta", 0.0))
+        converted.setdefault("validated_precision", converted.get("precision", 0.0))
+        converted.setdefault("validated_recall", converted.get("recall", 0.0))
+        converted.setdefault("validated_f1", converted.get("f1", 0.0))
+        converted.setdefault("validated_f_beta", converted.get("f_beta", 0.0))
+        converted.setdefault("latency_per_case_ms", converted.get("latency_per_case", 0.0))
+        converted.setdefault("cost_per_validated_fix", converted.get("cost_per_true_positive"))
+        return converted
+
+
+class CaseResult(BaseModel):
+    case_id: str
+    title: str
+    category: str
+    severity: Severity
+    ground_truth_summary: str
+    response: ReviewerResponse
+    scored_findings: list[ScoredFinding]
+    breakdown: ScoreBreakdown
+    score: float
+    review_quality_score: float | None = None
+    bug_found: bool
+    correct_file: bool
+    correct_line: bool
+    line_match: str
+    false_positive_count: int
+    test_output: str = ""
+    deterministic_case_score: DeterministicCaseScore | None = None
+    patch_provided: bool = False
+    patch_applied: bool = False
+    patch_error: str | None = None
+    touched_files: list[str] = Field(default_factory=list)
+    tests_ran: bool = False
+    tests_passed: bool | None = None
+    test_stdout_tail: str = ""
+    test_stderr_tail: str = ""
+    validators_run: list[str] = Field(default_factory=list)
+    validators_passed: bool | None = None
+    validator_results: list[dict[str, Any]] = Field(default_factory=list)
+    deterministic_pass: bool | None = None
+    failure_reasons: list[str] = Field(default_factory=list)
+    raw_suggested_patch: str | None = None
+
+
+class RunMetadata(BaseModel):
+    prompt_version: str
+    benchmark_version: str
+    temperature: float = 0.0
+    git_commit: str | None = None
+
+
+class RunResult(BaseModel):
+    run_id: str
+    benchmark_set: str
+    reviewer: str
+    model: str | None
+    started_at: datetime
+    completed_at: datetime
+    metadata: RunMetadata
+    case_results: list[CaseResult]
+    total_score: float
+    mode: Literal["review", "patch", "full"] = "review"
+    beta: float = 1.0
+    deterministic_metrics: DeterministicMetrics | None = None
+    bugs_found: int
+    correct_files: int
+    correct_lines: int
+    false_positives: int
+    total_cost: float
+    total_latency_ms: int
+
+    @property
+    def case_count(self) -> int:
+        return len(self.case_results)

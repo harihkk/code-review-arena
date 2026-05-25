@@ -1,0 +1,11 @@
+--- a/app/projector.py
++++ b/app/projector.py
+@@ -14,6 +14,8 @@
+         self.state = OrderState(status="CREATED", version=0)
+ 
+     def apply(self, event: OrderStatusChanged) -> OrderState:
++        if event.version <= self.state.version:
++            return self.state
+         self.state.status = event.status
+         self.state.version = event.version
+         return self.state

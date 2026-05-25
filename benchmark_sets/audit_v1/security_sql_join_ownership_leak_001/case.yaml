@@ -1,0 +1,35 @@
+id: security_sql_join_ownership_leak_001
+title: SQL document lookup omits organization ownership
+category: security
+severity: high
+stack: [python, sql, postgres, multi-tenant]
+description: >
+  A pull request removes organization_id filtering from a document lookup that joins
+  documents and projects, allowing cross-tenant reads when document_id is known.
+input:
+  diff: pr.diff
+  before_dir: before
+  after_dir: after
+  tests_dir: tests
+ground_truth:
+  primary_bug:
+    summary: Document access omits organization ownership filtering in the lookup query.
+    files:
+      - path: app/documents.py
+        line_ranges: [{start: 1, end: 8}]
+    concepts: [authorization, tenant isolation, sql, data exposure]
+    must_mention: [organization_id, document, ownership]
+    acceptable_fix_keywords: [organization_id, tenant, ownership, org_id]
+scoring:
+  weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
+  false_positive_penalty: 5
+  invalid_json_penalty: 20
+execution:
+  run_tests: true
+  test_command: "pytest -q tests"
+  timeout_seconds: 30
+validation:
+  patch_required: true
+  tests_required: true
+  structural_validators: [sql_has_tenant_or_owner_filter]
+metrics: {beta: 1.0}

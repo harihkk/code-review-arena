@@ -1,0 +1,35 @@
+id: api_pagination_cursor_skip_001
+title: Cursor pagination skips rows with duplicate timestamps
+category: api
+severity: high
+stack: [python, api, pagination]
+description: >
+  A pull request paginates with created_at only. Rows sharing a timestamp are skipped
+  or duplicated when cursors advance.
+input:
+  diff: pr.diff
+  before_dir: before
+  after_dir: after
+  tests_dir: tests
+ground_truth:
+  primary_bug:
+    summary: Cursor pagination omits a stable id tiebreaker for duplicate created_at values.
+    files:
+      - path: app/pagination.py
+        line_ranges: [{start: 8, end: 20}]
+    concepts: [pagination, cursor, duplicate timestamp, api correctness]
+    must_mention: [cursor, created_at, id]
+    acceptable_fix_keywords: [id, tiebreaker, composite, created_at]
+scoring:
+  weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
+  false_positive_penalty: 5
+  invalid_json_penalty: 20
+execution:
+  run_tests: true
+  test_command: "pytest -q tests"
+  timeout_seconds: 30
+validation:
+  patch_required: true
+  tests_required: true
+  structural_validators: [pagination_uses_stable_tiebreaker]
+metrics: {beta: 1.0}

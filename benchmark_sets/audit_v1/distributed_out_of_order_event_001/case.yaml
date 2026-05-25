@@ -1,0 +1,35 @@
+id: distributed_out_of_order_event_001
+title: Out-of-order events overwrite newer projector state
+category: distributed-systems
+severity: high
+stack: [python, events, state projection]
+description: >
+  A pull request applies every event in arrival order without checking version, so a
+  delayed older event can regress state to an obsolete status.
+input:
+  diff: pr.diff
+  before_dir: before
+  after_dir: after
+  tests_dir: tests
+ground_truth:
+  primary_bug:
+    summary: Projector applies stale events without a monotonic version guard.
+    files:
+      - path: app/projector.py
+        line_ranges: [{start: 10, end: 14}]
+    concepts: [event ordering, version, stale event, state projection]
+    must_mention: [version, stale, out-of-order]
+    acceptable_fix_keywords: [version, stale, sequence, updated_at]
+scoring:
+  weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
+  false_positive_penalty: 5
+  invalid_json_penalty: 20
+execution:
+  run_tests: true
+  test_command: "pytest -q tests"
+  timeout_seconds: 30
+validation:
+  patch_required: true
+  tests_required: true
+  structural_validators: [event_version_monotonic_guard]
+metrics: {beta: 1.0}

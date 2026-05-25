@@ -1,0 +1,16 @@
+diff -ruN a/app/idempotency.py b/app/idempotency.py
+--- a/app/idempotency.py	2026-05-25 18:08:04
++++ b/app/idempotency.py	2026-05-25 18:08:06
+@@ -1,9 +1,9 @@
+ class IdempotencyStore:
+     def __init__(self):
+-        self._records: dict[tuple[str, str], dict] = {}
++        self._records: dict[str, dict] = {}
+ 
+     def lookup(self, tenant_id: str, key: str):
+-        return self._records.get((tenant_id, key))
++        return self._records.get(key)
+ 
+     def store(self, tenant_id: str, key: str, response: dict):
+-        self._records[(tenant_id, key)] = response
++        self._records[key] = response

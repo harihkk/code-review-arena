@@ -1,0 +1,11 @@
+diff --git a/app/search_cache.py b/app/search_cache.py
+--- a/app/search_cache.py
++++ b/app/search_cache.py
+@@ -1,5 +1,5 @@
+ def cache_key(tenant_id: str, user_id: str, query: str) -> str:
+-    return f"search:{tenant_id}:{user_id}:{query}"
++    return f"search:{user_id}"
+ 
+ 
+ def search(redis, tenant_id: str, user_id: str, query: str, load):
+

@@ -1,0 +1,38 @@
+name: Audit v1
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit-v1:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Validate audit pack
+        run: arena validate benchmark_sets/audit_v1
+
+      - name: Run deterministic audit baseline
+        run: >
+          arena run benchmark_sets/audit_v1
+          --reviewer mock:perfect_patch
+          --mode full
+          --allow-local-execution
+
+      - name: Leaderboard summary
+        run: arena leaderboard runs/ --metric validated_f_beta --beta 1.0
+
+      - name: Upload run artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-v1-runs
+          path: runs/

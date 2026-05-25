@@ -1,0 +1,11 @@
+diff -ruN a/rag/answer.py b/rag/answer.py
+--- a/rag/answer.py	2026-05-25 18:07:48
++++ b/rag/answer.py	2026-05-25 18:07:49
+@@ -1,6 +1,2 @@
+ def build_answer(generator, retrieved_chunks):
+-    answer = generator(retrieved_chunks)
+-    valid_ids = {chunk["id"] for chunk in retrieved_chunks}
+-    if any(citation not in valid_ids for citation in answer["citation_ids"]):
+-        raise ValueError("Answer contained an unsupported citation")
+-    return answer
++    return generator(retrieved_chunks)

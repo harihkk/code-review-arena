@@ -1,0 +1,31 @@
+id: graphql_n_plus_one_001
+title: GraphQL customer resolver N+1 regression
+category: performance
+severity: medium
+stack: [typescript, graphql, dataloader]
+description: >
+  A batched customer load has been replaced by an individual database lookup per order.
+input:
+  diff: pr.diff
+  before_dir: before
+  after_dir: after
+  tests_dir: tests
+ground_truth:
+  primary_bug:
+    summary: Customer lookups inside the order map introduce N+1 database queries.
+    files:
+      - path: src/resolvers/orders.ts
+        line_ranges: [{start: 4, end: 10}]
+    concepts: [N+1, batching, database query]
+    must_mention: [customer, loop, query]
+    acceptable_fix_keywords: [DataLoader, loadMany, batch]
+scoring:
+  weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
+  false_positive_penalty: 5
+  invalid_json_penalty: 20
+execution: {run_tests: false, timeout_seconds: 30, docker_image: null}
+validation:
+  patch_required: true
+  tests_required: false
+  structural_validators: [graphql_uses_batching_or_dataloader]
+metrics: {beta: 1.0}

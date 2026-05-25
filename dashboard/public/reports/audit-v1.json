@@ -1,0 +1,47 @@
+{
+  "title": "Detection Is Not Validation: Audit v1 Results",
+  "generated_at": "2026-05-25T22:21:44.087681+00:00",
+  "empty": false,
+  "summary": {
+    "benchmark_pack": "audit_v1",
+    "run_count": 1,
+    "case_count": 5,
+    "reviewers_tested": [
+      "mock:perfect_patch"
+    ],
+    "biggest_detection_validation_gap": null
+  },
+  "reviewers": [
+    {
+      "reviewer": "mock",
+      "model": "perfect_patch",
+      "mode": "full",
+      "detection_f_beta": 1.0,
+      "validated_f_beta": 1.0,
+      "deterministic_pass_rate": 1.0,
+      "patch_apply_rate": 1.0,
+      "test_pass_rate": 1.0,
+      "structural_pass_rate": 1.0,
+      "false_positives_per_case": 0.0,
+      "cost_per_validated_fix": 0.0,
+      "latency_per_case_ms": 0.0,
+      "run_id": "2026-05-25_18-13-40"
+    }
+  ],
+  "gaps": [],
+  "failure_modes": {},
+  "case_studies": [],
+  "reproducibility_commands": [
+    "arena validate benchmark_sets/audit_v1",
+    "arena run benchmark_sets/audit_v1 --reviewer mock:perfect_patch --mode full --allow-local-execution",
+    "arena leaderboard runs/ --metric validated_f_beta --beta 1.0",
+    "arena audit-report runs/ --output docs/reports/audit-v1-results.md"
+  ],
+  "limitations": [
+    "audit_v1 is curated and small; it measures a narrow set of patch-backed failures.",
+    "Structural validators are hand-authored and may reject alternate but valid repairs.",
+    "Regression tests cannot prove full production correctness.",
+    "Some credible fixes may fail when validators are intentionally narrow.",
+    "This pack is not designed to compete with large public leaderboard scale benchmarks."
+  ]
+}

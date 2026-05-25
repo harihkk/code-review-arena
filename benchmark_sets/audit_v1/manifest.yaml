@@ -1,0 +1,13 @@
+version: audit_v1
+name: CodeReview Arena Audit Pack v1
+cases:
+  - security_fastapi_multitenant_admin_bypass_001
+  - distributed_kafka_duplicate_event_001
+  - rag_fabricated_citation_001
+  - async_balance_race_001
+  - idempotency_key_tenant_scope_001
+  - security_sql_join_ownership_leak_001
+  - security_jwt_audience_validation_001
+  - distributed_out_of_order_event_001
+  - api_pagination_cursor_skip_001
+  - rag_prompt_injection_policy_override_001
