@@ -1,20 +1,24 @@
 {
   "title": "Detection Is Not Validation: Audit v1 Results",
-  "generated_at": "2026-05-25T22:21:44.087681+00:00",
+  "generated_at": "2026-05-25T23:23:52.028128+00:00",
   "empty": false,
   "summary": {
     "benchmark_pack": "audit_v1",
-    "run_count": 1,
-    "case_count": 5,
+    "run_count": 3,
+    "case_count": 10,
     "reviewers_tested": [
-      "mock:perfect_patch"
+      "mock:keyword_gamer",
+      "reference-patch"
     ],
-    "biggest_detection_validation_gap": null
+    "biggest_detection_validation_gap": {
+      "reviewer": "mock:keyword_gamer",
+      "gap": 1.0
+    }
   },
   "reviewers": [
     {
-      "reviewer": "mock",
-      "model": "perfect_patch",
+      "reviewer": "reference-patch",
+      "model": "",
       "mode": "full",
       "detection_f_beta": 1.0,
       "validated_f_beta": 1.0,
@@ -25,12 +29,94 @@
       "false_positives_per_case": 0.0,
       "cost_per_validated_fix": 0.0,
       "latency_per_case_ms": 0.0,
-      "run_id": "2026-05-25_18-13-40"
+      "run_id": "2026-05-25_19-22-05"
+    },
+    {
+      "reviewer": "mock",
+      "model": "keyword_gamer",
+      "mode": "full",
+      "detection_f_beta": 1.0,
+      "validated_f_beta": 0.0,
+      "deterministic_pass_rate": 0.0,
+      "patch_apply_rate": 1.0,
+      "test_pass_rate": 0.0,
+      "structural_pass_rate": 0.5,
+      "false_positives_per_case": 0.0,
+      "cost_per_validated_fix": null,
+      "latency_per_case_ms": 0.0,
+      "run_id": "2026-05-25_19-23-47"
     }
   ],
-  "gaps": [],
-  "failure_modes": {},
-  "case_studies": [],
+  "gaps": [
+    {
+      "reviewer": "mock",
+      "model": "keyword_gamer",
+      "mode": "full",
+      "detection_f_beta": 1.0,
+      "validated_f_beta": 0.0,
+      "gap": 1.0,
+      "run_id": "2026-05-25_19-23-47"
+    }
+  ],
+  "failure_modes": {
+    "tests_failed": 10,
+    "structural_validation_failed": 5
+  },
+  "case_studies": [
+    {
+      "case_id": "security_fastapi_multitenant_admin_bypass_001",
+      "reviewer": "mock",
+      "model": "keyword_gamer",
+      "finding_summary": "Tenant admin route does not verify tenant-scoped administrator privileges. In `app/routes/tenant_admin.py` (see also `app/auth.py`): authorization multi-tenant privilege escalation tenant admin role tenant_id. Structural validation context: tenant-scoped admin authorization, require_tenant_admin, tenant_id RBAC, citation validation, structural validator fastapi_tenant_admin_authorization. Recommended fix: Use require_tenant_admin and enforce tenant-scoped admin RBAC..",
+      "failure_reasons": [
+        "tests_failed",
+        "structural_validation_failed"
+      ],
+      "validator_evidence": [
+        {
+          "name": "fastapi_tenant_admin_authorization",
+          "passed": false,
+          "message": "Tenant admin route still lacks tenant-scoped administrator enforcement."
+        }
+      ],
+      "test_stderr_tail": ""
+    },
+    {
+      "case_id": "distributed_kafka_duplicate_event_001",
+      "reviewer": "mock",
+      "model": "keyword_gamer",
+      "finding_summary": "Duplicate Kafka events are no longer deduplicated before ledger mutation. In `consumer/payments.py` (see also `consumer/ledger.py`): idempotency duplicate event at-least-once delivery event_id duplicate credit kafka. Structural validation context: event_id idempotency duplicate at-least-once delivery, processed_event_ids lock, kafka consumer guard before ledger credit. Recommended fix: Persist processed_event_ids keyed by event_id before crediting..",
+      "failure_reasons": [
+        "tests_failed",
+        "structural_validation_failed"
+      ],
+      "validator_evidence": [
+        {
+          "name": "kafka_idempotency_guard",
+          "passed": false,
+          "message": "No complete check-then-record idempotency guard surrounds the mutation."
+        }
+      ],
+      "test_stderr_tail": ""
+    },
+    {
+      "case_id": "rag_fabricated_citation_001",
+      "reviewer": "mock",
+      "model": "keyword_gamer",
+      "finding_summary": "Generated citation IDs are not validated against retrieved context. In `rag/answer.py` (see also `rag/retriever.py`): citation validation retrieved context fabricated citation citation_ids valid_ids. Structural validation context: citation validation, retrieved_chunks, valid_ids grounding, audience of citations, reject fabricated citation_ids. Recommended fix: Validate citation_ids against valid_ids from retrieved_chunks..",
+      "failure_reasons": [
+        "tests_failed"
+      ],
+      "validator_evidence": [
+        {
+          "name": "rag_citation_ids_validated",
+          "passed": true,
+          "message": "Generated citation IDs are constrained by retrieved sources."
+        }
+      ],
+      "test_stderr_tail": ""
+    }
+  ],
   "reproducibility_commands": [
     "arena validate benchmark_sets/audit_v1",
     "arena run benchmark_sets/audit_v1 --reviewer mock:perfect_patch --mode full --allow-local-execution",

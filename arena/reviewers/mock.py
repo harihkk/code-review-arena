@@ -610,7 +610,7 @@ def build_prompt(
         if self.mode == "keyword_gamer":
             summary_text = (
                 f"{summary} In `{path}` (see also `{nearby}`): {terms}. "
-                f"Structural validation context — {gamer_voice}. "
+                f"Structural validation context: {gamer_voice}. "
                 f"Recommended fix: {fix}."
             )
         else:

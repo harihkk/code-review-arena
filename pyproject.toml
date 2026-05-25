@@ -22,10 +22,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/code-review-arena/code-review-arena"
-Repository = "https://github.com/code-review-arena/code-review-arena"
-Documentation = "https://github.com/code-review-arena/code-review-arena#readme"
-Issues = "https://github.com/code-review-arena/code-review-arena/issues"
+Homepage = "https://github.com/harihkk/code-review-arena"
+Repository = "https://github.com/harihkk/code-review-arena"
+Documentation = "https://github.com/harihkk/code-review-arena#readme"
+Issues = "https://github.com/harihkk/code-review-arena/issues"
 
 [project.optional-dependencies]
 openai = ["openai>=1.30"]

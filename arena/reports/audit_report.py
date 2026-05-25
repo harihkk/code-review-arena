@@ -55,7 +55,7 @@ def build_audit_report_data(runs: list[RunResult]) -> dict[str, Any]:
             "summary": {
                 "benchmark_pack": AUDIT_BENCHMARK_SET,
                 "run_count": 0,
-                "case_count": 5,
+                "case_count": 10,
                 "reviewers_tested": [],
                 "biggest_detection_validation_gap": None,
             },
@@ -141,7 +141,7 @@ def build_audit_report_data(runs: list[RunResult]) -> dict[str, Any]:
         "summary": {
             "benchmark_pack": AUDIT_BENCHMARK_SET,
             "run_count": len(runs),
-            "case_count": max((run.case_count for run in latest.values()), default=5),
+            "case_count": max((run.case_count for run in latest.values()), default=10),
             "reviewers_tested": sorted({_reviewer_label(run) for run in latest.values()}),
             "biggest_detection_validation_gap": (
                 {"reviewer": biggest_gap_label, "gap": round(biggest_gap, 6)}

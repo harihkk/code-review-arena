@@ -2,8 +2,6 @@
 
 Local, execution-backed audits for AI code reviewers.
 
-Public repository: **code-review-arena**
-
 ## Overview
 
 CodeReview Arena is a benchmark harness for evaluating AI code-review agents on seeded pull-request bugs. It checks whether a reviewer can detect the bug, localize it, produce a patch, apply that patch, pass tests, and satisfy structural validators.
@@ -153,7 +151,7 @@ make typecheck
 cd dashboard && npm install && npm run build
 ```
 
-Python package name: `codereview-arena`. CLI entry point: `arena`.
+Python package name: `codereview-arena`. CLI entry point: `arena`. GitHub repository: `code-review-arena`.
 
 ## Limitations
 
