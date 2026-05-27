@@ -1,4 +1,4 @@
-# CodeReview Arena (code-review-arena)
+# Code Review Arena (code-review-arena)
 services:
   api:
     build: .

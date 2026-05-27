@@ -1,23 +1,19 @@
 import Link from "next/link";
 
 const links = [
+  { href: "/", label: "Overview" },
   { href: "/leaderboard", label: "Leaderboard" },
-  { href: "/runs", label: "Runs" },
   { href: "/cases", label: "Cases" },
+  { href: "/reports/audit-v1", label: "Audit Pack v1" },
   { href: "/methodology", label: "Methodology" },
-  { href: "/reports/audit-v1", label: "Audit Report" },
   { href: "/docs", label: "Docs" },
+  { href: "/runs", label: "Runs" },
 ];
 
 export function Navbar() {
   return (
     <header className="topbar">
-      <div>
-        <Link className="brand" href="/">CodeReview Arena</Link>
-        <p className="tagline">
-          Local, execution-backed audits for AI code reviewers. Repo: code-review-arena
-        </p>
-      </div>
+      <Link className="brand" href="/">Code Review Arena</Link>
       <nav className="nav" aria-label="Primary">
         {links.map((link) => (
           <Link href={link.href} key={link.href}>{link.label}</Link>

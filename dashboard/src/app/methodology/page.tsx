@@ -1,32 +1,62 @@
 import { PageHeader } from "../../components/PageHeader";
 
+const steps = [
+  "Seeded PR",
+  "Reviewer",
+  "Structured finding",
+  "Suggested patch",
+  "Apply patch",
+  "Run tests",
+  "Run validators",
+  "Compute metrics",
+];
+
 const sections = [
-  ["What CodeReview Arena measures", "A local benchmark run begins with intentionally buggy pull requests and records localization, patches, execution outcomes, validator evidence, false positives, cost, and latency."],
-  ["Detection vs validation", "Detection means a reviewer found and localized the seeded defect. Validation means that result also produced an acceptable patch outcome: clean application, required passing tests, required validator passes, and acceptable precision."],
-  ["Patch application pipeline", "Each suggested unified diff is applied to an isolated run workspace copied from the buggy after snapshot. Benchmark fixtures are never mutated."],
-  ["Test execution", "Cases may execute regression tests inside the copied workspace. Local execution is opt-in; Docker can be configured for stronger containment."],
-  ["Structural validators", "Validators check repair properties such as admin authorization, tenant scoping, idempotency guards, or citation validation. They accept multiple credible code patterns rather than one mock-patch shape."],
-  ["False-positive fatigue", "Unmatched findings count against precision and can prevent deterministic passage. A reviewer that floods a PR with unsupported warnings is not treated as effective."],
-  ["Cost and latency", "Reports track estimated cost per validated fix and elapsed latency per case so repair quality can be compared against operational cost."],
-  ["Intended use", "Arena is designed for reproducible local audits, private reviewer evaluation, prompt or model comparisons, and failure-mode testing before deployment."],
+  ["1. What is measured", "Code Review Arena records whether a reviewer identifies a seeded bug, localizes it, supplies a patch, and produces an execution-backed outcome."],
+  ["2. Detection vs validation", "detection_f_beta measures found and localized bugs. validated_f_beta measures detected bugs whose fixes pass required deterministic validation."],
+  ["3. Benchmark case design", "Cases are small pull-request fixtures with known failure behavior, ground truth, validation requirements, and regression evidence."],
+  ["4. Patch application", "Suggested unified diffs are applied to isolated copied workspaces. A patch that cannot apply cannot receive a validated outcome."],
+  ["5. Test execution", "Cases can require fixture-owned regression tests after patch application. Local execution is explicit and opt-in."],
+  ["6. Structural validators", "Hand-authored validators check repair properties that tests may not fully express, such as tenant scoping or event ordering guards."],
+  ["7. Baselines", "reference-patch and mock reviewers are deterministic controls used to exercise success and failure paths. They are not external model comparisons."],
+  ["8. Metrics", "The primary full-mode ranking metric is validated_f_beta. Reports also expose patch apply, test, structural pass, false-positive, cost, and latency measures."],
+  ["9. Limitations", "The audit pack is curated and small. Validators can be too narrow, and passing tests cannot establish every production property."],
 ];
 
 export default function MethodologyPage() {
   return (
     <>
-      <PageHeader eyebrow="Methodology" title="Outcome-based evaluation" description="How deterministic patch validation builds evidence beyond plausible review comments." />
-      <div className="prose panel methodology">
-        {sections.map(([title, copy]) => <section key={title}><h2>{title}</h2><p>{copy}</p></section>)}
-        <section>
-          <h2>Limitations</h2>
-          <ul>
-            <li>Version 1 is a small curated benchmark set, not a scale benchmark.</li>
-            <li>Structural validators are hand-authored and may still reject some valid repairs.</li>
-            <li>Passing tests provides useful evidence but cannot prove complete correctness.</li>
-            <li>Arena is intended for local reproducibility and audit workflows, not claims of universal model quality.</li>
-          </ul>
-        </section>
+      <PageHeader
+        eyebrow="Methodology"
+        title="Methodology"
+        description="How Code Review Arena turns reviewer output into reproducible validation evidence."
+      />
+      <section className="panel method-pipeline">
+        <h2>Evaluation pipeline</h2>
+        <div className="pipeline">
+          {steps.map((step, index) => (
+            <div className="pipeline-step" key={step}>
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              {step}
+            </div>
+          ))}
+        </div>
+      </section>
+      <div className="method-grid">
+        {sections.map(([title, copy]) => (
+          <section className="panel method-section" key={title}>
+            <h2>{title}</h2>
+            <p>{copy}</p>
+          </section>
+        ))}
       </div>
+      <section className="panel callout section-space">
+        <p>
+          Code Review Arena is a local audit harness. It is not a large-scale public adoption benchmark.
+          Large public benchmarks evaluate different things, often at broader scale. Code Review Arena
+          focuses on local execution-backed validation of patch outputs.
+        </p>
+      </section>
     </>
   );
 }

@@ -18,6 +18,12 @@ export default function AuditReportDocsPage() {
           <code>dashboard/public/reports/audit-v1.json</code> for the
           <a href="/reports/audit-v1">/reports/audit-v1</a> page.
         </p>
+        <h2>Data integrity</h2>
+        <p>
+          Report tables contain only saved run outputs. Reference and mock reviewers are
+          labelled as deterministic controls; real model rows appear only when a recorded
+          run exists.
+        </p>
       </DocsLayout>
     </>
   );

@@ -19,6 +19,8 @@ export type LeaderboardRow = {
   run_id: string;
   history_count: number;
   completed_at: string;
+  benchmark_set?: string;
+  detail_available?: boolean;
   deterministic_passes: number;
   deterministic_metrics: DeterministicMetrics | null;
 };
@@ -44,6 +46,7 @@ export type DeterministicMetrics = {
 
 export type CaseSummary = {
   id: string;
+  benchmark_set: "v1" | "audit_v1";
   title: string;
   category: string;
   severity: string;

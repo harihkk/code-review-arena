@@ -1,4 +1,4 @@
-# CodeReview Arena Report
+# Code Review Arena Report
 
 Benchmark Set: v1
 Reviewer: mock:perfect

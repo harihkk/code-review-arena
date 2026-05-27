@@ -49,7 +49,7 @@ def _reviewer_label(run: RunResult) -> str:
 def build_audit_report_data(runs: list[RunResult]) -> dict[str, Any]:
     if not runs:
         return {
-            "title": "Detection Is Not Validation: Audit v1 Results",
+            "title": "Detection Is Not Validation: Audit Pack v1 Results",
             "generated_at": datetime.now(UTC).isoformat(),
             "empty": True,
             "summary": {
@@ -85,6 +85,7 @@ def build_audit_report_data(runs: list[RunResult]) -> dict[str, Any]:
         detection = metrics.detection_f_beta if metrics else None
         validated = metrics.validated_f_beta if metrics else None
         gap = (detection or 0.0) - (validated or 0.0)
+        run_failure_counter: Counter[str] = Counter()
         if gap > biggest_gap:
             biggest_gap = gap
             biggest_gap_label = _reviewer_label(run)
@@ -104,16 +105,23 @@ def build_audit_report_data(runs: list[RunResult]) -> dict[str, Any]:
             for reason in case.failure_reasons:
                 if reason in FAILURE_REASON_LABELS:
                     failure_counter[reason] += 1
+                    run_failure_counter[reason] += 1
                 elif reason == "detection_failed":
                     failure_counter["detection_failed"] += 1
+                    run_failure_counter["detection_failed"] += 1
                 elif reason == "localization_failed":
                     failure_counter["localization_failed"] += 1
+                    run_failure_counter["localization_failed"] += 1
         reviewer_rows.append(
             {
                 "reviewer": run.reviewer,
                 "model": run.model or "",
                 "mode": run.mode,
+                "detection_precision": metrics.detection_precision if metrics else None,
+                "detection_recall": metrics.detection_recall if metrics else None,
                 "detection_f_beta": detection,
+                "validated_precision": metrics.validated_precision if metrics else None,
+                "validated_recall": metrics.validated_recall if metrics else None,
                 "validated_f_beta": validated,
                 "deterministic_pass_rate": metrics.deterministic_pass_rate if metrics else None,
                 "patch_apply_rate": metrics.patch_apply_rate if metrics else None,
@@ -123,6 +131,9 @@ def build_audit_report_data(runs: list[RunResult]) -> dict[str, Any]:
                 "cost_per_validated_fix": metrics.cost_per_validated_fix if metrics else None,
                 "latency_per_case_ms": metrics.latency_per_case_ms if metrics else None,
                 "run_id": run.run_id,
+                "primary_failure_mode": (
+                    run_failure_counter.most_common(1)[0][0] if run_failure_counter else None
+                ),
             }
         )
 
@@ -135,7 +146,7 @@ def build_audit_report_data(runs: list[RunResult]) -> dict[str, Any]:
     case_studies = _select_case_studies(list(latest.values()))
 
     return {
-        "title": "Detection Is Not Validation: Audit v1 Results",
+        "title": "Detection Is Not Validation: Audit Pack v1 Results",
         "generated_at": datetime.now(UTC).isoformat(),
         "empty": False,
         "summary": {
@@ -214,7 +225,8 @@ def _select_case_studies(runs: list[RunResult]) -> list[dict[str, Any]]:
 def _reproducibility_commands() -> list[str]:
     return [
         "arena validate benchmark_sets/audit_v1",
-        "arena run benchmark_sets/audit_v1 --reviewer mock:perfect_patch --mode full --allow-local-execution",
+        "arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution",
+        "arena run benchmark_sets/audit_v1 --reviewer mock:keyword_gamer --mode full --allow-local-execution",
         "arena leaderboard runs/ --metric validated_f_beta --beta 1.0",
         "arena audit-report runs/ --output docs/reports/audit-v1-results.md",
     ]

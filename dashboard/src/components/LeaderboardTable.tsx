@@ -12,9 +12,7 @@ type Metric =
   | "patch_apply_rate"
   | "structural_pass_rate"
   | "test_pass_rate"
-  | "false_positives_per_case"
-  | "cost_per_validated_fix"
-  | "latency_per_case_ms";
+  | "false_positives_per_case";
 
 const metricOptions: Metric[] = [
   "validated_f_beta",
@@ -24,16 +22,25 @@ const metricOptions: Metric[] = [
   "structural_pass_rate",
   "test_pass_rate",
   "false_positives_per_case",
-  "cost_per_validated_fix",
-  "latency_per_case_ms",
 ];
 
 export function LeaderboardTable({ rows }: { rows: LeaderboardRow[] }) {
   const [metric, setMetric] = useState<Metric>("validated_f_beta");
   const [beta, setBeta] = useState(1);
-  const ascending = metric === "false_positives_per_case" || metric === "cost_per_validated_fix" || metric === "latency_per_case_ms";
+  const [benchmark, setBenchmark] = useState(
+    rows.some((row) => row.benchmark_set === "audit_v1")
+      ? "audit_v1"
+      : (rows.find((row) => row.benchmark_set)?.benchmark_set ?? ""),
+  );
+  const [reviewer, setReviewer] = useState("");
+  const benchmarkOptions = Array.from(new Set(rows.map((row) => row.benchmark_set).filter((item): item is string => Boolean(item)))).sort();
+  const reviewerOptions = Array.from(new Set(rows.map((row) => reviewerName(row)))).sort();
+  const ascending = metric === "false_positives_per_case";
   const sorted = useMemo(
-    () => [...rows].sort((left, right) => {
+    () => rows
+      .filter((row) => !row.benchmark_set || row.benchmark_set === benchmark)
+      .filter((row) => !reviewer || reviewerName(row) === reviewer)
+      .sort((left, right) => {
       const leftValue = value(left, metric, beta);
       const rightValue = value(right, metric, beta);
       if (leftValue == null) return rightValue == null ? 0 : 1;
@@ -41,14 +48,27 @@ export function LeaderboardTable({ rows }: { rows: LeaderboardRow[] }) {
       const delta = leftValue - rightValue;
       return ascending ? delta : -delta;
     }),
-    [ascending, beta, metric, rows],
+    [ascending, benchmark, beta, metric, reviewer, rows],
   );
-  if (!rows.length) return <div className="panel empty">No completed runs yet.</div>;
+  if (!rows.length) return <div className="panel empty"><h2>No completed runs yet</h2><p>Run a benchmark locally to generate leaderboard results.</p></div>;
   return (
     <>
-      <div className="controls panel">
+      <div className="controls">
         <label>
-          Ranking metric
+          Benchmark set
+          <select value={benchmark} onChange={(event) => setBenchmark(event.target.value)}>
+            {benchmarkOptions.map((option) => <option value={option} key={option}>{option}</option>)}
+          </select>
+        </label>
+        <label>
+          Reviewer
+          <select value={reviewer} onChange={(event) => setReviewer(event.target.value)}>
+            <option value="">All reviewers</option>
+            {reviewerOptions.map((option) => <option value={option} key={option}>{option}</option>)}
+          </select>
+        </label>
+        <label>
+          Metric
           <select value={metric} onChange={(event) => setMetric(event.target.value as Metric)}>
             {metricOptions.map((option) => <option value={option} key={option}>{option}</option>)}
           </select>
@@ -56,31 +76,32 @@ export function LeaderboardTable({ rows }: { rows: LeaderboardRow[] }) {
         <label>
           Beta
           <select value={beta} onChange={(event) => setBeta(Number(event.target.value))}>
-            <option value={0.5}>0.5 Precision mode</option>
-            <option value={1}>1.0 Balanced</option>
-            <option value={2}>2.0 Recall mode</option>
+            <option value={0.5}>0.5 precision</option>
+            <option value={1}>1.0 balanced</option>
+            <option value={2}>2.0 recall</option>
           </select>
         </label>
-        <span className="control-note">Primary ranking: <strong>validated_f_beta</strong></span>
+        <span className="control-note">Primary metric: <code>validated_f_beta</code></span>
       </div>
-      <div className="table-scroll">
+      {!sorted.length ? <div className="panel empty">No recorded runs match these filters.</div> : <div className="table-scroll">
         <table className="data-table leaderboard-table">
           <thead>
             <tr>
               <th>Rank</th>
-              <th>Reviewer / Model</th>
+              <th>Reviewer</th>
+              <th>Model</th>
+              <th>Benchmark</th>
               <th>Mode</th>
-              <th>Status</th>
               <th className="numeric">Validated F-beta</th>
               <th className="numeric">Detection F-beta</th>
               <th className="numeric">Passes</th>
               <th className="numeric">Patch Apply</th>
-              <th className="numeric">Structural</th>
               <th className="numeric">Tests</th>
+              <th className="numeric">Validators</th>
               <th className="numeric">False Positives</th>
-              <th className="numeric">Cost</th>
               <th className="numeric">Latency</th>
-              <th>Run Date</th>
+              <th>Status</th>
+              <th>Run</th>
             </tr>
           </thead>
           <tbody>
@@ -90,27 +111,27 @@ export function LeaderboardTable({ rows }: { rows: LeaderboardRow[] }) {
                 <tr key={`${row.run_id}:${row.mode}`}>
                   <td className="numeric">{index + 1}</td>
                   <td>
-                    <Link href={`/runs/${row.run_id}`}><strong>{row.reviewer}</strong></Link>
-                    <div className="table-subtitle">{row.model || "default model"}</div>
+                    <strong>{reviewerName(row)}</strong>
                   </td>
+                  <td>{row.model || "-"}</td>
+                  <td>{row.benchmark_set ?? "recorded run"}</td>
                   <td>{row.mode}</td>
-                  <td>{validationBadge(row)}</td>
                   <td className="numeric strong-metric">{formatRate(dynamicF(metrics, "validated", beta))}</td>
                   <td className="numeric">{formatRate(dynamicF(metrics, "detection", beta))}</td>
                   <td className="numeric">{row.deterministic_passes}/{row.case_count}</td>
                   <td className="numeric">{formatRate(metrics?.patch_apply_rate)}</td>
-                  <td className="numeric">{formatRate(metrics?.structural_pass_rate)}</td>
                   <td className="numeric">{formatRate(metrics?.test_pass_rate)}</td>
+                  <td className="numeric">{formatRate(metrics?.structural_pass_rate)}</td>
                   <td className="numeric">{row.false_positives}</td>
-                  <td className="numeric">${row.cost.toFixed(4)}</td>
                   <td className="numeric">{(row.latency_ms / 1000).toFixed(2)}s</td>
-                  <td>{new Date(row.completed_at).toLocaleDateString()}</td>
+                  <td>{validationBadge(row)}</td>
+                  <td>{row.detail_available === false ? <Link href="/reports/audit-v1">Report</Link> : <Link href={`/runs/${row.run_id}`}>View</Link>}</td>
                 </tr>
               );
             })}
           </tbody>
         </table>
-      </div>
+      </div>}
       <p className="table-footnote">Sorted by <code>{metric}</code> with beta={beta.toFixed(1)}.</p>
     </>
   );
@@ -134,32 +155,20 @@ function value(row: LeaderboardRow, metric: Metric, beta: number): number | null
 
 function validationBadge(row: LeaderboardRow) {
   const metrics = row.deterministic_metrics;
-  if (!metrics) return <StatusBadge tone="neutral">Review only</StatusBadge>;
-  if (metrics.validated_f_beta === 1 && row.false_positives === 0) {
-    return <StatusBadge tone="success">Validated</StatusBadge>;
-  }
+  if (!metrics) return <StatusBadge tone="neutral">review only</StatusBadge>;
   if (metrics.detection_f_beta > metrics.validated_f_beta) {
-    return (
-      <div className="status-stack">
-        <StatusBadge tone="warning">Detected only - fix not validated</StatusBadge>
-        {secondaryFailure(row)}
-      </div>
-    );
+    return <StatusBadge tone="warning">detected only</StatusBadge>;
   }
-  if (row.false_positives > 0) return <StatusBadge tone="danger">Noisy</StatusBadge>;
-  return <StatusBadge tone="danger">Validation failed</StatusBadge>;
-}
-
-function secondaryFailure(row: LeaderboardRow) {
-  const metrics = row.deterministic_metrics;
-  if (!metrics) return null;
-  if (row.false_positives > 0) return <StatusBadge tone="danger">Noisy</StatusBadge>;
-  if (metrics.patch_apply_rate == null) return <StatusBadge tone="danger">No patch</StatusBadge>;
-  if (metrics.patch_apply_rate === 0) return <StatusBadge tone="danger">Patch failed</StatusBadge>;
-  if (metrics.structural_pass_rate === 0) return <StatusBadge tone="danger">Validator failed</StatusBadge>;
-  return null;
+  if (metrics.validated_f_beta > 0 && row.false_positives === 0) {
+    return <StatusBadge tone="success">validated</StatusBadge>;
+  }
+  return <StatusBadge tone="danger">not validated</StatusBadge>;
 }
 
 function formatRate(value: number | null | undefined) {
   return value == null ? "-" : value.toFixed(3);
+}
+
+function reviewerName(row: LeaderboardRow) {
+  return row.reviewer === "mock" && row.model ? `mock:${row.model}` : row.reviewer;
 }

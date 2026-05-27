@@ -1,157 +1,80 @@
-import fs from "fs";
-import path from "path";
-
+import { CodeBlock } from "../../../components/CodeBlock";
+import { FailureReasonChart } from "../../../components/FailureReasonChart";
 import { PageHeader } from "../../../components/PageHeader";
-
-type AuditReport = {
-  title: string;
-  empty: boolean;
-  summary: {
-    benchmark_pack: string;
-    run_count: number;
-    case_count: number;
-    reviewers_tested: string[];
-    biggest_detection_validation_gap: { reviewer: string; gap: number } | null;
-  };
-  reviewers: Array<{
-    reviewer: string;
-    model: string;
-    mode: string;
-    detection_f_beta: number | null;
-    validated_f_beta: number | null;
-    deterministic_pass_rate: number | null;
-    patch_apply_rate: number | null;
-    test_pass_rate: number | null;
-    structural_pass_rate: number | null;
-    false_positives_per_case: number | null;
-    cost_per_validated_fix: number | null;
-    latency_per_case_ms: number | null;
-  }>;
-  gaps: Array<{
-    reviewer: string;
-    model: string;
-    mode: string;
-    detection_f_beta: number;
-    validated_f_beta: number;
-    gap: number;
-    run_id: string;
-  }>;
-  failure_modes: Record<string, number>;
-  case_studies: Array<{
-    case_id: string;
-    reviewer: string;
-    model: string;
-    finding_summary: string;
-    failure_reasons: string[];
-    validator_evidence: Array<{ name: string; passed: boolean; message: string }>;
-    test_stderr_tail: string;
-  }>;
-  reproducibility_commands: string[];
-  limitations: string[];
-};
-
-function loadReport(): AuditReport | null {
-  const file = path.join(process.cwd(), "public", "reports", "audit-v1.json");
-  if (!fs.existsSync(file)) return null;
-  return JSON.parse(fs.readFileSync(file, "utf-8")) as AuditReport;
-}
-
-function formatRate(value: number | null | undefined): string {
-  if (value == null) return "n/a";
-  return `${(value * 100).toFixed(1)}%`;
-}
-
-function formatMetric(value: number | null | undefined): string {
-  if (value == null) return "n/a";
-  return value.toFixed(3);
-}
+import { StatusBadge } from "../../../components/StatusBadge";
+import { AuditReviewerRow, displayReviewer, loadAuditReport } from "../../../lib/auditReport";
 
 export default function AuditV1ReportPage() {
-  const report = loadReport();
+  const report = loadAuditReport();
 
   if (!report || report.empty) {
     return (
       <>
         <PageHeader
-          eyebrow="Audit Report"
-          title="Detection Is Not Validation"
-          description="No audit report has been generated yet."
+          eyebrow="Audit Pack v1 report"
+          title="Detection Is Not Validation: Audit Pack v1"
+          description="A local execution-backed audit of code-review agents on 10 patch-required seeded bugs."
         />
-        <section className="panel">
-          <p>Generate an audit_v1 run and report before viewing this page.</p>
-          <pre className="code-block">
-{`arena run benchmark_sets/audit_v1 --reviewer mock:perfect_patch --mode full --allow-local-execution
-arena audit-report runs/ --output docs/reports/audit-v1-results.md`}
-          </pre>
+        <section className="panel empty">
+          <h2>No audit report data found.</h2>
+          <p>Generate local run evidence and a report snapshot to populate this page.</p>
+          <CodeBlock compact>{`arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
+arena audit-report runs/ --output docs/reports/audit-v1-results.md`}</CodeBlock>
         </section>
       </>
     );
   }
 
-  const gap = report.summary.biggest_detection_validation_gap;
-
   return (
     <>
       <PageHeader
-        eyebrow="Audit Report"
-        title="Detection Is Not Validation"
-        description="Audit Pack v1 compares detection metrics with execution-backed validation."
+        eyebrow="Audit Pack v1 report"
+        title="Detection Is Not Validation: Audit Pack v1"
+        description="A local execution-backed audit of code-review agents on 10 patch-required seeded bugs."
       />
-      <section className="grid stats">
-        <div className="panel">
-          <span className="stat-label">Benchmark pack</span>
-          <strong className="stat-value">{report.summary.benchmark_pack}</strong>
-        </div>
-        <div className="panel">
-          <span className="stat-label">Runs</span>
-          <strong className="stat-value">{report.summary.run_count}</strong>
-        </div>
-        <div className="panel">
-          <span className="stat-label">Cases</span>
-          <strong className="stat-value">{report.summary.case_count}</strong>
-        </div>
-        <div className="panel">
-          <span className="stat-label">Largest gap</span>
-          <strong className="stat-value">
-            {gap ? gap.gap.toFixed(3) : "n/a"}
-          </strong>
-          <span className="stat-note">{gap?.reviewer ?? "no gap recorded"}</span>
-        </div>
+
+      <section className="report-section">
+        <h2>Summary</h2>
+        <dl className="report-summary">
+          <ReportFact term="Cases" value={String(report.summary.case_count)} />
+          <ReportFact term="Primary metric" value="validated_f_beta" code />
+          <ReportFact term="Baselines present" value={String(report.reviewers.length)} />
+          <ReportFact term="Generated at" value={new Date(report.generated_at).toLocaleString()} />
+        </dl>
       </section>
 
-      <section className="panel">
-        <h3>Reviewer comparison</h3>
-        <div className="table-wrap">
-          <table className="dense-table">
+      <section className="report-section">
+        <div className="row-between">
+          <h2>Reviewer comparison</h2>
+          <StatusBadge tone="neutral">Generated local run data</StatusBadge>
+        </div>
+        <p className="section-caption">
+          Reference and mock rows are deterministic controls. No external model row is shown unless it exists in the report data.
+        </p>
+        <ReviewerTable rows={report.reviewers} />
+      </section>
+
+      <section className="report-section">
+        <h2>Detection-validation gap</h2>
+        <div className="table-scroll">
+          <table className="data-table dense-table">
             <thead>
               <tr>
                 <th>Reviewer</th>
-                <th>Model</th>
-                <th>Mode</th>
                 <th>Detection F-beta</th>
                 <th>Validated F-beta</th>
-                <th>Pass rate</th>
-                <th>Patch apply</th>
-                <th>Tests</th>
-                <th>Structural</th>
-                <th>FP / case</th>
-                <th>Latency / case</th>
+                <th>Gap</th>
+                <th>Primary failure mode</th>
               </tr>
             </thead>
             <tbody>
               {report.reviewers.map((row) => (
-                <tr key={`${row.reviewer}-${row.model}-${row.mode}`}>
-                  <td>{row.reviewer}</td>
-                  <td>{row.model}</td>
-                  <td>{row.mode}</td>
-                  <td>{formatMetric(row.detection_f_beta)}</td>
-                  <td>{formatMetric(row.validated_f_beta)}</td>
-                  <td>{formatRate(row.deterministic_pass_rate)}</td>
-                  <td>{formatRate(row.patch_apply_rate)}</td>
-                  <td>{formatRate(row.test_pass_rate)}</td>
-                  <td>{formatRate(row.structural_pass_rate)}</td>
-                  <td>{row.false_positives_per_case ?? "n/a"}</td>
-                  <td>{row.latency_per_case_ms ?? "n/a"}</td>
+                <tr key={`${row.reviewer}-${row.model}-${row.mode}-gap`}>
+                  <td><code>{displayReviewer(row)}</code></td>
+                  <td>{metric(row.detection_f_beta)}</td>
+                  <td className="strong-metric">{metric(row.validated_f_beta)}</td>
+                  <td>{gap(row)}</td>
+                  <td><code>{row.primary_failure_mode ?? "-"}</code></td>
                 </tr>
               ))}
             </tbody>
@@ -159,72 +82,104 @@ arena audit-report runs/ --output docs/reports/audit-v1-results.md`}
         </div>
       </section>
 
-      <section className="grid two-columns">
-        <div className="panel">
-          <h3>Detection vs validation gap</h3>
-          {report.gaps.length === 0 ? (
-            <p>No runs exceeded the configured gap threshold.</p>
-          ) : (
-            <ul>
-              {report.gaps.map((item) => (
-                <li key={item.run_id}>
-                  <code>{item.reviewer}:{item.model}</code> ({item.mode}): detection {item.detection_f_beta.toFixed(3)}, validated {item.validated_f_beta.toFixed(3)}, gap {item.gap.toFixed(3)}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-        <div className="panel">
-          <h3>Failure mode breakdown</h3>
-          {Object.keys(report.failure_modes).length === 0 ? (
-            <p>No failure reasons recorded.</p>
-          ) : (
-            <ul>
-              {Object.entries(report.failure_modes).map(([reason, count]) => (
-                <li key={reason}><code>{reason}</code>: {count}</li>
-              ))}
-            </ul>
-          )}
-        </div>
+      <section className="report-section panel">
+        <h2>Failure modes</h2>
+        <FailureReasonChart counts={report.failure_modes} />
       </section>
 
-      <section className="panel">
-        <h3>Case studies</h3>
+      <section className="report-section">
+        <h2>Case studies</h2>
         {report.case_studies.length === 0 ? (
-          <p>No failing case studies were available in the generated report.</p>
+          <p className="empty-inline">No failing case evidence appears in this generated report.</p>
         ) : (
-          report.case_studies.map((study) => (
-            <article className="case-study" key={`${study.case_id}-${study.reviewer}`}>
-              <h4>{study.case_id}</h4>
-              <p><strong>{study.reviewer}:{study.model}</strong></p>
-              {study.finding_summary ? <p>{study.finding_summary}</p> : null}
-              <p>Failure reasons: {study.failure_reasons.join(", ")}</p>
-              {study.validator_evidence.length > 0 ? (
-                <ul>
-                  {study.validator_evidence.map((item) => (
-                    <li key={item.name}>{item.name}: {item.message}</li>
-                  ))}
-                </ul>
-              ) : null}
-            </article>
-          ))
+          <div className="case-studies">
+            {report.case_studies.slice(0, 3).map((study) => (
+              <article className="panel case-study" key={`${study.case_id}-${study.reviewer}-${study.model}`}>
+                <h3><code>{study.case_id}</code></h3>
+                <p className="section-caption">Reviewer: <code>{displayReviewer(study)}</code></p>
+                <p><strong>Detected:</strong> {study.finding_summary || "No finding summary recorded."}</p>
+                <p><strong>Why validation failed:</strong> <code>{study.failure_reasons.join(", ")}</code></p>
+                {study.validator_evidence.map((evidence) => (
+                  <p key={evidence.name}><strong>Evidence:</strong> {evidence.name}: {evidence.message}</p>
+                ))}
+                {study.test_stderr_tail ? <p><strong>Test evidence:</strong> <code>{study.test_stderr_tail}</code></p> : null}
+              </article>
+            ))}
+          </div>
         )}
       </section>
 
-      <section className="grid two-columns">
+      <section className="report-section report-two-columns">
         <div className="panel">
-          <h3>Reproducibility</h3>
-          <pre className="code-block">{report.reproducibility_commands.join("\n")}</pre>
+          <h2>Reproduce</h2>
+          <CodeBlock compact>{report.reproducibility_commands.join("\n")}</CodeBlock>
         </div>
         <div className="panel">
-          <h3>Limitations</h3>
-          <ul>
-            {report.limitations.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
+          <h2>Limitations</h2>
+          <ul className="list">
+            {report.limitations.map((item) => <li key={item}>{item}</li>)}
           </ul>
         </div>
       </section>
     </>
   );
+}
+
+function ReportFact({ term, value, code = false }: { term: string; value: string; code?: boolean }) {
+  return (
+    <div className="report-fact">
+      <dt>{term}</dt>
+      <dd>{code ? <code>{value}</code> : value}</dd>
+    </div>
+  );
+}
+
+function ReviewerTable({ rows }: { rows: AuditReviewerRow[] }) {
+  return (
+    <div className="table-scroll">
+      <table className="data-table dense-table">
+        <thead>
+          <tr>
+            <th>Reviewer</th>
+            <th>Model</th>
+            <th>Detection F-beta</th>
+            <th>Validated F-beta</th>
+            <th>Deterministic Pass Rate</th>
+            <th>Patch Apply Rate</th>
+            <th>Test Pass Rate</th>
+            <th>Structural Pass Rate</th>
+            <th>False Positives / Case</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={`${row.reviewer}-${row.model}-${row.mode}`}>
+              <td><code>{displayReviewer(row)}</code></td>
+              <td>{row.model || "-"}</td>
+              <td>{metric(row.detection_f_beta)}</td>
+              <td className="strong-metric">{metric(row.validated_f_beta)}</td>
+              <td>{rate(row.deterministic_pass_rate)}</td>
+              <td>{rate(row.patch_apply_rate)}</td>
+              <td>{rate(row.test_pass_rate)}</td>
+              <td>{rate(row.structural_pass_rate)}</td>
+              <td>{metric(row.false_positives_per_case)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function rate(value: number | null) {
+  return value == null ? "-" : `${(value * 100).toFixed(1)}%`;
+}
+
+function metric(value: number | null) {
+  return value == null ? "-" : value.toFixed(3);
+}
+
+function gap(row: AuditReviewerRow) {
+  if (row.detection_f_beta == null || row.validated_f_beta == null) return "-";
+  return (row.detection_f_beta - row.validated_f_beta).toFixed(3);
 }

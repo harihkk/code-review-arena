@@ -4,8 +4,8 @@ import type { ReactNode } from "react";
 import { AppShell } from "../components/AppShell";
 
 export const metadata: Metadata = {
-  title: "CodeReview Arena",
-  description: "Local, execution-backed audits for AI code reviewers (code-review-arena).",
+  title: "Code Review Arena",
+  description: "Execution-backed benchmark for AI code-review agents.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

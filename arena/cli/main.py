@@ -1,4 +1,4 @@
-"""Command-line application for CodeReview Arena."""
+"""Command-line application for Code Review Arena."""
 
 from pathlib import Path
 from typing import Literal

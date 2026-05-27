@@ -28,6 +28,19 @@ def test_api_health_and_cases():
     assert detail["ground_truth"]["primary_bug"]["files"][0]["path"] == "app/routes/admin.py"
 
 
+def test_api_can_browse_audit_pack_reference_patches():
+    client = TestClient(server_app)
+    cases = client.get("/cases", params={"benchmark_set": "audit_v1"}).json()
+    assert len(cases) == 10
+    assert all(case["benchmark_set"] == "audit_v1" for case in cases)
+    detail = client.get(
+        "/cases/security_fastapi_multitenant_admin_bypass_001",
+        params={"benchmark_set": "audit_v1"},
+    ).json()
+    assert detail["reference_patch"]
+    assert detail["benchmark_set"] == "audit_v1"
+
+
 def test_api_run_trace_contains_dashboard_evidence(monkeypatch, tmp_path):
     monkeypatch.setenv("ARENA_DB_PATH", str(tmp_path / "api.db"))
     monkeypatch.setenv("ARENA_RUNS_DIR", str(tmp_path / "runs"))
@@ -53,6 +66,27 @@ def test_api_run_trace_contains_dashboard_evidence(monkeypatch, tmp_path):
     assert leaderboard[0]["false_positives"] == 10
     assert leaderboard[0]["deterministic_metrics"]["detection_f_beta"] < 1
     assert leaderboard[0]["deterministic_metrics"]["validated_f_beta"] == 0
+
+
+def test_api_audit_trace_uses_the_runs_benchmark_pack(monkeypatch, tmp_path):
+    monkeypatch.setenv("ARENA_DB_PATH", str(tmp_path / "audit-api.db"))
+    monkeypatch.setenv("ARENA_RUNS_DIR", str(tmp_path / "audit-runs"))
+    client = TestClient(server_app)
+    created = client.post(
+        "/runs",
+        json={
+            "benchmark_set": "benchmark_sets/audit_v1",
+            "reviewer": "reference-patch",
+            "mode": "full",
+            "allow_local_execution": True,
+        },
+    )
+    assert created.status_code == 200
+    run_id = created.json()["run_id"]
+    trace = client.get(f"/runs/{run_id}/cases/security_fastapi_multitenant_admin_bypass_001").json()
+    assert "tenant_admin" in trace["diff"]
+    assert trace["ground_truth"]["primary_bug"]["summary"]
+    assert trace["deterministic_pass"] is True
 
 
 def test_cli_leaderboard_supports_validated_metric(monkeypatch, tmp_path):

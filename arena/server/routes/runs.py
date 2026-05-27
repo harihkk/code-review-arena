@@ -1,8 +1,10 @@
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException
 
 from arena.benchmark.benchmark_runner import run_benchmark
 from arena.benchmark.case_loader import build_context, load_cases
-from arena.core.config import DEFAULT_BENCHMARK_SET, database_path
+from arena.core.config import database_path
 from arena.core.registry import create_reviewer
 from arena.server.schemas import CreateRunRequest
 from arena.storage.repository import RunRepository
@@ -42,7 +44,7 @@ def run_case_detail(run_id: str, case_id: str) -> dict[str, object]:
         raise HTTPException(status_code=404, detail="Run not found")
     for result in run.case_results:
         if result.case_id == case_id:
-            for case in load_cases(DEFAULT_BENCHMARK_SET):
+            for case in load_cases(Path("benchmark_sets") / run.benchmark_set):
                 if case.id == case_id:
                     context = build_context(case)
                     return {

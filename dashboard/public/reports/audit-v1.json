@@ -1,13 +1,16 @@
 {
-  "title": "Detection Is Not Validation: Audit v1 Results",
-  "generated_at": "2026-05-25T23:23:52.028128+00:00",
+  "title": "Detection Is Not Validation: Audit Pack v1 Results",
+  "generated_at": "2026-05-26T05:37:43.217512+00:00",
   "empty": false,
   "summary": {
     "benchmark_pack": "audit_v1",
-    "run_count": 3,
+    "run_count": 7,
     "case_count": 10,
     "reviewers_tested": [
+      "mock:bad_patch",
       "mock:keyword_gamer",
+      "mock:malformed_patch",
+      "mock:perfect_patch",
       "reference-patch"
     ],
     "biggest_detection_validation_gap": {
@@ -20,7 +23,31 @@
       "reviewer": "reference-patch",
       "model": "",
       "mode": "full",
+      "detection_precision": 1.0,
+      "detection_recall": 1.0,
       "detection_f_beta": 1.0,
+      "validated_precision": 1.0,
+      "validated_recall": 1.0,
+      "validated_f_beta": 1.0,
+      "deterministic_pass_rate": 1.0,
+      "patch_apply_rate": 1.0,
+      "test_pass_rate": 1.0,
+      "structural_pass_rate": 1.0,
+      "false_positives_per_case": 0.0,
+      "cost_per_validated_fix": 0.0,
+      "latency_per_case_ms": 0.1,
+      "run_id": "2026-05-26_01-17-32",
+      "primary_failure_mode": null
+    },
+    {
+      "reviewer": "mock",
+      "model": "perfect_patch",
+      "mode": "full",
+      "detection_precision": 1.0,
+      "detection_recall": 1.0,
+      "detection_f_beta": 1.0,
+      "validated_precision": 1.0,
+      "validated_recall": 1.0,
       "validated_f_beta": 1.0,
       "deterministic_pass_rate": 1.0,
       "patch_apply_rate": 1.0,
@@ -29,13 +56,18 @@
       "false_positives_per_case": 0.0,
       "cost_per_validated_fix": 0.0,
       "latency_per_case_ms": 0.0,
-      "run_id": "2026-05-25_19-22-05"
+      "run_id": "2026-05-26_00-34-06",
+      "primary_failure_mode": null
     },
     {
       "reviewer": "mock",
       "model": "keyword_gamer",
       "mode": "full",
+      "detection_precision": 1.0,
+      "detection_recall": 1.0,
       "detection_f_beta": 1.0,
+      "validated_precision": 0.0,
+      "validated_recall": 0.0,
       "validated_f_beta": 0.0,
       "deterministic_pass_rate": 0.0,
       "patch_apply_rate": 1.0,
@@ -44,7 +76,48 @@
       "false_positives_per_case": 0.0,
       "cost_per_validated_fix": null,
       "latency_per_case_ms": 0.0,
-      "run_id": "2026-05-25_19-23-47"
+      "run_id": "2026-05-26_01-17-39",
+      "primary_failure_mode": "tests_failed"
+    },
+    {
+      "reviewer": "mock",
+      "model": "bad_patch",
+      "mode": "full",
+      "detection_precision": 1.0,
+      "detection_recall": 1.0,
+      "detection_f_beta": 1.0,
+      "validated_precision": 0.0,
+      "validated_recall": 0.0,
+      "validated_f_beta": 0.0,
+      "deterministic_pass_rate": 0.0,
+      "patch_apply_rate": 1.0,
+      "test_pass_rate": 0.0,
+      "structural_pass_rate": 0.1,
+      "false_positives_per_case": 0.0,
+      "cost_per_validated_fix": null,
+      "latency_per_case_ms": 0.0,
+      "run_id": "2026-05-26_00-34-14",
+      "primary_failure_mode": "tests_failed"
+    },
+    {
+      "reviewer": "mock",
+      "model": "malformed_patch",
+      "mode": "full",
+      "detection_precision": 1.0,
+      "detection_recall": 1.0,
+      "detection_f_beta": 1.0,
+      "validated_precision": 0.0,
+      "validated_recall": 0.0,
+      "validated_f_beta": 0.0,
+      "deterministic_pass_rate": 0.0,
+      "patch_apply_rate": 0.0,
+      "test_pass_rate": null,
+      "structural_pass_rate": null,
+      "false_positives_per_case": 0.0,
+      "cost_per_validated_fix": null,
+      "latency_per_case_ms": 0.0,
+      "run_id": "2026-05-26_00-34-18",
+      "primary_failure_mode": "patch_apply_failed"
     }
   ],
   "gaps": [
@@ -55,12 +128,31 @@
       "detection_f_beta": 1.0,
       "validated_f_beta": 0.0,
       "gap": 1.0,
-      "run_id": "2026-05-25_19-23-47"
+      "run_id": "2026-05-26_01-17-39"
+    },
+    {
+      "reviewer": "mock",
+      "model": "bad_patch",
+      "mode": "full",
+      "detection_f_beta": 1.0,
+      "validated_f_beta": 0.0,
+      "gap": 1.0,
+      "run_id": "2026-05-26_00-34-14"
+    },
+    {
+      "reviewer": "mock",
+      "model": "malformed_patch",
+      "mode": "full",
+      "detection_f_beta": 1.0,
+      "validated_f_beta": 0.0,
+      "gap": 1.0,
+      "run_id": "2026-05-26_00-34-18"
     }
   ],
   "failure_modes": {
-    "tests_failed": 10,
-    "structural_validation_failed": 5
+    "tests_failed": 30,
+    "structural_validation_failed": 24,
+    "patch_apply_failed": 10
   },
   "case_studies": [
     {
@@ -119,7 +211,8 @@
   ],
   "reproducibility_commands": [
     "arena validate benchmark_sets/audit_v1",
-    "arena run benchmark_sets/audit_v1 --reviewer mock:perfect_patch --mode full --allow-local-execution",
+    "arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution",
+    "arena run benchmark_sets/audit_v1 --reviewer mock:keyword_gamer --mode full --allow-local-execution",
     "arena leaderboard runs/ --metric validated_f_beta --beta 1.0",
     "arena audit-report runs/ --output docs/reports/audit-v1-results.md"
   ],

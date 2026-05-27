@@ -176,6 +176,7 @@ class RunRepository:
                 "reviewer": run.reviewer,
                 "model": run.model or "",
                 "mode": run.mode,
+                "benchmark_set": run.benchmark_set,
                 "score": run.total_score,
                 "bugs_found": run.bugs_found,
                 "case_count": run.case_count,

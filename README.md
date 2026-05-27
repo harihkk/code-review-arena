@@ -1,76 +1,72 @@
-# CodeReview Arena
+# Code Review Arena
 
-Local, execution-backed audits for AI code reviewers.
+Execution-backed benchmark for AI code-review agents.
 
 ## Overview
 
-CodeReview Arena is a benchmark harness for evaluating AI code-review agents on seeded pull-request bugs. It checks whether a reviewer can detect the bug, localize it, produce a patch, apply that patch, pass tests, and satisfy structural validators.
+Code Review Arena evaluates whether review agents can detect seeded pull-request bugs
+and produce patches that pass deterministic validation. It reports detection and
+validation separately so a plausible finding is not confused with a working fix.
 
-The project separates two ideas that are often mixed together:
+The local dashboard presents leaderboard results, benchmark cases, methodology, run
+traces, and generated Audit Pack v1 reports.
 
-- `detection_f_beta`: whether the reviewer found and localized the bug
-- `validated_f_beta`: whether the reviewer produced a fix that passed deterministic validation
+## Why detection is not validation
 
-A reviewer can describe the right issue and still fail validation if the patch is missing, malformed, fails tests, or violates structural checks.
+`detection_f_beta` records whether the reviewer found and localized the seeded defect.
+`validated_f_beta` records whether the finding also produced a patch that applied,
+passed required tests, and satisfied required structural validators.
 
-## Why this exists
-
-Most code-review demos focus on comments. CodeReview Arena focuses on outcomes. It is designed to show the gap between a plausible review and a validated fix.
-
-It is not meant to replace large public benchmarks. It is a local audit harness for failure-mode testing, prompt regression checks, and private reviewer evaluation.
-
-## What it evaluates
-
-- Bug detection
-- File and line localization
-- Patch generation
-- Patch application
-- Regression tests
-- Structural validators
-- False positives
-- Cost and latency
-- Detection versus validation gap
+A reviewer can score well on detection and still produce no validated fixes.
 
 ## Benchmark packs
 
-### benchmark_sets/v1
+| Pack | Cases | Purpose | Primary validation |
+|---|---:|---|---|
+| `benchmark_sets/v1` | 10 | Baseline harness cases | scoring and validation |
+| `benchmark_sets/audit_v1` | 10 | Patch-required audit cases | patch, tests, and validators |
 
-Baseline pack with 10 seeded pull-request bugs across backend, frontend, distributed systems, API compatibility, SQL, and RAG workflows.
+## Audit Pack v1
 
-### benchmark_sets/audit_v1
-
-Harder audit pack with 10 patch-required cases:
-
-| Case | Area | Main failure |
-|---|---|---|
-| security_fastapi_multitenant_admin_bypass_001 | Security | Missing tenant-scoped admin authorization |
-| distributed_kafka_duplicate_event_001 | Distributed systems | Duplicate event mutates state twice |
-| rag_fabricated_citation_001 | RAG | Generated citations are not constrained to retrieved sources |
-| async_balance_race_001 | Concurrency | Concurrent balance updates lose writes |
-| idempotency_key_tenant_scope_001 | Reliability | Idempotency keys are not tenant-scoped |
-| security_sql_join_ownership_leak_001 | Security | Query drops organization ownership filter |
-| security_jwt_audience_validation_001 | Security | JWT verifier skips audience and issuer checks |
-| distributed_out_of_order_event_001 | Distributed systems | Stale events overwrite newer state |
-| api_pagination_cursor_skip_001 | API correctness | Cursor pagination skips or duplicates records |
-| rag_prompt_injection_policy_override_001 | RAG safety | Retrieved text is merged into trusted instructions |
-
-Each audit_v1 case includes a static `reference.patch` file. See [docs/audit-pack-v1.md](docs/audit-pack-v1.md).
-
-## Reviewer baselines
-
-CodeReview Arena includes deterministic reviewer modes for testing the harness:
-
-| Reviewer | Purpose |
+| Category | Seeded bug |
 |---|---|
-| mock:perfect_patch | Happy-path mock that produces valid fixes |
-| reference-patch | Reads static `reference.patch` files from each case |
-| mock:keyword_gamer | Produces plausible keyword-rich reviews that fail validation |
-| mock:bad_patch | Detects issues but produces bad fixes |
-| mock:detects_no_patch | Detects issues but provides no patch |
-| mock:malformed_patch | Produces invalid patch output |
-| custom-command | Runs an external reviewer CLI through a safe subprocess adapter |
+| Security | FastAPI tenant admin bypass |
+| Security | SQL ownership leak |
+| Security | JWT audience and issuer validation |
+| Distributed systems | Kafka duplicate event |
+| Distributed systems | Out-of-order event |
+| RAG safety | Fabricated citation |
+| RAG safety | Prompt injection policy override |
+| Concurrency | Async race |
+| Reliability | Idempotency tenant scope |
+| API correctness | Pagination cursor bug |
 
-Optional provider adapters (`openai`, `anthropic`, `gemini`, `ollama`) require API credentials. They are not required for local harness checks.
+## Metrics
+
+| Metric | Meaning |
+|---|---|
+| `detection_f_beta` | Found and localized the seeded bug |
+| `validated_f_beta` | Found a bug and produced a deterministically validated fix |
+| `patch_apply_rate` | Fraction of required patches that applied cleanly |
+| `test_pass_rate` | Fraction of required regression-test executions that passed |
+| `structural_pass_rate` | Fraction of required structural validator checks that passed |
+| `false_positives_per_case` | Unsupported findings per evaluated case |
+
+`validated_f_beta` is the primary metric for full-mode audit runs.
+
+## Baselines
+
+| Reviewer | Role |
+|---|---|
+| `reference-patch` | Loads committed known-good `reference.patch` artifacts |
+| `mock:perfect_patch` | Deterministic harness success control |
+| `mock:keyword_gamer` | Detection-only adversarial control |
+| `mock:bad_patch` | Detects bugs while supplying failing fixes |
+| `mock:detects_no_patch` | Detects bugs without patch output |
+| `mock:malformed_patch` | Supplies invalid patch output |
+| `custom-command` | Invokes a local reviewer command using structured input and output |
+
+Reference and mock rows are deterministic controls, not external model results.
 
 ## Quickstart
 
@@ -80,67 +76,47 @@ Python 3.11 or newer is required.
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
-make test
-arena validate benchmark_sets/v1
-arena run benchmark_sets/v1 --reviewer mock:perfect_patch --mode full --allow-local-execution
+arena validate benchmark_sets/audit_v1
+```
+
+## Run a benchmark
+
+```bash
+arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
+arena run benchmark_sets/audit_v1 --reviewer mock:keyword_gamer --mode full --allow-local-execution
 arena leaderboard runs/ --metric validated_f_beta --beta 1.0
 ```
 
-`--allow-local-execution` opts into fixture test commands inside isolated run workspaces. It is disabled by default.
+`--allow-local-execution` opts into fixture-owned test commands in copied run
+workspaces. Use it only with fixtures you trust.
 
-### Audit pack commands
+## Generate report
 
 ```bash
-arena validate benchmark_sets/audit_v1
-arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
-arena run benchmark_sets/audit_v1 --reviewer mock:keyword_gamer --mode full --allow-local-execution
 arena audit-report runs/ --output docs/reports/audit-v1-results.md
 ```
 
-Regenerate `docs/reports/audit-v1-results.md` after local runs. That file is gitignored. The dashboard sample at `dashboard/public/reports/audit-v1.json` is checked in for the static audit report page.
+This command also writes the JSON snapshot consumed by `/reports/audit-v1`.
 
-## How it works
-
-```mermaid
-flowchart LR
-    P["Seeded pull request"] --> R["Reviewer"]
-    R --> J["JSON findings and suggested patch"]
-    J --> W["Isolated workspace copy"]
-    W --> A["Apply unified diff"]
-    A --> T["Run required tests"]
-    T --> V["Run structural validators"]
-    V --> S["Validated outcome metrics"]
-```
-
-Every case contains a `before/` tree, a buggy `after/` tree, `pr.diff`, `case.yaml` metadata, and optional regression tests. Ground truth is not included in reviewer prompts. Patches and tests run only in copied run workspaces.
-
-## Metrics
-
-For full and patch mode, `validated_f_beta` is the primary leaderboard metric. `detection_f_beta` measures localization only. The CLI name `f_beta` aliases `detection_f_beta` for backward compatibility.
-
-See [docs/metrics.md](docs/metrics.md).
-
-## Dashboard and API
+## Dashboard
 
 ```bash
-docker compose up --build
+arena serve
+cd dashboard
+npm install
+npm run dev
 ```
 
-Open `http://localhost:3000` for the leaderboard, run traces, case catalog, and documentation pages. The API listens on `http://localhost:8000`.
+Open `http://localhost:3000`. The primary pages are `/leaderboard`, `/cases`,
+`/reports/audit-v1`, `/methodology`, and `/docs`.
 
-```bash
-arena serve --host 0.0.0.0 --port 8000
-```
+## Limitations
 
-Copy `.env.example` to `.env` when using optional provider credentials. Do not commit `.env`.
-
-## Documentation
-
-- [docs/audit-pack-v1.md](docs/audit-pack-v1.md)
-- [docs/patch-validation.md](docs/patch-validation.md)
-- [docs/validators.md](docs/validators.md)
-- [docs/reviewer-interface.md](docs/reviewer-interface.md)
-- [docs/adding-cases.md](docs/adding-cases.md)
+- `audit_v1` is curated and small.
+- Structural validators are hand-authored and may reject alternate valid repairs.
+- Passing tests supplies execution evidence, not proof of complete correctness.
+- Valid fixes can fail when a validator is intentionally narrow.
+- Code Review Arena is a local audit harness, not a large-scale public adoption benchmark.
 
 ## Development
 
@@ -148,18 +124,9 @@ Copy `.env.example` to `.env` when using optional provider credentials. Do not c
 make test
 make lint
 make typecheck
-cd dashboard && npm install && npm run build
+cd dashboard && npm run build
 ```
-
-Python package name: `codereview-arena`. CLI entry point: `arena`. GitHub repository: `code-review-arena`.
-
-## Limitations
-
-- Curated, small benchmark packs
-- Structural validators may reject alternate valid repairs
-- Passing tests is evidence of repair behavior, not full production correctness
-- Intended for local reproducibility and private audits, not large-scale public leaderboard comparisons
 
 ## License
 
-MIT. See [pyproject.toml](pyproject.toml).
+MIT. See [LICENSE](LICENSE).

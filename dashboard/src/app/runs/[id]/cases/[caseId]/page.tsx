@@ -24,10 +24,10 @@ export default async function TracePage({ params }: { params: Promise<{ id: stri
       <section className="status-row panel">
         <Stage label="Detection" passed={result.bug_found} />
         <Stage label="Localization" passed={result.correct_file && result.correct_line} />
-        <Stage label="Patch" passed={result.patch_applied} applicable={result.patch_provided} skippedLabel="No patch" />
+        <Stage label="Patch Applied" passed={result.patch_applied} applicable={result.patch_provided} skippedLabel="No patch" />
         <Stage label="Tests" passed={result.tests_passed} applicable={result.tests_ran} />
         <Stage label="Validators" passed={result.validators_passed} applicable={result.validators_run.length > 0} />
-        <Stage label="Outcome" passed={result.deterministic_pass} applicable={result.deterministic_pass != null} />
+        <Stage label="Deterministic Outcome" passed={result.deterministic_pass} applicable={result.deterministic_pass != null} />
       </section>
       <div className="trace-grid">
         <section className="panel trace-diff">
@@ -73,6 +73,7 @@ export default async function TracePage({ params }: { params: Promise<{ id: stri
         </section>
         <section className="panel full-width outcome-panel">
           <h2>Final outcome</h2>
+          {result.failure_reasons.length > 0 ? <p className="callout failure">This case failed validation. The evidence below identifies the first repair requirements that were not satisfied.</p> : null}
           <FailureReasonList reasons={result.failure_reasons} />
         </section>
         <section className="panel full-width">

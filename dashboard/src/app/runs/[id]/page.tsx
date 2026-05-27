@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { FailureReasonList } from "../../../components/FailureReasonList";
+import { FailureReasonChart } from "../../../components/FailureReasonChart";
 import { MetricCard } from "../../../components/MetricCard";
 import { PageHeader } from "../../../components/PageHeader";
 import { StatusBadge } from "../../../components/StatusBadge";
@@ -20,9 +21,13 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
         eyebrow={`${run.benchmark_set} / ${run.mode} / ${run.run_id}`}
         title={`${run.reviewer}:${run.model || "default"}`}
         description="A complete validation trace from seeded defect detection through patch execution and structural checks."
-        actions={<StatusBadge tone={metrics && metrics.validated_f_beta === 1 ? "success" : metrics ? "warning" : "neutral"}>{metrics && metrics.validated_f_beta === 1 ? "Validated" : metrics ? "Detected only - fix not validated" : "Review only"}</StatusBadge>}
+        actions={runBadge(run)}
       />
       <section className="run-meta panel">
+        <span><strong>Reviewer</strong>{run.reviewer}</span>
+        <span><strong>Model</strong>{run.model || "default"}</span>
+        <span><strong>Benchmark</strong>{run.benchmark_set}</span>
+        <span><strong>Mode</strong>{run.mode}</span>
         <span><strong>Completed</strong>{new Date(run.completed_at).toLocaleString()}</span>
         <span><strong>Duration</strong>{(run.total_latency_ms / 1000).toFixed(2)}s</span>
         <span><strong>Prompt version</strong>{run.metadata.prompt_version}</span>
@@ -31,7 +36,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
       {metrics ? (
         <>
           <section className="metrics-eight">
-            <MetricCard label="Validated F-beta" value={metrics.validated_f_beta.toFixed(3)} note={`beta=${metrics.beta}`} />
+            <MetricCard label="Validated F-beta" value={metrics.validated_f_beta.toFixed(3)} note={`beta=${metrics.beta}`} emphasis />
             <MetricCard label="Detection F-beta" value={metrics.detection_f_beta.toFixed(3)} />
             <MetricCard label="Deterministic Pass Rate" value={rate(metrics.deterministic_pass_rate)} />
             <MetricCard label="Patch Apply Rate" value={rate(metrics.patch_apply_rate)} />
@@ -47,11 +52,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
           <section className="grid two-columns section-space">
             <div className="panel">
               <h2>Failure reason breakdown</h2>
-              {reasonCounts.length ? (
-                <ul className="reason-list">
-                  {reasonCounts.map(([reason, count]) => <li key={reason}><code>{reason}</code><strong>{count}</strong></li>)}
-                </ul>
-              ) : <p className="pass-text">Every case passed deterministic validation.</p>}
+              <FailureReasonChart counts={Object.fromEntries(reasonCounts)} />
             </div>
             <div className="panel">
               <h2>Outcome interpretation</h2>
@@ -79,6 +80,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
               <th>Validators</th>
               <th>Outcome</th>
               <th>Failure Reasons</th>
+              <th>Evidence</th>
             </tr>
           </thead>
           <tbody>
@@ -94,6 +96,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
                 <td>{status(item.validators_passed, item.validators_run.length > 0)}</td>
                 <td>{status(item.deterministic_pass, item.deterministic_pass != null)}</td>
                 <td className="failure-cell">{item.failure_reasons.join(", ") || "-"}</td>
+                <td><Link href={`/runs/${run.run_id}/cases/${item.case_id}`}>View trace -&gt;</Link></td>
               </tr>
             ))}
           </tbody>
@@ -114,4 +117,14 @@ function rate(value: number | null) {
 
 function currency(value: number | null) {
   return value == null ? "-" : `$${value.toFixed(4)}`;
+}
+
+function runBadge(run: RunDetail) {
+  const metrics = run.deterministic_metrics;
+  if (!metrics) return <StatusBadge tone="neutral">Review only</StatusBadge>;
+  if (metrics.validated_f_beta === 1) return <StatusBadge tone="success">Validated</StatusBadge>;
+  if (metrics.detection_f_beta > metrics.validated_f_beta) {
+    return <StatusBadge tone="warning">Detected only - fix not validated</StatusBadge>;
+  }
+  return <StatusBadge tone="danger">Validation failed</StatusBadge>;
 }

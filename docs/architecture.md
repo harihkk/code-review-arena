@@ -1,6 +1,6 @@
 # Architecture
 
-CodeReview Arena is a backend-first evaluation harness. A benchmark fixture contains only
+Code Review Arena is a backend-first evaluation harness. A benchmark fixture contains only
 inputs visible to a reviewer plus separately loaded ground truth. `BenchmarkRunner` loads a
 fixture, calls a reviewer, and sends structured findings to both the review-quality scorer
 and, in full mode, the deterministic patch-validation pipeline.

@@ -3,15 +3,18 @@ import { PageHeader } from "../../components/PageHeader";
 import { CaseSummary, fetchJson } from "../../lib/api";
 
 export default async function Cases() {
-  const cases = await fetchJson<CaseSummary[]>("/cases").catch(() => []);
+  const [v1, auditV1] = await Promise.all([
+    fetchJson<CaseSummary[]>("/cases?benchmark_set=v1").catch(() => []),
+    fetchJson<CaseSummary[]>("/cases?benchmark_set=audit_v1").catch(() => []),
+  ]);
   return (
     <>
       <PageHeader
-        eyebrow="Benchmark set v1"
-        title="Seeded production bugs"
-        description="Ten curated pull requests covering security, correctness, performance, reliability, distributed systems, frontend behavior, API compatibility, and AI quality."
+        eyebrow="Dataset"
+        title="Benchmark cases"
+        description="Browse seeded pull-request bugs, execution requirements, and structural validation used by each benchmark pack."
       />
-      <CaseCatalog cases={cases} />
+      <CaseCatalog cases={[...auditV1, ...v1]} />
     </>
   );
 }
