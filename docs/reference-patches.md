@@ -1,9 +1,13 @@
 # Reference Patches
 
-Every `audit_v1` case includes a `reference.patch` file containing a canonical known-good
-fix for the buggy `after/` tree. The patch is stored as an inspectable unified diff and is
-expected to apply cleanly, pass required regression tests, and satisfy structural
-validators.
+Every case in both packs includes a `reference.patch` file containing a canonical
+known-good fix for the buggy `after/` tree. The patch is stored as an inspectable unified
+diff and is expected to apply cleanly, pass required regression tests, and satisfy
+structural validators.
+
+The v1 patches are derived from the canonical fixed sources by
+`scripts/generate_reference_patches.py` (idempotent; skips existing patches unless
+`--force`).
 
 `reference-patch` reads these static artifacts directly. It validates the benchmark
 fixtures and execution pipeline without inventing a reviewer result.
