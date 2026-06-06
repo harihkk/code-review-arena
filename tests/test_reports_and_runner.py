@@ -8,12 +8,29 @@ from arena.reports.html_report import render_html
 from arena.reports.json_report import read_json_report
 from arena.reports.leaderboard import leaderboard_rows
 from arena.reports.markdown_report import render_markdown
+from arena.reviewers.base import BaseReviewer
 from arena.reviewers.mock import MockReviewer
 
 
 @pytest.fixture
 def audit_benchmark_dir() -> Path:
     return Path("benchmark_sets/audit_v1")
+
+
+class _RaisesOnOneCase(BaseReviewer):
+    """Otherwise-perfect reviewer that raises on a single case id."""
+
+    name = "mock"
+    model = "raises_one"
+
+    def __init__(self, bad_case_id: str) -> None:
+        self._inner = MockReviewer("perfect_patch")
+        self._bad_case_id = bad_case_id
+
+    def review(self, context):  # type: ignore[no-untyped-def]
+        if context.case.id == self._bad_case_id:
+            raise RuntimeError("boom while reviewing")
+        return self._inner.review(context)
 
 
 def test_run_directory_reservation_never_reuses_an_existing_path(tmp_path):
@@ -183,6 +200,34 @@ def test_leaderboard_ranks_perfect_patch_above_keyword_gamer(audit_benchmark_dir
     detection = leaderboard_rows(tmp_path / "audit_runs", metric="detection_f_beta", beta=1.0)
     detection_by_model = {row["model"]: row["metric_value"] for row in detection}
     assert detection_by_model["keyword_gamer"] == 1
+
+
+def test_single_case_failure_does_not_abort_the_batch(audit_benchmark_dir, tmp_path):
+    bad_case_id = "security_jwt_audience_validation_001"
+    run = run_benchmark(
+        audit_benchmark_dir,
+        _RaisesOnOneCase(bad_case_id),
+        output_dir=tmp_path / "runs",
+        db_path=tmp_path / "arena.db",
+        mode="full",
+        allow_local_execution=True,
+    )
+    # The batch completes with every case represented, including the one that raised.
+    assert run.case_count == 10
+    assert (tmp_path / "runs" / run.run_id / "run.json").exists()
+
+    failed = next(item for item in run.case_results if item.case_id == bad_case_id)
+    assert failed.deterministic_pass is False
+    assert any(reason.startswith("case_execution_error") for reason in failed.failure_reasons)
+
+    # The other nine cases still scored normally.
+    healthy = [item for item in run.case_results if item.case_id != bad_case_id]
+    assert len(healthy) == 9
+    assert all(item.deterministic_pass for item in healthy)
+
+    metrics = run.deterministic_metrics
+    assert metrics is not None
+    assert metrics.deterministic_pass_rate == 0.9
 
 
 def test_audit_report_lists_keyword_gamer_as_detection_validation_gap(

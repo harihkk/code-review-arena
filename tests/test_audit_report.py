@@ -76,3 +76,38 @@ def test_audit_report_uses_real_run_json_only(tmp_path: Path):
     assert saved["title"].startswith("Detection Is Not Validation")
     assert "Limitations" in output.read_text(encoding="utf-8")
     assert payload["summary"]["run_count"] == 1
+
+
+def test_audit_report_json_matches_schema_and_markdown(tmp_path: Path):
+    from arena.core.config import REPORT_SCHEMA_VERSION
+    from arena.reports.report_schema import AuditReport
+
+    run = _sample_run("audit-run-1", validated=0.5, detection=1.0)
+    run_dir = tmp_path / "audit-run-1"
+    run_dir.mkdir()
+    write_json_report(run, run_dir / "run.json")
+
+    output = tmp_path / "audit.md"
+    json_path = tmp_path / "audit.json"
+    data = write_audit_report(tmp_path, output, json_path)
+
+    # The written JSON validates against the versioned contract.
+    saved = json.loads(json_path.read_text(encoding="utf-8"))
+    report = AuditReport.model_validate(saved)
+    assert report.schema_version == REPORT_SCHEMA_VERSION
+
+    # Markdown and JSON are rendered from one source, so the JSON's headline figure
+    # appears verbatim in the Markdown table.
+    markdown = output.read_text(encoding="utf-8")
+    assert f"{data['reviewers'][0]['validated_f_beta']:.3f}" in markdown
+    assert report.summary.reviewers_tested == data["summary"]["reviewers_tested"]
+
+
+def test_audit_report_schema_rejects_drift():
+    import pytest
+    from pydantic import ValidationError
+
+    from arena.reports.report_schema import AuditReport
+
+    with pytest.raises(ValidationError):
+        AuditReport.model_validate({"schema_version": "1.0", "unexpected": True})
