@@ -2,17 +2,33 @@ import { CodeBlock } from "../../../components/CodeBlock";
 import { FailureReasonChart } from "../../../components/FailureReasonChart";
 import { PageHeader } from "../../../components/PageHeader";
 import { StatusBadge } from "../../../components/StatusBadge";
-import { AuditReviewerRow, displayReviewer, loadAuditReport } from "../../../lib/auditReport";
+import { AuditReviewerRow, displayReviewer, readAuditReport } from "../../../lib/auditReport";
 
 export default function AuditV1ReportPage() {
-  const report = loadAuditReport();
+  const { report, error } = readAuditReport();
+
+  if (error) {
+    return (
+      <>
+        <PageHeader
+          eyebrow="Audit Pack v1"
+          title="Detection Is Not Validation"
+          description="A local execution-backed audit of code-review agents on 10 patch-required seeded bugs."
+        />
+        <section className="panel empty">
+          <h2>Report data could not be read</h2>
+          <p>{error}</p>
+        </section>
+      </>
+    );
+  }
 
   if (!report || report.empty) {
     return (
       <>
         <PageHeader
-          eyebrow="Audit Pack v1 report"
-          title="Detection Is Not Validation: Audit Pack v1"
+          eyebrow="Audit Pack v1"
+          title="Detection Is Not Validation"
           description="A local execution-backed audit of code-review agents on 10 patch-required seeded bugs."
         />
         <section className="panel empty">
@@ -28,8 +44,8 @@ arena audit-report runs/ --output docs/reports/audit-v1-results.md`}</CodeBlock>
   return (
     <>
       <PageHeader
-        eyebrow="Audit Pack v1 report"
-        title="Detection Is Not Validation: Audit Pack v1"
+        eyebrow="Audit Pack v1"
+        title="Detection Is Not Validation"
         description="A local execution-backed audit of code-review agents on 10 patch-required seeded bugs."
       />
 
@@ -38,9 +54,10 @@ arena audit-report runs/ --output docs/reports/audit-v1-results.md`}</CodeBlock>
         <dl className="report-summary">
           <ReportFact term="Cases" value={String(report.summary.case_count)} />
           <ReportFact term="Primary metric" value="validated_f_beta" code />
-          <ReportFact term="Baselines present" value={String(report.reviewers.length)} />
-          <ReportFact term="Generated at" value={new Date(report.generated_at).toLocaleString()} />
+          <ReportFact term="Validation" value="patch apply + tests + validators" />
+          <ReportFact term="Source" value="local run artifacts" />
         </dl>
+        <p className="section-caption">Generated {new Date(report.generated_at).toLocaleString()}</p>
       </section>
 
       <section className="report-section">
@@ -56,29 +73,18 @@ arena audit-report runs/ --output docs/reports/audit-v1-results.md`}</CodeBlock>
 
       <section className="report-section">
         <h2>Detection-validation gap</h2>
-        <div className="table-scroll">
-          <table className="data-table dense-table">
-            <thead>
-              <tr>
-                <th>Reviewer</th>
-                <th>Detection F-beta</th>
-                <th>Validated F-beta</th>
-                <th>Gap</th>
-                <th>Primary failure mode</th>
-              </tr>
-            </thead>
-            <tbody>
-              {report.reviewers.map((row) => (
-                <tr key={`${row.reviewer}-${row.model}-${row.mode}-gap`}>
-                  <td><code>{displayReviewer(row)}</code></td>
-                  <td>{metric(row.detection_f_beta)}</td>
-                  <td className="strong-metric">{metric(row.validated_f_beta)}</td>
-                  <td>{gap(row)}</td>
-                  <td><code>{row.primary_failure_mode ?? "-"}</code></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="gap-bars">
+          {report.reviewers.map((row) => (
+            <article key={`${row.reviewer}-${row.model}-${row.mode}-gap`}>
+              <div className="gap-row-head">
+                <strong><code>{displayReviewer(row)}</code></strong>
+                <span>Gap {gap(row)}</span>
+              </div>
+              <MetricBar label="Detection" value={row.detection_f_beta} />
+              <MetricBar label="Validation" value={row.validated_f_beta} accent />
+              <p>Primary failure mode: <code>{row.primary_failure_mode ?? "none"}</code></p>
+            </article>
+          ))}
         </div>
       </section>
 
@@ -167,6 +173,17 @@ function ReviewerTable({ rows }: { rows: AuditReviewerRow[] }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function MetricBar({ label, value, accent = false }: { label: string; value: number | null; accent?: boolean }) {
+  const percent = Math.max(0, Math.min(1, value ?? 0)) * 100;
+  return (
+    <div className={`report-bar ${accent ? "accent" : ""}`}>
+      <span>{label}</span>
+      <i><b style={{ width: `${percent}%` }} /></i>
+      <strong>{metric(value)}</strong>
     </div>
   );
 }

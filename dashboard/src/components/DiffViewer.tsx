@@ -1,3 +1,5 @@
+import { CodeBlock } from "./CodeBlock";
+
 export function DiffViewer({ diff }: { diff: string }) {
-  return <pre className="diff">{diff}</pre>;
+  return <CodeBlock label="Diff">{diff}</CodeBlock>;
 }

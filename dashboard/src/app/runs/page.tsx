@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { StatusBadge } from "../../components/StatusBadge";
 import { fetchJson, RunSummary } from "../../lib/api";
@@ -12,6 +13,15 @@ export default async function Runs() {
         title="Benchmark runs"
         description="Inspect detection, patch application, tests, structural validators, cost, and latency for every run."
       />
+      {runs.length === 0 ? (
+        <EmptyState
+          title="No runs to show"
+          message="Runs are read from the API. Start it with `arena serve`, then generate a run."
+          command={
+            "arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution"
+          }
+        />
+      ) : (
       <div className="table-scroll">
         <table className="data-table">
           <thead>
@@ -44,6 +54,7 @@ export default async function Runs() {
           </tbody>
         </table>
       </div>
+      )}
     </>
   );
 }

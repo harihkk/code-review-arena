@@ -1,26 +1,26 @@
 import { PageHeader } from "../../components/PageHeader";
 
-const steps = [
-  "Seeded PR",
-  "Reviewer",
-  "Structured finding",
-  "Suggested patch",
-  "Apply patch",
-  "Run tests",
-  "Run validators",
-  "Compute metrics",
-];
-
+const flow = ["Reviewer output", "Suggested patch", "Isolated workspace", "Tests", "Validators", "Metrics"];
 const sections = [
-  ["1. What is measured", "Code Review Arena records whether a reviewer identifies a seeded bug, localizes it, supplies a patch, and produces an execution-backed outcome."],
-  ["2. Detection vs validation", "detection_f_beta measures found and localized bugs. validated_f_beta measures detected bugs whose fixes pass required deterministic validation."],
-  ["3. Benchmark case design", "Cases are small pull-request fixtures with known failure behavior, ground truth, validation requirements, and regression evidence."],
-  ["4. Patch application", "Suggested unified diffs are applied to isolated copied workspaces. A patch that cannot apply cannot receive a validated outcome."],
-  ["5. Test execution", "Cases can require fixture-owned regression tests after patch application. Local execution is explicit and opt-in."],
-  ["6. Structural validators", "Hand-authored validators check repair properties that tests may not fully express, such as tenant scoping or event ordering guards."],
-  ["7. Baselines", "reference-patch and mock reviewers are deterministic controls used to exercise success and failure paths. They are not external model comparisons."],
-  ["8. Metrics", "The primary full-mode ranking metric is validated_f_beta. Reports also expose patch apply, test, structural pass, false-positive, cost, and latency measures."],
-  ["9. Limitations", "The audit pack is curated and small. Validators can be too narrow, and passing tests cannot establish every production property."],
+  ["1. What is measured", "A run records detection, localization, patch availability, patch application, tests, structural validation, false positives, cost, and latency."],
+  ["2. Detection vs validation", "Detection measures whether the seeded bug was found and localized. Validation measures whether the associated fix completed deterministic checks."],
+  ["3. Case design", "Cases are seeded pull-request fixtures with known failure behavior, expected files, execution requirements, and validation criteria."],
+  ["4. Reviewer-visible context", "Reviewer inputs include the pull-request diff and relevant files. Ground truth, validators, and reference patches are not sent to the reviewer."],
+  ["5. Patch application", "Suggested unified diffs are applied to copied run workspaces. A patch that cannot apply cleanly fails the validation path."],
+  ["6. Test execution", "Cases can require fixture-owned regression tests after patch application. Local execution is explicit and opt-in."],
+  ["7. Structural validators", "Validators check repair properties such as tenant scoping, idempotency, event ordering, citation grounding, and API contract behavior."],
+  ["8. Metrics", "The primary full-mode ranking metric is validated_f_beta. Supporting metrics expose detection, patch apply, test pass, validator pass, false positives, cost, and latency."],
+  ["9. Baselines", "Deterministic controls exercise known success paths, detection-only behavior, malformed patches, missing patches, and custom command integration."],
+  ["10. Limitations", "The benchmark is curated and small. Validators are hand-authored. Tests do not prove all correctness. Valid fixes may fail if validators are narrow."],
+];
+const baselines = [
+  ["reference-patch", "Reads committed known-good reference.patch files."],
+  ["mock:perfect_patch", "Harness success control."],
+  ["mock:keyword_gamer", "Detects bugs but does not produce validated fixes."],
+  ["mock:bad_patch", "Detects bugs while supplying failing fixes."],
+  ["mock:detects_no_patch", "Detects bugs without patch output."],
+  ["mock:malformed_patch", "Returns invalid patch output."],
+  ["custom-command", "Runs an external reviewer command through structured input and output."],
 ];
 
 export default function MethodologyPage() {
@@ -32,12 +32,12 @@ export default function MethodologyPage() {
         description="How Code Review Arena turns reviewer output into reproducible validation evidence."
       />
       <section className="panel method-pipeline">
-        <h2>Evaluation pipeline</h2>
+        <h2>Evaluation flow</h2>
         <div className="pipeline">
-          {steps.map((step, index) => (
-            <div className="pipeline-step" key={step}>
+          {flow.map((step, index) => (
+            <div className="pipeline-node" key={step}>
               <span>{String(index + 1).padStart(2, "0")}</span>
-              {step}
+              <strong>{step}</strong>
             </div>
           ))}
         </div>
@@ -50,11 +50,22 @@ export default function MethodologyPage() {
           </section>
         ))}
       </div>
+      <section className="panel section-space">
+        <h2>Baseline controls</h2>
+        <table className="data-table">
+          <thead><tr><th>Reviewer</th><th>Purpose</th></tr></thead>
+          <tbody>
+            {baselines.map(([name, purpose]) => (
+              <tr key={name}><td><code>{name}</code></td><td>{purpose}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
       <section className="panel callout section-space">
         <p>
-          Code Review Arena is a local audit harness. It is not a large-scale public adoption benchmark.
-          Large public benchmarks evaluate different things, often at broader scale. Code Review Arena
-          focuses on local execution-backed validation of patch outputs.
+          Code Review Arena is a local audit harness, not a large-scale public ranking.
+          Large public benchmarks evaluate different things, often at broader scale.
+          This project focuses on local execution-backed validation of patch outputs.
         </p>
       </section>
     </>

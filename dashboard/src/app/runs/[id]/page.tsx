@@ -96,7 +96,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
                 <td>{status(item.validators_passed, item.validators_run.length > 0)}</td>
                 <td>{status(item.deterministic_pass, item.deterministic_pass != null)}</td>
                 <td className="failure-cell">{item.failure_reasons.join(", ") || "-"}</td>
-                <td><Link href={`/runs/${run.run_id}/cases/${item.case_id}`}>View trace -&gt;</Link></td>
+                <td><Link href={`/runs/${run.run_id}/cases/${item.case_id}`}>View trace</Link></td>
               </tr>
             ))}
           </tbody>

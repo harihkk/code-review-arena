@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import type { DeterministicMetrics, LeaderboardRow } from "../lib/api";
+import { EmptyState } from "./EmptyState";
 import { StatusBadge } from "./StatusBadge";
 
 type Metric =
@@ -10,19 +11,23 @@ type Metric =
   | "detection_f_beta"
   | "deterministic_pass_rate"
   | "patch_apply_rate"
-  | "structural_pass_rate"
   | "test_pass_rate"
-  | "false_positives_per_case";
+  | "structural_pass_rate"
+  | "false_positives_per_case"
+  | "latency_per_case_ms";
 
 const metricOptions: Metric[] = [
   "validated_f_beta",
   "detection_f_beta",
   "deterministic_pass_rate",
   "patch_apply_rate",
-  "structural_pass_rate",
   "test_pass_rate",
+  "structural_pass_rate",
   "false_positives_per_case",
+  "latency_per_case_ms",
 ];
+const emptyCommand = `arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
+arena leaderboard runs/ --metric validated_f_beta --beta 1.0`;
 
 export function LeaderboardTable({ rows }: { rows: LeaderboardRow[] }) {
   const [metric, setMetric] = useState<Metric>("validated_f_beta");
@@ -33,30 +38,38 @@ export function LeaderboardTable({ rows }: { rows: LeaderboardRow[] }) {
       : (rows.find((row) => row.benchmark_set)?.benchmark_set ?? ""),
   );
   const [reviewer, setReviewer] = useState("");
+  const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query);
   const benchmarkOptions = Array.from(new Set(rows.map((row) => row.benchmark_set).filter((item): item is string => Boolean(item)))).sort();
   const reviewerOptions = Array.from(new Set(rows.map((row) => reviewerName(row)))).sort();
-  const ascending = metric === "false_positives_per_case";
+  const ascending = metric === "false_positives_per_case" || metric === "latency_per_case_ms";
   const sorted = useMemo(
     () => rows
-      .filter((row) => !row.benchmark_set || row.benchmark_set === benchmark)
+      .filter((row) => !benchmark || !row.benchmark_set || row.benchmark_set === benchmark)
       .filter((row) => !reviewer || reviewerName(row) === reviewer)
+      .filter((row) => !deferredQuery || `${reviewerName(row)} ${row.model} ${row.benchmark_set} ${row.run_id}`.toLowerCase().includes(deferredQuery.toLowerCase()))
       .sort((left, right) => {
-      const leftValue = value(left, metric, beta);
-      const rightValue = value(right, metric, beta);
-      if (leftValue == null) return rightValue == null ? 0 : 1;
-      if (rightValue == null) return -1;
-      const delta = leftValue - rightValue;
-      return ascending ? delta : -delta;
-    }),
-    [ascending, benchmark, beta, metric, reviewer, rows],
+        const leftValue = value(left, metric, beta);
+        const rightValue = value(right, metric, beta);
+        if (leftValue == null) return rightValue == null ? 0 : 1;
+        if (rightValue == null) return -1;
+        const delta = leftValue - rightValue;
+        return ascending ? delta : -delta;
+      }),
+    [ascending, benchmark, beta, deferredQuery, metric, reviewer, rows],
   );
-  if (!rows.length) return <div className="panel empty"><h2>No completed runs yet</h2><p>Run a benchmark locally to generate leaderboard results.</p></div>;
+
+  if (!rows.length) {
+    return <EmptyState title="No completed runs yet" message="Run a benchmark locally to generate leaderboard results." command={emptyCommand} />;
+  }
+
   return (
     <>
-      <div className="controls">
+      <div className="controls filter-bar">
         <label>
-          Benchmark set
+          Benchmark
           <select value={benchmark} onChange={(event) => setBenchmark(event.target.value)}>
+            <option value="">All</option>
             {benchmarkOptions.map((option) => <option value={option} key={option}>{option}</option>)}
           </select>
         </label>
@@ -81,58 +94,70 @@ export function LeaderboardTable({ rows }: { rows: LeaderboardRow[] }) {
             <option value={2}>2.0 recall</option>
           </select>
         </label>
-        <span className="control-note">Primary metric: <code>validated_f_beta</code></span>
+        <label>
+          Search
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Reviewer, model, run" />
+        </label>
       </div>
-      {!sorted.length ? <div className="panel empty">No recorded runs match these filters.</div> : <div className="table-scroll">
-        <table className="data-table leaderboard-table">
-          <thead>
-            <tr>
-              <th>Rank</th>
-              <th>Reviewer</th>
-              <th>Model</th>
-              <th>Benchmark</th>
-              <th>Mode</th>
-              <th className="numeric">Validated F-beta</th>
-              <th className="numeric">Detection F-beta</th>
-              <th className="numeric">Passes</th>
-              <th className="numeric">Patch Apply</th>
-              <th className="numeric">Tests</th>
-              <th className="numeric">Validators</th>
-              <th className="numeric">False Positives</th>
-              <th className="numeric">Latency</th>
-              <th>Status</th>
-              <th>Run</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((row, index) => {
-              const metrics = row.deterministic_metrics;
-              return (
-                <tr key={`${row.run_id}:${row.mode}`}>
-                  <td className="numeric">{index + 1}</td>
-                  <td>
-                    <strong>{reviewerName(row)}</strong>
-                  </td>
-                  <td>{row.model || "-"}</td>
-                  <td>{row.benchmark_set ?? "recorded run"}</td>
-                  <td>{row.mode}</td>
-                  <td className="numeric strong-metric">{formatRate(dynamicF(metrics, "validated", beta))}</td>
-                  <td className="numeric">{formatRate(dynamicF(metrics, "detection", beta))}</td>
-                  <td className="numeric">{row.deterministic_passes}/{row.case_count}</td>
-                  <td className="numeric">{formatRate(metrics?.patch_apply_rate)}</td>
-                  <td className="numeric">{formatRate(metrics?.test_pass_rate)}</td>
-                  <td className="numeric">{formatRate(metrics?.structural_pass_rate)}</td>
-                  <td className="numeric">{row.false_positives}</td>
-                  <td className="numeric">{(row.latency_ms / 1000).toFixed(2)}s</td>
-                  <td>{validationBadge(row)}</td>
-                  <td>{row.detail_available === false ? <Link href="/reports/audit-v1">Report</Link> : <Link href={`/runs/${row.run_id}`}>View</Link>}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>}
-      <p className="table-footnote">Sorted by <code>{metric}</code> with beta={beta.toFixed(1)}.</p>
+      {!sorted.length ? (
+        <EmptyState title="No matching runs" message="Adjust filters or generate a deterministic baseline." command={emptyCommand} />
+      ) : (
+        <div className="table-scroll">
+          <table className="data-table leaderboard-table">
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Reviewer</th>
+                <th>Model</th>
+                <th>Benchmark</th>
+                <th>Mode</th>
+                <th className={`numeric ${metric === "validated_f_beta" ? "selected-metric" : ""}`}>Validated F-beta</th>
+                <th className={`numeric ${metric === "detection_f_beta" ? "selected-metric" : ""}`}>Detection F-beta</th>
+                <th className="numeric">Passes</th>
+                <th className={`numeric ${metric === "patch_apply_rate" ? "selected-metric" : ""}`}>Patch Apply</th>
+                <th className={`numeric ${metric === "test_pass_rate" ? "selected-metric" : ""}`}>Tests</th>
+                <th className={`numeric ${metric === "structural_pass_rate" ? "selected-metric" : ""}`}>Validators</th>
+                <th className={`numeric ${metric === "false_positives_per_case" ? "selected-metric" : ""}`}>False Positives</th>
+                <th className={`numeric ${metric === "latency_per_case_ms" ? "selected-metric" : ""}`}>Latency</th>
+                <th>Status</th>
+                <th>Run</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((row, index) => {
+                const metrics = row.deterministic_metrics;
+                const validated = dynamicF(metrics, "validated", beta);
+                return (
+                  <tr key={`${row.run_id}:${row.mode}`}>
+                    <td className="numeric">{index + 1}</td>
+                    <td><strong>{reviewerName(row)}</strong></td>
+                    <td>{row.model || "-"}</td>
+                    <td><code>{row.benchmark_set ?? "recorded run"}</code></td>
+                    <td>{row.mode}</td>
+                    <td className="numeric strong-metric metric-cell">
+                      <span>{formatNumber(validated)}</span>
+                      <span className="metric-bar"><i style={{ width: `${Math.max(0, Math.min(1, validated ?? 0)) * 100}%` }} /></span>
+                    </td>
+                    <td className="numeric secondary-metric">{formatNumber(dynamicF(metrics, "detection", beta))}</td>
+                    <td className="numeric">{row.deterministic_passes}/{row.case_count}</td>
+                    <td className="numeric">{formatNumber(metrics?.patch_apply_rate)}</td>
+                    <td className="numeric">{formatNumber(metrics?.test_pass_rate)}</td>
+                    <td className="numeric">{formatNumber(metrics?.structural_pass_rate)}</td>
+                    <td className="numeric">{row.false_positives}</td>
+                    <td className="numeric">{formatLatency(metrics?.latency_per_case_ms ?? row.latency_ms / Math.max(1, row.case_count))}</td>
+                    <td>{validationBadge(row)}</td>
+                    <td>{row.detail_available === false ? <Link href="/reports/audit-v1">Report</Link> : <Link href={`/runs/${row.run_id}`}>View</Link>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="table-footnote">
+        <code>validated_f_beta</code> counts only cases that reached deterministic validation.
+        <code>detection_f_beta</code> only measures whether the seeded bug was found and localized.
+      </p>
     </>
   );
 }
@@ -150,23 +175,25 @@ function value(row: LeaderboardRow, metric: Metric, beta: number): number | null
   if (!metrics) return null;
   if (metric === "detection_f_beta") return dynamicF(metrics, "detection", beta) ?? 0;
   if (metric === "validated_f_beta") return dynamicF(metrics, "validated", beta) ?? 0;
+  if (metric === "latency_per_case_ms") return metrics.latency_per_case_ms;
   return metrics[metric];
 }
 
 function validationBadge(row: LeaderboardRow) {
   const metrics = row.deterministic_metrics;
   if (!metrics) return <StatusBadge tone="neutral">review only</StatusBadge>;
-  if (metrics.detection_f_beta > metrics.validated_f_beta) {
-    return <StatusBadge tone="warning">detected only</StatusBadge>;
-  }
-  if (metrics.validated_f_beta > 0 && row.false_positives === 0) {
-    return <StatusBadge tone="success">validated</StatusBadge>;
-  }
+  if ((metrics.patch_apply_rate ?? 1) === 0) return <StatusBadge tone="danger">patch failed</StatusBadge>;
+  if (metrics.detection_f_beta >= 0.8 && metrics.validated_f_beta <= 0.3) return <StatusBadge tone="warning">detected only</StatusBadge>;
+  if (metrics.validated_f_beta >= 0.8) return <StatusBadge tone="success">validated</StatusBadge>;
   return <StatusBadge tone="danger">not validated</StatusBadge>;
 }
 
-function formatRate(value: number | null | undefined) {
+function formatNumber(value: number | null | undefined) {
   return value == null ? "-" : value.toFixed(3);
+}
+
+function formatLatency(value: number | null | undefined) {
+  return value == null ? "-" : `${Math.round(value)}ms`;
 }
 
 function reviewerName(row: LeaderboardRow) {

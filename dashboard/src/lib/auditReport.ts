@@ -3,6 +3,10 @@ import path from "path";
 
 import type { LeaderboardRow } from "./api";
 
+// Must match arena.core.config.REPORT_SCHEMA_VERSION. The producer embeds this in
+// the JSON; a mismatch means the dashboard and the CLI are out of step.
+export const EXPECTED_REPORT_SCHEMA_VERSION = "1.0";
+
 export type AuditReviewerRow = {
   reviewer: string;
   model: string;
@@ -25,6 +29,7 @@ export type AuditReviewerRow = {
 };
 
 export type AuditReport = {
+  schema_version: string;
   generated_at: string;
   empty: boolean;
   summary: {
@@ -49,14 +54,44 @@ export type AuditReport = {
   limitations: string[];
 };
 
-export function loadAuditReport(): AuditReport | null {
-  const file = path.join(process.cwd(), "public", "reports", "audit-v1.json");
-  if (!fs.existsSync(file)) return null;
-  return JSON.parse(fs.readFileSync(file, "utf-8")) as AuditReport;
+export type AuditReportResult = {
+  report: AuditReport | null;
+  error: string | null;
+};
+
+const AUDIT_REPORT_FILE = path.join(process.cwd(), "public", "reports", "audit-v1.json");
+const REGENERATE_HINT = "Regenerate it with `arena audit-report runs/`.";
+
+/**
+ * Read the audit report, distinguishing "not generated yet" (report and error both
+ * null) from a real failure (error set). Callers that must not show stale or fake
+ * data render the error; fallback callers can ignore it and treat null as empty.
+ */
+export function readAuditReport(): AuditReportResult {
+  if (!fs.existsSync(AUDIT_REPORT_FILE)) {
+    return { report: null, error: null };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(AUDIT_REPORT_FILE, "utf-8"));
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    return { report: null, error: `audit-v1.json is not valid JSON (${detail}). ${REGENERATE_HINT}` };
+  }
+  const version = (parsed as { schema_version?: unknown }).schema_version;
+  if (version !== EXPECTED_REPORT_SCHEMA_VERSION) {
+    return {
+      report: null,
+      error:
+        `audit-v1.json schema_version ${JSON.stringify(version)} does not match the ` +
+        `expected ${JSON.stringify(EXPECTED_REPORT_SCHEMA_VERSION)}. ${REGENERATE_HINT}`,
+    };
+  }
+  return { report: parsed as AuditReport, error: null };
 }
 
 export function loadReportLeaderboardRows(): LeaderboardRow[] {
-  const report = loadAuditReport();
+  const report = readAuditReport().report;
   return (report?.reviewers ?? [])
     .filter((row) => row.detection_precision != null && row.detection_recall != null && row.validated_precision != null && row.validated_recall != null)
     .map((row) => ({

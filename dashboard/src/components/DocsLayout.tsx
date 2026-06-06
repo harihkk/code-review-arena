@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 
 const pages = [
@@ -14,11 +17,12 @@ const pages = [
 ];
 
 export function DocsLayout({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
   return (
     <div className="docs-layout">
       <aside className="panel docs-nav">
-        <Link className="docs-home" href="/docs">Documentation</Link>
-        {pages.map(([label, href]) => <Link href={href} key={href}>{label}</Link>)}
+        <Link className={`docs-home ${pathname === "/docs" ? "active" : ""}`} href="/docs">Documentation</Link>
+        {pages.map(([label, href]) => <Link className={pathname === href ? "active" : undefined} href={href} key={href}>{label}</Link>)}
       </aside>
       <article className="panel prose">{children}</article>
     </div>

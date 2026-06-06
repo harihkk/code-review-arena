@@ -1,13 +1,17 @@
 {
+  "schema_version": "1.0",
   "title": "Detection Is Not Validation: Audit Pack v1 Results",
-  "generated_at": "2026-05-26T05:37:43.217512+00:00",
+  "generated_at": "2026-06-06T19:17:17.006737+00:00",
   "empty": false,
   "summary": {
     "benchmark_pack": "audit_v1",
-    "run_count": 7,
+    "run_count": 12,
     "case_count": 10,
     "reviewers_tested": [
+      "custom-command:custom",
       "mock:bad_patch",
+      "mock:detects_no_patch",
+      "mock:false_positive_patch",
       "mock:keyword_gamer",
       "mock:malformed_patch",
       "mock:perfect_patch",
@@ -35,8 +39,8 @@
       "structural_pass_rate": 1.0,
       "false_positives_per_case": 0.0,
       "cost_per_validated_fix": 0.0,
-      "latency_per_case_ms": 0.1,
-      "run_id": "2026-05-26_01-17-32",
+      "latency_per_case_ms": 0.0,
+      "run_id": "2026-06-06_15-16-26",
       "primary_failure_mode": null
     },
     {
@@ -56,7 +60,7 @@
       "false_positives_per_case": 0.0,
       "cost_per_validated_fix": 0.0,
       "latency_per_case_ms": 0.0,
-      "run_id": "2026-05-26_00-34-06",
+      "run_id": "2026-06-06_14-33-36",
       "primary_failure_mode": null
     },
     {
@@ -76,7 +80,7 @@
       "false_positives_per_case": 0.0,
       "cost_per_validated_fix": null,
       "latency_per_case_ms": 0.0,
-      "run_id": "2026-05-26_01-17-39",
+      "run_id": "2026-06-06_15-16-35",
       "primary_failure_mode": "tests_failed"
     },
     {
@@ -96,7 +100,7 @@
       "false_positives_per_case": 0.0,
       "cost_per_validated_fix": null,
       "latency_per_case_ms": 0.0,
-      "run_id": "2026-05-26_00-34-14",
+      "run_id": "2026-06-06_15-16-40",
       "primary_failure_mode": "tests_failed"
     },
     {
@@ -116,8 +120,68 @@
       "false_positives_per_case": 0.0,
       "cost_per_validated_fix": null,
       "latency_per_case_ms": 0.0,
-      "run_id": "2026-05-26_00-34-18",
+      "run_id": "2026-06-06_14-33-50",
       "primary_failure_mode": "patch_apply_failed"
+    },
+    {
+      "reviewer": "mock",
+      "model": "detects_no_patch",
+      "mode": "full",
+      "detection_precision": 1.0,
+      "detection_recall": 1.0,
+      "detection_f_beta": 1.0,
+      "validated_precision": 0.0,
+      "validated_recall": 0.0,
+      "validated_f_beta": 0.0,
+      "deterministic_pass_rate": 0.0,
+      "patch_apply_rate": null,
+      "test_pass_rate": null,
+      "structural_pass_rate": null,
+      "false_positives_per_case": 0.0,
+      "cost_per_validated_fix": null,
+      "latency_per_case_ms": 0.0,
+      "run_id": "2026-06-06_14-33-54",
+      "primary_failure_mode": "patch_required_but_missing"
+    },
+    {
+      "reviewer": "mock",
+      "model": "false_positive_patch",
+      "mode": "full",
+      "detection_precision": 0.5,
+      "detection_recall": 1.0,
+      "detection_f_beta": 0.666667,
+      "validated_precision": 0.0,
+      "validated_recall": 0.0,
+      "validated_f_beta": 0.0,
+      "deterministic_pass_rate": 0.0,
+      "patch_apply_rate": 1.0,
+      "test_pass_rate": 1.0,
+      "structural_pass_rate": 1.0,
+      "false_positives_per_case": 1.0,
+      "cost_per_validated_fix": null,
+      "latency_per_case_ms": 0.0,
+      "run_id": "2026-06-06_14-33-56",
+      "primary_failure_mode": "false_positive"
+    },
+    {
+      "reviewer": "custom-command",
+      "model": "custom",
+      "mode": "full",
+      "detection_precision": 0.142857,
+      "detection_recall": 0.1,
+      "detection_f_beta": 0.117647,
+      "validated_precision": 0.0,
+      "validated_recall": 0.0,
+      "validated_f_beta": 0.0,
+      "deterministic_pass_rate": 0.0,
+      "patch_apply_rate": null,
+      "test_pass_rate": null,
+      "structural_pass_rate": null,
+      "false_positives_per_case": 0.6,
+      "cost_per_validated_fix": null,
+      "latency_per_case_ms": 26.6,
+      "run_id": "2026-06-06_14-36-07",
+      "primary_failure_mode": "patch_required_but_missing"
     }
   ],
   "gaps": [
@@ -128,7 +192,7 @@
       "detection_f_beta": 1.0,
       "validated_f_beta": 0.0,
       "gap": 1.0,
-      "run_id": "2026-05-26_01-17-39"
+      "run_id": "2026-06-06_15-16-35"
     },
     {
       "reviewer": "mock",
@@ -137,7 +201,7 @@
       "detection_f_beta": 1.0,
       "validated_f_beta": 0.0,
       "gap": 1.0,
-      "run_id": "2026-05-26_00-34-14"
+      "run_id": "2026-06-06_15-16-40"
     },
     {
       "reviewer": "mock",
@@ -146,66 +210,84 @@
       "detection_f_beta": 1.0,
       "validated_f_beta": 0.0,
       "gap": 1.0,
-      "run_id": "2026-05-26_00-34-18"
+      "run_id": "2026-06-06_14-33-50"
+    },
+    {
+      "reviewer": "mock",
+      "model": "detects_no_patch",
+      "mode": "full",
+      "detection_f_beta": 1.0,
+      "validated_f_beta": 0.0,
+      "gap": 1.0,
+      "run_id": "2026-06-06_14-33-54"
+    },
+    {
+      "reviewer": "mock",
+      "model": "false_positive_patch",
+      "mode": "full",
+      "detection_f_beta": 0.666667,
+      "validated_f_beta": 0.0,
+      "gap": 0.666667,
+      "run_id": "2026-06-06_14-33-56"
     }
   ],
   "failure_modes": {
-    "tests_failed": 30,
-    "structural_validation_failed": 24,
-    "patch_apply_failed": 10
+    "tests_failed": 50,
+    "structural_validation_failed": 44,
+    "patch_apply_failed": 30,
+    "patch_required_but_missing": 20,
+    "false_positive": 16,
+    "detection_failed": 6,
+    "localization_failed": 9
   },
   "case_studies": [
     {
       "case_id": "security_fastapi_multitenant_admin_bypass_001",
-      "reviewer": "mock",
-      "model": "keyword_gamer",
-      "finding_summary": "Tenant admin route does not verify tenant-scoped administrator privileges. In `app/routes/tenant_admin.py` (see also `app/auth.py`): authorization multi-tenant privilege escalation tenant admin role tenant_id. Structural validation context: tenant-scoped admin authorization, require_tenant_admin, tenant_id RBAC, citation validation, structural validator fastapi_tenant_admin_authorization. Recommended fix: Use require_tenant_admin and enforce tenant-scoped admin RBAC..",
+      "reviewer": "custom-command",
+      "model": "custom",
+      "finding_summary": "Reviewed security_fastapi_multitenant_admin_bypass_001 in app/auth.py.",
       "failure_reasons": [
+        "detection_failed",
+        "localization_failed",
+        "patch_required_but_missing",
+        "patch_apply_failed",
         "tests_failed",
-        "structural_validation_failed"
+        "structural_validation_failed",
+        "false_positive"
       ],
-      "validator_evidence": [
-        {
-          "name": "fastapi_tenant_admin_authorization",
-          "passed": false,
-          "message": "Tenant admin route still lacks tenant-scoped administrator enforcement."
-        }
-      ],
+      "validator_evidence": [],
       "test_stderr_tail": ""
     },
     {
       "case_id": "distributed_kafka_duplicate_event_001",
-      "reviewer": "mock",
-      "model": "keyword_gamer",
-      "finding_summary": "Duplicate Kafka events are no longer deduplicated before ledger mutation. In `consumer/payments.py` (see also `consumer/ledger.py`): idempotency duplicate event at-least-once delivery event_id duplicate credit kafka. Structural validation context: event_id idempotency duplicate at-least-once delivery, processed_event_ids lock, kafka consumer guard before ledger credit. Recommended fix: Persist processed_event_ids keyed by event_id before crediting..",
+      "reviewer": "custom-command",
+      "model": "custom",
+      "finding_summary": "Reviewed distributed_kafka_duplicate_event_001 in consumer/payments.py.",
       "failure_reasons": [
+        "localization_failed",
+        "patch_required_but_missing",
+        "patch_apply_failed",
         "tests_failed",
         "structural_validation_failed"
       ],
-      "validator_evidence": [
-        {
-          "name": "kafka_idempotency_guard",
-          "passed": false,
-          "message": "No complete check-then-record idempotency guard surrounds the mutation."
-        }
-      ],
+      "validator_evidence": [],
       "test_stderr_tail": ""
     },
     {
-      "case_id": "rag_fabricated_citation_001",
-      "reviewer": "mock",
-      "model": "keyword_gamer",
-      "finding_summary": "Generated citation IDs are not validated against retrieved context. In `rag/answer.py` (see also `rag/retriever.py`): citation validation retrieved context fabricated citation citation_ids valid_ids. Structural validation context: citation validation, retrieved_chunks, valid_ids grounding, audience of citations, reject fabricated citation_ids. Recommended fix: Validate citation_ids against valid_ids from retrieved_chunks..",
+      "case_id": "async_balance_race_001",
+      "reviewer": "custom-command",
+      "model": "custom",
+      "finding_summary": "Reviewed async_balance_race_001 in app/__init__.py.",
       "failure_reasons": [
-        "tests_failed"
+        "detection_failed",
+        "localization_failed",
+        "patch_required_but_missing",
+        "patch_apply_failed",
+        "tests_failed",
+        "structural_validation_failed",
+        "false_positive"
       ],
-      "validator_evidence": [
-        {
-          "name": "rag_citation_ids_validated",
-          "passed": true,
-          "message": "Generated citation IDs are constrained by retrieved sources."
-        }
-      ],
+      "validator_evidence": [],
       "test_stderr_tail": ""
     }
   ],

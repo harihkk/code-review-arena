@@ -1,11 +1,13 @@
 import type { ReactNode } from "react";
+import { Footer } from "./Footer";
 import { Navbar } from "./Navbar";
 
 export function AppShell({ children }: { children: ReactNode }) {
   return (
-    <main className="shell">
+    <>
       <Navbar />
-      {children}
-    </main>
+      <main className="shell">{children}</main>
+      <Footer />
+    </>
   );
 }

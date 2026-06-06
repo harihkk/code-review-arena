@@ -5,6 +5,7 @@ import path from "path";
 import { CodeBlock } from "../../components/CodeBlock";
 import { PageHeader } from "../../components/PageHeader";
 import { StatusBadge } from "../../components/StatusBadge";
+import { EXPECTED_REPORT_SCHEMA_VERSION } from "../../lib/auditReport";
 
 type Check = {
   status: "passing" | "failing" | "unknown";
@@ -26,6 +27,7 @@ type Baseline = {
   };
 };
 type Snapshot = {
+  schema_version: string;
   project_name: string;
   generated_at: string;
   benchmark_sets: Record<string, Check>;
@@ -42,14 +44,49 @@ arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow
 arena run benchmark_sets/audit_v1 --reviewer mock:keyword_gamer --mode full --allow-local-execution
 arena leaderboard runs/ --metric validated_f_beta --beta 1.0`;
 
-function loadSnapshot(): Snapshot | null {
+function loadSnapshot(): { snapshot: Snapshot | null; error: string | null } {
   const file = path.join(process.cwd(), "public", "verification.json");
-  if (!fs.existsSync(file)) return null;
-  return JSON.parse(fs.readFileSync(file, "utf-8")) as Snapshot;
+  if (!fs.existsSync(file)) return { snapshot: null, error: null };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    return {
+      snapshot: null,
+      error: `verification.json is not valid JSON (${detail}). Regenerate it with scripts/generate_verification_snapshot.py.`,
+    };
+  }
+  const version = (parsed as { schema_version?: unknown }).schema_version;
+  if (version !== EXPECTED_REPORT_SCHEMA_VERSION) {
+    return {
+      snapshot: null,
+      error:
+        `verification.json schema_version ${JSON.stringify(version)} does not match the ` +
+        `expected ${JSON.stringify(EXPECTED_REPORT_SCHEMA_VERSION)}. ` +
+        `Regenerate it with scripts/generate_verification_snapshot.py.`,
+    };
+  }
+  return { snapshot: parsed as Snapshot, error: null };
 }
 
 export default function VerifyPage() {
-  const snapshot = loadSnapshot();
+  const { snapshot, error } = loadSnapshot();
+  if (error) {
+    return (
+      <>
+        <PageHeader
+          eyebrow="Verification / Local evidence"
+          title="Project Health"
+          description="A generated snapshot of reproducible checks and deterministic control outcomes."
+        />
+        <section className="panel empty section-space">
+          <h2>Verification snapshot could not be read</h2>
+          <p>{error}</p>
+        </section>
+      </>
+    );
+  }
   return (
     <>
       <PageHeader
