@@ -1,4 +1,4 @@
-# Code Review Arena (code-review-arena)
+# CodeReview Arena (code-review-arena)
 services:
   api:
     build: .
@@ -9,10 +9,6 @@ services:
     environment:
       ARENA_DB_PATH: /app/data/arena.db
       ARENA_RUNS_DIR: /app/runs
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
     volumes:
       - ./runs:/app/runs
       - ./data:/app/data
@@ -32,17 +28,3 @@ services:
     depends_on:
       api:
         condition: service_healthy
-
-  db:
-    image: postgres:16
-    environment:
-      POSTGRES_DB: arena
-      POSTGRES_USER: arena
-      POSTGRES_PASSWORD: arena
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-volumes:
-  postgres_data:

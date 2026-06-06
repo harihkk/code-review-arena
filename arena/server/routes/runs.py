@@ -19,7 +19,7 @@ def runs() -> list[dict[str, object]]:
 
 @router.post("")
 def create_run(request: CreateRunRequest) -> dict[str, object]:
-    reviewer = create_reviewer(request.reviewer, request.model, request.models)
+    reviewer = create_reviewer(request.reviewer, command=request.command)
     return run_benchmark(
         request.benchmark_set,
         reviewer,

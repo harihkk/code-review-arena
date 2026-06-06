@@ -1,4 +1,4 @@
-"""Command-line application for Code Review Arena."""
+"""Command-line application for CodeReview Arena."""
 
 from pathlib import Path
 from typing import Literal
@@ -30,24 +30,22 @@ def validate(benchmark_set: Path = typer.Argument(DEFAULT_BENCHMARK_SET)) -> Non
 def run(
     benchmark_set: Path = typer.Argument(DEFAULT_BENCHMARK_SET),
     reviewer: str = typer.Option("mock:perfect", "--reviewer"),
-    model: str | None = typer.Option(None, "--model"),
-    models: str | None = typer.Option(None, "--models"),
     mode: Literal["review", "patch", "full"] = typer.Option("review", "--mode"),
     beta: float | None = typer.Option(None, "--beta", min=0.01),
     allow_local_execution: bool = typer.Option(False, "--allow-local-execution"),
     command: str | None = typer.Option(None, "--command"),
     reviewer_timeout_seconds: int = typer.Option(120, "--reviewer-timeout-seconds", min=1),
+    as_json: bool = typer.Option(False, "--json", help="Emit the run result as JSON to stdout."),
 ) -> None:
     run_command(
         benchmark_set,
         reviewer,
-        model,
-        models,
         mode,
         beta,
         allow_local_execution,
         command,
         reviewer_timeout_seconds,
+        as_json,
     )
 
 
@@ -79,8 +77,9 @@ def leaderboard(
     runs_dir: Path = typer.Argument(DEFAULT_RUNS_DIR),
     metric: str = typer.Option("validated_f_beta", "--metric"),
     beta: float = typer.Option(1.0, "--beta", min=0.01),
+    as_json: bool = typer.Option(False, "--json", help="Emit leaderboard rows as JSON to stdout."),
 ) -> None:
-    leaderboard_command(runs_dir, metric, beta)
+    leaderboard_command(runs_dir, metric, beta, as_json)
 
 
 @app.command()

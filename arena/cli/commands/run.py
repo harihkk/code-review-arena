@@ -1,37 +1,45 @@
 from pathlib import Path
 from typing import Literal
 
+import typer
 from rich.console import Console
 
 from arena.benchmark.benchmark_runner import run_benchmark
+from arena.core.errors import ArenaError
 from arena.core.registry import create_reviewer
 
 
 def run(
     benchmark_set: Path,
     reviewer_spec: str,
-    model: str | None,
-    models: str | None,
     mode: Literal["review", "patch", "full"],
     beta: float | None,
     allow_local_execution: bool,
     command: str | None,
     reviewer_timeout_seconds: int,
+    as_json: bool = False,
 ) -> None:
-    reviewer = create_reviewer(
-        reviewer_spec,
-        model=model,
-        models=models,
-        command=command,
-        reviewer_timeout_seconds=reviewer_timeout_seconds,
-    )
-    result = run_benchmark(
-        benchmark_set,
-        reviewer,
-        mode=mode,
-        beta=beta,
-        allow_local_execution=allow_local_execution,
-    )
+    try:
+        reviewer = create_reviewer(
+            reviewer_spec,
+            command=command,
+            reviewer_timeout_seconds=reviewer_timeout_seconds,
+        )
+        result = run_benchmark(
+            benchmark_set,
+            reviewer,
+            mode=mode,
+            beta=beta,
+            allow_local_execution=allow_local_execution,
+        )
+    except ArenaError as exc:
+        Console(stderr=True).print(f"[red]ERROR[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    if as_json:
+        typer.echo(result.model_dump_json(indent=2))
+        return
+
     Console().print(
         f"[green]Completed[/green] {result.run_id}: review_quality_score={result.total_score:.1f}, "
         f"bugs={result.bugs_found}/{result.case_count}, false_positives={result.false_positives}"

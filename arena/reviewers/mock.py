@@ -143,7 +143,7 @@ class MockReviewer(BaseReviewer):
             "Ignore events when event.version is not newer than current state.",
         ),
         "api_pagination_cursor_skip_001": (
-            "Cursor pagination omits a stable id tiebreaker for duplicate created_at values.",
+            "Pagination cursor omits a stable id tiebreaker for duplicate created_at values.",
             "pagination cursor created_at id tiebreaker duplicate timestamp api",
             "app/pagination.py",
             (8, 21),
