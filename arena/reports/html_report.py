@@ -75,7 +75,7 @@ Cost / validated fix</div>
 <div class="card"><span class="value">{metrics.latency_per_case_ms:.1f}ms</span>Latency / case</div>
 </section>"""
     return f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Code Review Arena - {escape(run.run_id)}</title>
+<html lang="en"><head><meta charset="utf-8"><title>CodeReview Arena - {escape(run.run_id)}</title>
 <style>
 body {{ font: 15px system-ui, sans-serif; max-width: 1000px; margin: 2rem auto; color: #16202a; }}
 .cards {{ display: flex; flex-wrap: wrap; gap: 1rem; margin: 1rem 0 2rem; }}
@@ -90,7 +90,7 @@ article {{ border: 1px solid #e4e9ef; border-radius: 10px; padding: 1rem; margin
 .breakdown span {{ background: #eef4ff; border-radius: 999px; padding: .35rem .65rem; }}
 pre {{ overflow: auto; background: #101827; color: #e8edf5; padding: .9rem; border-radius: 8px; }}
 </style></head><body>
-<h1>Code Review Arena Report</h1>
+<h1>CodeReview Arena Report</h1>
 <p>{escape(run.reviewer)}:{escape(run.model or "")} on
 {escape(run.benchmark_set)} - {escape(run.run_id)}</p>
 <section class="cards">

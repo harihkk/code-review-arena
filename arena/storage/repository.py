@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 from pathlib import Path
+from typing import Any
 
 from arena.core.models import RunResult
 from arena.storage.db import connect
@@ -162,44 +163,49 @@ class RunRepository:
         return RunResult.model_validate_json(row["run_json"]) if row else None
 
     def leaderboard(self) -> list[dict[str, object]]:
+        # Reads the stored run JSON directly rather than rebuilding the full nested
+        # RunResult/CaseResult object graph: a leaderboard row is a summary, so this
+        # stays responsive with hundreds of runs.
         with connect(self.db_path) as db:
             rows = db.execute("SELECT run_json FROM runs ORDER BY completed_at DESC").fetchall()
-        latest: dict[tuple[str, str | None, str], RunResult] = {}
+        latest: dict[tuple[str, str | None, str], dict[str, Any]] = {}
         history: dict[tuple[str, str | None, str], int] = {}
         for row in rows:
-            run = RunResult.model_validate_json(row["run_json"])
-            key = (run.reviewer, run.model, run.mode)
+            data: dict[str, Any] = json.loads(row["run_json"])
+            key = (data["reviewer"], data.get("model"), data.get("mode", "review"))
             history[key] = history.get(key, 0) + 1
-            latest.setdefault(key, run)
-        return [
-            {
-                "reviewer": run.reviewer,
-                "model": run.model or "",
-                "mode": run.mode,
-                "benchmark_set": run.benchmark_set,
-                "score": run.total_score,
-                "bugs_found": run.bugs_found,
-                "case_count": run.case_count,
-                "false_positives": run.false_positives,
-                "cost": run.total_cost,
-                "latency_ms": run.total_latency_ms,
-                "run_id": run.run_id,
-                "history_count": history[key],
-                "completed_at": run.completed_at.isoformat(),
-                "deterministic_passes": sum(
-                    result.deterministic_pass is True for result in run.case_results
-                ),
-                "deterministic_metrics": (
-                    run.deterministic_metrics.model_dump() if run.deterministic_metrics else None
-                ),
-            }
-            for key, run in sorted(
-                latest.items(),
-                key=lambda item: (
-                    item[1].deterministic_metrics.validated_f_beta
-                    if item[1].deterministic_metrics
-                    else -1
-                ),
-                reverse=True,
+            latest.setdefault(key, data)
+
+        summaries: list[dict[str, object]] = []
+        for key, data in latest.items():
+            case_results = data.get("case_results") or []
+            metrics = data.get("deterministic_metrics")
+            summaries.append(
+                {
+                    "reviewer": data["reviewer"],
+                    "model": data.get("model") or "",
+                    "mode": data.get("mode", "review"),
+                    "benchmark_set": data["benchmark_set"],
+                    "score": data["total_score"],
+                    "bugs_found": data["bugs_found"],
+                    "case_count": len(case_results),
+                    "false_positives": data["false_positives"],
+                    "cost": data["total_cost"],
+                    "latency_ms": data["total_latency_ms"],
+                    "run_id": data["run_id"],
+                    "history_count": history[key],
+                    "completed_at": data["completed_at"],
+                    "deterministic_passes": sum(
+                        case.get("deterministic_pass") is True for case in case_results
+                    ),
+                    "deterministic_metrics": metrics,
+                }
             )
-        ]
+
+        def _validated(summary: dict[str, object]) -> float:
+            metrics = summary["deterministic_metrics"]
+            value = metrics.get("validated_f_beta") if isinstance(metrics, dict) else None
+            return value if isinstance(value, (int, float)) else -1.0
+
+        summaries.sort(key=_validated, reverse=True)
+        return summaries

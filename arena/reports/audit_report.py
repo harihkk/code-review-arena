@@ -9,8 +9,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from arena.core.config import REPORT_SCHEMA_VERSION
 from arena.core.models import RunResult
 from arena.reports.json_report import read_json_report
+from arena.reports.report_schema import AuditReport
 
 AUDIT_BENCHMARK_SET = "audit_v1"
 GAP_THRESHOLD = 0.15
@@ -49,6 +51,7 @@ def _reviewer_label(run: RunResult) -> str:
 def build_audit_report_data(runs: list[RunResult]) -> dict[str, Any]:
     if not runs:
         return {
+            "schema_version": REPORT_SCHEMA_VERSION,
             "title": "Detection Is Not Validation: Audit Pack v1 Results",
             "generated_at": datetime.now(UTC).isoformat(),
             "empty": True,
@@ -146,6 +149,7 @@ def build_audit_report_data(runs: list[RunResult]) -> dict[str, Any]:
     case_studies = _select_case_studies(list(latest.values()))
 
     return {
+        "schema_version": REPORT_SCHEMA_VERSION,
         "title": "Detection Is Not Validation: Audit Pack v1 Results",
         "generated_at": datetime.now(UTC).isoformat(),
         "empty": False,
@@ -353,6 +357,9 @@ def write_audit_report(
     json_output_path: Path | None = None,
 ) -> dict[str, Any]:
     data = build_audit_report_data(load_audit_runs(runs_dir))
+    # Validate the contract before writing so a producer-side drift fails loudly here
+    # rather than silently in the dashboard.
+    AuditReport.model_validate(data)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(render_audit_report_markdown(data), encoding="utf-8")
     if json_output_path is not None:

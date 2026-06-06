@@ -7,7 +7,7 @@ from arena.core.models import RunResult
 
 def render_markdown(run: RunResult) -> str:
     lines = [
-        "# Code Review Arena Report",
+        "# CodeReview Arena Report",
         "",
         f"Benchmark Set: {run.benchmark_set}",
         f"Reviewer: {run.reviewer}{':' + run.model if run.model else ''}",
