@@ -9,7 +9,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-PROJECT = "Code Review Arena"
+from arena.core.config import REPORT_SCHEMA_VERSION
+from arena.reports.report_schema import VerificationSnapshot
+
+PROJECT = "CodeReview Arena"
 BASELINES = {
     "reference-patch": "Known-good patch artifacts",
     "mock:perfect_patch": "Harness happy path",
@@ -174,6 +177,7 @@ def main() -> None:
         )
 
     snapshot = {
+        "schema_version": REPORT_SCHEMA_VERSION,
         "project_name": PROJECT,
         "generated_at": checked_at(),
         "benchmark_sets": validations,
@@ -181,6 +185,8 @@ def main() -> None:
         "quality_checks": quality,
         "capabilities": capabilities,
     }
+    # Fail loudly here if the snapshot drifts from the contract the dashboard reads.
+    VerificationSnapshot.model_validate(snapshot)
     output = root / args.output
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(snapshot, indent=2) + "\n")

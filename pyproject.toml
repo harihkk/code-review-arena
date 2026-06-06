@@ -9,13 +9,12 @@ description = "Local, execution-backed benchmark harness for AI code reviewers (
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
-authors = [{name = "Code Review Arena contributors"}]
+authors = [{name = "CodeReview Arena contributors"}]
 dependencies = [
   "fastapi>=0.110",
   "httpx>=0.27",
   "pydantic>=2.6",
   "PyYAML>=6.0",
-  "pytest>=8.0",
   "rich>=13.7",
   "typer>=0.12",
   "uvicorn[standard]>=0.29",
@@ -28,9 +27,6 @@ Documentation = "https://github.com/harihkk/code-review-arena#readme"
 Issues = "https://github.com/harihkk/code-review-arena/issues"
 
 [project.optional-dependencies]
-openai = ["openai>=1.30"]
-anthropic = ["anthropic>=0.28"]
-gemini = ["google-genai>=1.0"]
 dev = [
   "mypy>=1.10",
   "pytest>=8.0",
@@ -63,7 +59,6 @@ select = ["E", "F", "I", "UP", "B"]
 extend-immutable-calls = ["typer.Argument", "typer.Option"]
 
 [tool.ruff.lint.per-file-ignores]
-"arena/reviewers/prompt_templates.py" = ["E501"]
 "arena/reviewers/mock.py" = ["E501"]
 "arena/reports/audit_report.py" = ["E501"]
 

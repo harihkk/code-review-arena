@@ -19,6 +19,7 @@ dashboard/.next/
 dashboard/out/
 dashboard/.turbo/
 dashboard/*.tsbuildinfo
+dashboard/next-env.d.ts
 dashboard/.env*
 !dashboard/.env.example
 

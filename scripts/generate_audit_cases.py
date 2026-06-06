@@ -376,7 +376,7 @@ class OrderProjector:
     },
     "api_pagination_cursor_skip_001": {
         "yaml": """id: api_pagination_cursor_skip_001
-title: Cursor pagination skips rows with duplicate timestamps
+title: Pagination cursor skips rows with duplicate timestamps
 category: api
 severity: high
 stack: [python, api, pagination]
@@ -390,7 +390,7 @@ input:
   tests_dir: tests
 ground_truth:
   primary_bug:
-    summary: Cursor pagination omits a stable id tiebreaker for duplicate created_at values.
+    summary: Pagination cursor omits a stable id tiebreaker for duplicate created_at values.
     files:
       - path: app/pagination.py
         line_ranges: [{start: 8, end: 20}]
