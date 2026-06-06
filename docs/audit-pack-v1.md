@@ -16,13 +16,13 @@ idempotency, API correctness, and pagination.
 | `security_sql_join_ownership_leak_001` | SQL join ownership leak |
 | `security_jwt_audience_validation_001` | JWT audience and issuer validation |
 | `distributed_out_of_order_event_001` | Out-of-order event projection |
-| `api_pagination_cursor_skip_001` | Cursor pagination tiebreaker |
+| `api_pagination_cursor_skip_001` | Pagination cursor tiebreaker |
 | `rag_prompt_injection_policy_override_001` | RAG prompt injection isolation |
 
 ## Reference patches
 
 Each audit_v1 case ships a static `reference.patch` beside `case.yaml`. The file is the
-canonical known-good unified diff for that case’s `after/` tree: it applies cleanly, passes
+canonical known-good unified diff for that case's `after/` tree: it applies cleanly, passes
 regression tests, and satisfies structural validators. Contributors can inspect or replay the
 fix without reading mock reviewer internals.
 

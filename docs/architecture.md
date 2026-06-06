@@ -1,6 +1,6 @@
 # Architecture
 
-Code Review Arena is a backend-first evaluation harness. A benchmark fixture contains only
+CodeReview Arena is a backend-first evaluation harness. A benchmark fixture contains only
 inputs visible to a reviewer plus separately loaded ground truth. `BenchmarkRunner` loads a
 fixture, calls a reviewer, and sends structured findings to both the review-quality scorer
 and, in full mode, the deterministic patch-validation pipeline.
@@ -11,7 +11,7 @@ and, in full mode, the deterministic patch-validation pipeline.
 |---|---|
 | `arena.core` | Typed contracts, configuration, errors, reviewer registry |
 | `arena.benchmark` | Manifest/case loading, diff parsing, validation, orchestration |
-| `arena.reviewers` | Prompting, JSON parsing, provider and mock adapters |
+| `arena.reviewers` | JSON parsing, the deterministic mock controls, reference-patch and custom-command adapters |
 | `arena.tools` / `arena.execution` | Controlled evidence gathering in materialized trees |
 | `arena.scoring` | Localization, concept/fix/severity scoring and false positives |
 | `arena.patching` | Isolated patch workspace creation and unified-diff application |
@@ -39,9 +39,16 @@ Each report records reviewer/model, prompt version, benchmark version, temperatu
 hash where available, timestamps, raw and parsed output, per-case breakdown, latency and
 estimated cost, raw suggested patches, test output tails and validator evidence.
 
+Scoring is deterministic: cases are loaded in manifest order, the mock and reference-patch
+controls take no random input, and no scoring path seeds or shuffles. The only values that
+differ between two identical runs are wall-clock fields: `run_id`, `started_at`,
+`completed_at`, `latency_ms`, and per-step `duration_ms`. The six headline metrics and every
+finding are reproducible given the same inputs. A reviewer that crashes on a single case does
+not abort the batch: the failure is recorded as a non-passing `CaseResult` with a
+`case_execution_error` reason and the run continues.
+
 ## Deployment
 
-Docker Compose starts the API, dashboard and an optional Postgres service for future
-advanced storage mode. The current API uses a mounted SQLite database and mounted report
-directory for local reproducibility. The dashboard image is built as a minimal Next.js
-standalone runtime and waits for the API health check before startup.
+Docker Compose starts the API and the dashboard. The API uses a mounted SQLite database and
+mounted report directory for local reproducibility. The dashboard image is built as a minimal
+Next.js standalone runtime and waits for the API health check before startup.

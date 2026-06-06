@@ -1,6 +1,6 @@
 # Metrics
 
-Detection is not validation. Code Review Arena reports two metric tiers because a
+Detection is not validation. CodeReview Arena reports two metric tiers because a
 reviewer can correctly point at a defect while supplying no usable repair.
 
 ## Detection Tier

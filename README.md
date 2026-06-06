@@ -1,32 +1,42 @@
-# Code Review Arena
+# CodeReview Arena
 
 Execution-backed benchmark for AI code-review agents.
 
+[![CI](https://github.com/harihkk/code-review-arena/actions/workflows/ci.yml/badge.svg)](https://github.com/harihkk/code-review-arena/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+
 ## Overview
 
-Code Review Arena evaluates whether review agents can detect seeded pull-request bugs
+CodeReview Arena evaluates whether review agents can detect seeded pull-request bugs
 and produce patches that pass deterministic validation. It reports detection and
 validation separately so a plausible finding is not confused with a working fix.
 
-The local dashboard presents leaderboard results, benchmark cases, methodology, run
-traces, and generated Audit Pack v1 reports.
+The project includes a local CLI, two benchmark packs, deterministic controls,
+custom-command reviewer support, saved run traces, and a dashboard for leaderboard and
+report inspection.
 
-## Why detection is not validation
+## Detection vs validation
 
-`detection_f_beta` records whether the reviewer found and localized the seeded defect.
-`validated_f_beta` records whether the finding also produced a patch that applied,
-passed required tests, and satisfied required structural validators.
+| Metric | Signal |
+|---|---|
+| `detection_f_beta` | Reviewer found and localized the seeded bug |
+| `validated_f_beta` | Reviewer produced a patch that applied, passed tests, and satisfied validators |
 
-A reviewer can score well on detection and still produce no validated fixes.
+The split matters because a reviewer can detect the right issue while still producing no
+usable repair. On `audit_v1`, the `mock:keyword_gamer` control detects all ten seeded bugs
+(`detection_f_beta=1.000`) but validates none of its patches (`validated_f_beta=0.000`),
+while `reference-patch` validates all ten (`validated_f_beta=1.000`). `arena audit-report`
+and the dashboard surface that gap per reviewer.
 
 ## Benchmark packs
 
-| Pack | Cases | Purpose | Primary validation |
+| Pack | Cases | Purpose | Validation |
 |---|---:|---|---|
-| `benchmark_sets/v1` | 10 | Baseline harness cases | scoring and validation |
-| `benchmark_sets/audit_v1` | 10 | Patch-required audit cases | patch, tests, and validators |
+| `benchmark_sets/v1` | 10 | Baseline harness cases | review scoring + validation |
+| `benchmark_sets/audit_v1` | 10 | Patch-required audit cases | patch apply + tests + validators |
 
-## Audit Pack v1
+## Audit Pack v1 cases
 
 | Category | Seeded bug |
 |---|---|
@@ -45,14 +55,12 @@ A reviewer can score well on detection and still produce no validated fixes.
 
 | Metric | Meaning |
 |---|---|
-| `detection_f_beta` | Found and localized the seeded bug |
-| `validated_f_beta` | Found a bug and produced a deterministically validated fix |
-| `patch_apply_rate` | Fraction of required patches that applied cleanly |
-| `test_pass_rate` | Fraction of required regression-test executions that passed |
-| `structural_pass_rate` | Fraction of required structural validator checks that passed |
+| `validated_f_beta` | Primary full-mode score for deterministically validated fixes |
+| `detection_f_beta` | Found and localized seeded bugs |
+| `patch_apply_rate` | Required patches that applied cleanly |
+| `test_pass_rate` | Required regression-test executions that passed |
+| `structural_pass_rate` | Required structural validator checks that passed |
 | `false_positives_per_case` | Unsupported findings per evaluated case |
-
-`validated_f_beta` is the primary metric for full-mode audit runs.
 
 ## Baselines
 
@@ -79,7 +87,7 @@ python -m pip install -e ".[dev]"
 arena validate benchmark_sets/audit_v1
 ```
 
-## Run a benchmark
+## Run benchmarks
 
 ```bash
 arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
@@ -90,15 +98,37 @@ arena leaderboard runs/ --metric validated_f_beta --beta 1.0
 `--allow-local-execution` opts into fixture-owned test commands in copied run
 workspaces. Use it only with fixtures you trust.
 
-## Generate report
+## Custom reviewers
+
+CodeReview Arena is model-agnostic. It ships no vendor adapters and makes no model
+performance claims; the built-in reviewers are the deterministic controls and
+`reference-patch`. To benchmark a real model, wrap it in any local command that reads
+the case JSON on stdin/args and prints structured review JSON, then point
+`custom-command` at it. Ground truth is never included in that JSON, so a reviewer
+cannot pass on metadata alone.
+
+A working example reviewer ships in `scripts/fake_reviewer.py`:
+
+```bash
+arena run benchmark_sets/audit_v1 \
+  --reviewer custom-command \
+  --command "python scripts/fake_reviewer.py --case {case_json}" \
+  --mode full \
+  --allow-local-execution
+```
+
+Swap that command for your own reviewer process. The template placeholders
+`{case_json}`, `{diff_file}`, `{case_id}`, and `{workspace}` are expanded per case.
+
+## Reports and dashboard
+
+Generate an audit report from saved run artifacts:
 
 ```bash
 arena audit-report runs/ --output docs/reports/audit-v1-results.md
 ```
 
-This command also writes the JSON snapshot consumed by `/reports/audit-v1`.
-
-## Dashboard
+Run the API and dashboard locally:
 
 ```bash
 arena serve
@@ -107,16 +137,15 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000`. The primary pages are `/leaderboard`, `/cases`,
-`/reports/audit-v1`, `/methodology`, and `/docs`.
+Primary dashboard routes are `/leaderboard`, `/reports/audit-v1`, `/cases`,
+`/methodology`, and `/docs`.
 
-## Limitations
+For a full walk-through from a fresh clone, see [docs/DEMO.md](docs/DEMO.md).
 
-- `audit_v1` is curated and small.
-- Structural validators are hand-authored and may reject alternate valid repairs.
-- Passing tests supplies execution evidence, not proof of complete correctness.
-- Valid fixes can fail when a validator is intentionally narrow.
-- Code Review Arena is a local audit harness, not a large-scale public adoption benchmark.
+## Documentation
+
+See [docs/](docs/README.md) for architecture, metrics, the reviewer interface, case
+authoring, and the audit report.
 
 ## Development
 
@@ -126,6 +155,14 @@ make lint
 make typecheck
 cd dashboard && npm run build
 ```
+
+## Limitations
+
+- `audit_v1` is curated and small.
+- Structural validators are hand-authored and may reject alternate valid repairs.
+- Passing tests supplies execution evidence, not proof of complete correctness.
+- Valid fixes can fail when a validator is intentionally narrow.
+- CodeReview Arena is a local audit harness, not a large-scale public ranking.
 
 ## License
 
