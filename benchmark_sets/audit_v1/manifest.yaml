@@ -1,5 +1,5 @@
 version: audit_v1
-name: Code Review Arena Audit Pack v1
+name: CodeReview Arena Audit Pack v1
 cases:
   - security_fastapi_multitenant_admin_bypass_001
   - distributed_kafka_duplicate_event_001

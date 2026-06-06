@@ -1,0 +1,13 @@
+--- a/src/components/Notifications.tsx
++++ b/src/components/Notifications.tsx
+@@ -5,9 +5,8 @@
+ 
+   async function receive(message: string) {
+     await Promise.resolve();
+-    setMessages([...messages, message]);
++    setMessages(previous => [...previous, message]);
+   }
+ 
+   return <button onClick={() => receive("new")}>{messages.length}</button>;
+ }
+-

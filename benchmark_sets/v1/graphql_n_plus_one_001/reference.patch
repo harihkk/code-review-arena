@@ -1,0 +1,20 @@
+--- a/src/resolvers/orders.ts
++++ b/src/resolvers/orders.ts
+@@ -1,14 +1,9 @@
+ export const resolvers = {
+   Query: {
+-    orders: async (_parent: unknown, _args: unknown, { db }: Context) => {
++    orders: async (_parent: unknown, _args: unknown, { db, loaders }: Context) => {
+       const orders = await db.orders.list();
+-      return Promise.all(
+-        orders.map(async order => ({
+-          ...order,
+-          customer: await db.customers.findById(order.customerId),
+-        })),
+-      );
++      const customers = await loaders.customer.loadMany(orders.map(order => order.customerId));
++      return orders.map((order, index) => ({ ...order, customer: customers[index] }));
+     },
+   },
+ };
+-

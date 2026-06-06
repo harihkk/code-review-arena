@@ -1,0 +1,17 @@
+--- a/app/search_cache.py
++++ b/app/search_cache.py
+@@ -1,5 +1,7 @@
+-def cache_key(tenant_id: str, user_id: str, query: str) -> str:
+-    return f"search:{user_id}"
++def cache_key(
++    tenant_id: str, user_id: str, query: str
++) -> str:
++    return f"search:{tenant_id}:{user_id}:{query}"
+ 
+ 
+ def search(redis, tenant_id: str, user_id: str, query: str, load):
+@@ -10,4 +12,3 @@
+     result = load(tenant_id, user_id, query)
+     redis.set(key, result)
+     return result
+-

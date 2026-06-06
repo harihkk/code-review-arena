@@ -1,5 +1,5 @@
 version: v1
-name: Code Review Arena seeded production bugs
+name: CodeReview Arena seeded production bugs
 cases:
   - fastapi_auth_bypass_001
   - spring_boot_null_handling_001

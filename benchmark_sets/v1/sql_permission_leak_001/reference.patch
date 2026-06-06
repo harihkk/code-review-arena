@@ -1,0 +1,9 @@
+--- a/sql/documents.sql
++++ b/sql/documents.sql
+@@ -1,4 +1,4 @@
+ SELECT id, title, body
+ FROM documents
+-WHERE id = :document_id;
+-
++WHERE id = :document_id
++  AND organization_id = :organization_id;
