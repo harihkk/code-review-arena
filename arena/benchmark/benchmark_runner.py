@@ -10,7 +10,15 @@ from typing import Literal
 
 from arena.benchmark.case_loader import build_context, load_cases, load_manifest
 from arena.core.config import PROMPT_VERSION, database_path, runs_path
-from arena.core.models import RunMetadata, RunResult
+from arena.core.models import (
+    BenchmarkCase,
+    CaseResult,
+    DeterministicCaseScore,
+    ReviewerResponse,
+    RunMetadata,
+    RunResult,
+    ScoreBreakdown,
+)
 from arena.execution.sandbox import materialized_case
 from arena.execution.test_executor import TestExecutionRequest, TestExecutionResult, TestExecutor
 from arena.patching.patch_applier import PatchApplier
@@ -56,6 +64,170 @@ def _reserve_run_dir(root: Path) -> tuple[str, Path]:
             suffix += 1
 
 
+def _evaluate_case(
+    case: BenchmarkCase,
+    reviewer: BaseReviewer,
+    *,
+    test_executor: TestExecutor,
+    patch_applier: PatchApplier,
+    run_id: str,
+    mode: Literal["review", "patch", "full"],
+    selected_beta: float,
+    allow_local_execution: bool,
+) -> CaseResult:
+    test_output = ""
+    static_output = ""
+    with materialized_case(case) as materialized:
+        if allow_local_execution and case.execution.run_tests and case.execution.test_command:
+            executed = test_executor.execute(
+                TestExecutionRequest(
+                    case_id=case.id,
+                    workspace_path=materialized,
+                    test_command=case.execution.test_command,
+                    timeout_seconds=case.execution.timeout_seconds,
+                    docker_image=case.execution.docker_image,
+                    allow_local_execution=allow_local_execution,
+                )
+            )
+            test_output = (
+                f"exit_code={executed.exit_code}\nduration_ms={executed.duration_ms}\n"
+                f"{executed.stdout}{executed.stderr}"
+            )
+        if case.execution.run_static_analysis and case.execution.static_analysis_command:
+            static_output = run_static_analysis(
+                materialized,
+                case.execution.static_analysis_command,
+                case.execution.timeout_seconds,
+            )
+    context = build_context(case, test_output=test_output, static_analysis_output=static_output)
+    response = reviewer.review(context)
+    review_result = score_case(case, response, test_output=test_output)
+    if mode == "review":
+        return review_result
+    assert case.case_dir is not None
+    matching_finding = next(
+        (item.finding for item in review_result.scored_findings if item.is_true_positive), None
+    )
+    patch_text = matching_finding.suggested_patch if matching_finding else None
+    patch = patch_applier.apply(
+        PatchApplyRequest(
+            case_id=case.id,
+            source_dir=case.case_dir / case.input.after_dir,
+            patch_text=patch_text or "",
+            run_id=run_id,
+        )
+    )
+    executed_tests: TestExecutionResult | None = None
+    if patch.applied and case.execution.run_tests and case.execution.test_command:
+        tests_dir = case.input.tests_dir
+        if tests_dir and (case.case_dir / tests_dir).is_dir():
+            shutil.copytree(
+                case.case_dir / tests_dir,
+                Path(patch.workspace_path) / tests_dir,
+                dirs_exist_ok=True,
+            )
+        executed_tests = test_executor.execute(
+            TestExecutionRequest(
+                case_id=case.id,
+                workspace_path=Path(patch.workspace_path),
+                test_command=case.execution.test_command,
+                timeout_seconds=case.execution.timeout_seconds,
+                docker_image=case.execution.docker_image,
+                allow_local_execution=allow_local_execution,
+            )
+        )
+    validators = []
+    if patch.applied and case.validation.structural_validators:
+        validators = run_validators(
+            case.validation.structural_validators,
+            ValidatorContext(
+                case_id=case.id,
+                workspace_path=Path(patch.workspace_path),
+                changed_files=patch.touched_files,
+                finding=matching_finding,
+                case_metadata=case,
+            ),
+        )
+    deterministic = score_deterministic_case(
+        case, review_result, patch, executed_tests, validators, selected_beta
+    )
+    return review_result.model_copy(
+        update={
+            "deterministic_case_score": deterministic,
+            "patch_provided": deterministic.patch_provided,
+            "patch_applied": deterministic.patch_applied,
+            "patch_error": patch.error,
+            "touched_files": patch.touched_files,
+            "tests_ran": deterministic.tests_ran,
+            "tests_passed": deterministic.tests_passed,
+            "test_stdout_tail": _tail(executed_tests.stdout if executed_tests else ""),
+            "test_stderr_tail": _tail(
+                (executed_tests.stderr or executed_tests.error or "") if executed_tests else ""
+            ),
+            "validators_run": [item.name for item in validators],
+            "validators_passed": deterministic.structural_validation_passed,
+            "validator_results": [item.model_dump() for item in validators],
+            "deterministic_pass": deterministic.deterministic_pass,
+            "failure_reasons": deterministic.failure_reasons,
+            "raw_suggested_patch": patch_text,
+        }
+    )
+
+
+def _failed_case_result(
+    case: BenchmarkCase,
+    error: Exception,
+    mode: Literal["review", "patch", "full"],
+) -> CaseResult:
+    """Record an unexpected per-case failure as a non-passing result and keep going."""
+    reasons = [f"case_execution_error: {type(error).__name__}: {error}"]
+    deterministic = None
+    if mode != "review":
+        deterministic = DeterministicCaseScore(
+            case_id=case.id,
+            detected_bug=False,
+            localized_correctly=False,
+            patch_provided=False,
+            patch_applied=False,
+            tests_ran=False,
+            tests_passed=None,
+            structural_validation_ran=False,
+            structural_validation_passed=None,
+            true_positive_count=0,
+            false_positive_count=0,
+            false_negative_count=1,
+            precision=0.0,
+            recall=0.0,
+            f1=0.0,
+            f_beta=0.0,
+            patch_apply_score=0.0,
+            execution_score=0.0,
+            structural_score=0.0,
+            deterministic_pass=False,
+            failure_reasons=reasons,
+        )
+    return CaseResult(
+        case_id=case.id,
+        title=case.title,
+        category=case.category,
+        severity=case.severity,
+        ground_truth_summary=case.ground_truth.primary_bug.summary,
+        response=ReviewerResponse(raw_response="", invalid_output=True),
+        scored_findings=[],
+        breakdown=ScoreBreakdown(),
+        score=0.0,
+        review_quality_score=0.0,
+        bug_found=False,
+        correct_file=False,
+        correct_line=False,
+        line_match="wrong_file",
+        false_positive_count=0,
+        deterministic_case_score=deterministic,
+        deterministic_pass=False if mode != "review" else None,
+        failure_reasons=reasons,
+    )
+
+
 def run_benchmark(
     benchmark_dir: Path,
     reviewer: BaseReviewer,
@@ -78,108 +250,21 @@ def run_benchmark(
     for case in load_cases(benchmark_dir):
         if beta is None:
             selected_beta = case.metrics.beta
-        test_output = ""
-        static_output = ""
-        with materialized_case(case) as materialized:
-            if allow_local_execution and case.execution.run_tests and case.execution.test_command:
-                executed = test_executor.execute(
-                    TestExecutionRequest(
-                        case_id=case.id,
-                        workspace_path=materialized,
-                        test_command=case.execution.test_command,
-                        timeout_seconds=case.execution.timeout_seconds,
-                        docker_image=case.execution.docker_image,
-                        allow_local_execution=allow_local_execution,
-                    )
-                )
-                test_output = (
-                    f"exit_code={executed.exit_code}\nduration_ms={executed.duration_ms}\n"
-                    f"{executed.stdout}{executed.stderr}"
-                )
-            if case.execution.run_static_analysis and case.execution.static_analysis_command:
-                static_output = run_static_analysis(
-                    materialized,
-                    case.execution.static_analysis_command,
-                    case.execution.timeout_seconds,
-                )
-        context = build_context(case, test_output=test_output, static_analysis_output=static_output)
-        response = reviewer.review(context)
-        review_result = score_case(case, response, test_output=test_output)
-        if mode == "review":
-            case_results.append(review_result)
-            continue
-        assert case.case_dir is not None
-        matching_finding = next(
-            (item.finding for item in review_result.scored_findings if item.is_true_positive), None
-        )
-        patch_text = matching_finding.suggested_patch if matching_finding else None
-        patch = patch_applier.apply(
-            PatchApplyRequest(
-                case_id=case.id,
-                source_dir=case.case_dir / case.input.after_dir,
-                patch_text=patch_text or "",
-                run_id=run_id,
-            )
-        )
-        executed_tests: TestExecutionResult | None = None
-        if patch.applied and case.execution.run_tests and case.execution.test_command:
-            tests_dir = case.input.tests_dir
-            if tests_dir and (case.case_dir / tests_dir).is_dir():
-                shutil.copytree(
-                    case.case_dir / tests_dir,
-                    Path(patch.workspace_path) / tests_dir,
-                    dirs_exist_ok=True,
-                )
-            executed_tests = test_executor.execute(
-                TestExecutionRequest(
-                    case_id=case.id,
-                    workspace_path=Path(patch.workspace_path),
-                    test_command=case.execution.test_command,
-                    timeout_seconds=case.execution.timeout_seconds,
-                    docker_image=case.execution.docker_image,
+        try:
+            case_results.append(
+                _evaluate_case(
+                    case,
+                    reviewer,
+                    test_executor=test_executor,
+                    patch_applier=patch_applier,
+                    run_id=run_id,
+                    mode=mode,
+                    selected_beta=selected_beta,
                     allow_local_execution=allow_local_execution,
                 )
             )
-        validators = []
-        if patch.applied and case.validation.structural_validators:
-            validators = run_validators(
-                case.validation.structural_validators,
-                ValidatorContext(
-                    case_id=case.id,
-                    workspace_path=Path(patch.workspace_path),
-                    changed_files=patch.touched_files,
-                    finding=matching_finding,
-                    case_metadata=case,
-                ),
-            )
-        deterministic = score_deterministic_case(
-            case, review_result, patch, executed_tests, validators, selected_beta
-        )
-        case_results.append(
-            review_result.model_copy(
-                update={
-                    "deterministic_case_score": deterministic,
-                    "patch_provided": deterministic.patch_provided,
-                    "patch_applied": deterministic.patch_applied,
-                    "patch_error": patch.error,
-                    "touched_files": patch.touched_files,
-                    "tests_ran": deterministic.tests_ran,
-                    "tests_passed": deterministic.tests_passed,
-                    "test_stdout_tail": _tail(executed_tests.stdout if executed_tests else ""),
-                    "test_stderr_tail": _tail(
-                        (executed_tests.stderr or executed_tests.error or "")
-                        if executed_tests
-                        else ""
-                    ),
-                    "validators_run": [item.name for item in validators],
-                    "validators_passed": deterministic.structural_validation_passed,
-                    "validator_results": [item.model_dump() for item in validators],
-                    "deterministic_pass": deterministic.deterministic_pass,
-                    "failure_reasons": deterministic.failure_reasons,
-                    "raw_suggested_patch": patch_text,
-                }
-            )
-        )
+        except Exception as exc:  # noqa: BLE001 - one failing case must not abort the batch.
+            case_results.append(_failed_case_result(case, exc, mode))
     completed = datetime.now()
     total_cost = round(sum(item.response.estimated_cost for item in case_results), 6)
     total_latency = sum(item.response.latency_ms for item in case_results)

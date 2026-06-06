@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from arena.benchmark.case_loader import load_cases
+from arena.benchmark.case_loader import load_cases, load_manifest
 from arena.benchmark.diff_loader import load_diff, parse_added_lines
 from arena.core.errors import ValidationError
 from arena.core.models import BenchmarkCase
+from arena.reviewers.reference_patch import REFERENCE_PATCH_FILENAME
 
 
 def validate_case(case: BenchmarkCase) -> list[str]:
@@ -29,6 +30,13 @@ def validate_case(case: BenchmarkCase) -> list[str]:
         errors.append(f"{case.id}: scoring weights must sum to 100")
     if case.execution.run_tests and not case.execution.test_command:
         errors.append(f"{case.id}: test_command is required when run_tests is enabled")
+    if case.validation.patch_required:
+        patch_path = case.case_dir / REFERENCE_PATCH_FILENAME
+        if not patch_path.is_file() or not patch_path.read_text(encoding="utf-8").strip():
+            errors.append(
+                f"{case.id}: patch_required is set but {REFERENCE_PATCH_FILENAME} "
+                "is missing or empty"
+            )
     for expected_file in case.ground_truth.primary_bug.files:
         path = after_dir / expected_file.path
         if not path.is_file():
@@ -54,4 +62,22 @@ def validate_dataset(benchmark_dir: Path) -> list[str]:
         errors.extend(validate_case(case))
     if not cases:
         errors.append("Benchmark contains no cases")
+    errors.extend(_manifest_directory_mismatches(benchmark_dir))
+    return errors
+
+
+def _manifest_directory_mismatches(benchmark_dir: Path) -> list[str]:
+    """Flag case directories present on disk but absent from the manifest (and vice versa)."""
+    manifest = load_manifest(benchmark_dir)
+    listed = set(manifest.cases)
+    on_disk = {
+        child.name
+        for child in benchmark_dir.iterdir()
+        if child.is_dir() and (child / "case.yaml").is_file()
+    }
+    errors: list[str] = []
+    for missing in sorted(listed - on_disk):
+        errors.append(f"manifest lists '{missing}' but no case directory with case.yaml exists")
+    for extra in sorted(on_disk - listed):
+        errors.append(f"case directory '{extra}' exists on disk but is not listed in manifest.yaml")
     return errors

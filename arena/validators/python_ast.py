@@ -421,9 +421,9 @@ class PaginationUsesStableTiebreaker(BaseValidator):
         )
         passed = composite and not created_only
         if composite:
-            evidence.append("Cursor pagination uses created_at with a stable id tiebreaker.")
+            evidence.append("Pagination cursor uses created_at with a stable id tiebreaker.")
         if created_only:
-            evidence.append("Cursor pagination relies on created_at without a tiebreaker.")
+            evidence.append("Pagination cursor relies on created_at without a tiebreaker.")
             passed = False
         return ValidatorResult(
             name=self.name,

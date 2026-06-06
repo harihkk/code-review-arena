@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shlex
 import shutil
 import subprocess
@@ -83,6 +84,8 @@ class TestExecutor:
             f"{request.workspace_path.resolve()}:/workspace",
             "-w",
             "/workspace",
+            "-e",
+            "PYTHONDONTWRITEBYTECODE=1",
             request.docker_image,
             *args,
         ]
@@ -94,6 +97,8 @@ class TestExecutor:
         mode: Literal["docker", "local"],
     ) -> TestExecutionResult:
         started = time.perf_counter()
+        # Keep run workspaces clean: tests must not leave __pycache__ behind.
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
         try:
             completed = subprocess.run(
                 args,
@@ -102,6 +107,7 @@ class TestExecutor:
                 text=True,
                 timeout=request.timeout_seconds,
                 check=False,
+                env=env,
             )
             return TestExecutionResult(
                 case_id=request.case_id,
