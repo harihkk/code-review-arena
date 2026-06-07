@@ -5,8 +5,18 @@ import { EmptyState } from "../components/EmptyState";
 import { StatusBadge } from "../components/StatusBadge";
 import { fetchJson, type LeaderboardRow } from "../lib/api";
 import { loadReportLeaderboardRows } from "../lib/auditReport";
+import { reviewerDisplayName } from "../lib/reviewers";
 
-const pipeline = ["Seeded PR", "Reviewer", "Finding JSON", "Suggested patch", "Patch apply", "Tests", "Validators", "Metrics"];
+const pipeline = [
+  "Seeded PR",
+  "Reviewer",
+  "Finding JSON",
+  "Suggested patch",
+  "Patch apply",
+  "Tests",
+  "Validators",
+  "Metrics",
+];
 const runCommands = `python -m pip install -e ".[dev]"
 arena validate benchmark_sets/audit_v1
 arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
@@ -15,12 +25,20 @@ const emptyCommands = `arena run benchmark_sets/audit_v1 --reviewer reference-pa
 arena leaderboard runs/ --metric validated_f_beta --beta 1.0`;
 
 export default async function Home() {
-  const liveRows = await fetchJson<LeaderboardRow[]>("/leaderboard").catch(() => []);
-  const auditRows = liveRows.some((row) => row.benchmark_set === "audit_v1") ? [] : loadReportLeaderboardRows();
+  const liveRows = await fetchJson<LeaderboardRow[]>("/leaderboard").catch(
+    () => [],
+  );
+  const auditRows = liveRows.some((row) => row.benchmark_set === "audit_v1")
+    ? []
+    : loadReportLeaderboardRows();
   const rows = [...auditRows, ...liveRows];
   const previewRows = rows
     .filter((row) => row.deterministic_metrics)
-    .sort((left, right) => (right.deterministic_metrics?.validated_f_beta ?? 0) - (left.deterministic_metrics?.validated_f_beta ?? 0))
+    .sort(
+      (left, right) =>
+        (right.deterministic_metrics?.validated_f_beta ?? 0) -
+        (left.deterministic_metrics?.validated_f_beta ?? 0),
+    )
     .slice(0, 5);
 
   return (
@@ -30,13 +48,20 @@ export default async function Home() {
           <p className="eyebrow">Local benchmark for code-review agents</p>
           <h1>Detection is not validation.</h1>
           <p className="hero-subtitle">
-            Code Review Arena evaluates whether review agents can find seeded pull-request bugs
-            and produce patches that apply, pass tests, and satisfy structural validators.
+            Code Review Arena evaluates whether review agents can find seeded
+            pull-request bugs and produce patches that apply, pass tests, and
+            satisfy structural validators.
           </p>
           <div className="hero-actions">
-            <Link className="button primary" href="/leaderboard">View leaderboard</Link>
-            <Link className="button" href="/methodology">Read methodology</Link>
-            <Link className="button text" href="/docs/getting-started">Run locally</Link>
+            <Link className="button primary" href="/leaderboard">
+              View leaderboard
+            </Link>
+            <Link className="button" href="/methodology">
+              Read methodology
+            </Link>
+            <Link className="button text" href="/docs/getting-started">
+              Run locally
+            </Link>
           </div>
           <div className="proof-pills" aria-label="Benchmark properties">
             <span>Patch-backed</span>
@@ -53,8 +78,13 @@ export default async function Home() {
         <div className="metric-split-grid">
           <article className="metric-panel">
             <span>Detection</span>
-            <h3><code>detection_f_beta</code></h3>
-            <p>Finds and localizes the seeded bug. This can be high even when the patch is missing, malformed, or behaviorally wrong.</p>
+            <h3>
+              <code>detection_f_beta</code>
+            </h3>
+            <p>
+              Finds and localizes the seeded bug. This can be high even when the
+              patch is missing, malformed, or behaviorally wrong.
+            </p>
           </article>
           <div className="signal-flow" aria-label="Evaluation flow">
             <span>review comment</span>
@@ -64,8 +94,13 @@ export default async function Home() {
           </div>
           <article className="metric-panel primary">
             <span>Validation</span>
-            <h3><code>validated_f_beta</code></h3>
-            <p>Counts fixes that apply cleanly, pass required tests, and satisfy structural validators. This is the primary full-mode metric.</p>
+            <h3>
+              <code>validated_f_beta</code>
+            </h3>
+            <p>
+              Counts fixes that apply cleanly, pass required tests, and satisfy
+              structural validators. This is the primary full-mode metric.
+            </p>
           </article>
         </div>
       </section>
@@ -78,8 +113,14 @@ export default async function Home() {
           </div>
           <Link href="/leaderboard">Open leaderboard</Link>
         </div>
-        {previewRows.length ? <LeaderboardPreview rows={previewRows} /> : (
-          <EmptyState title="No benchmark runs recorded" message="Generate a deterministic baseline locally to populate the leaderboard." command={emptyCommands} />
+        {previewRows.length ? (
+          <LeaderboardPreview rows={previewRows} />
+        ) : (
+          <EmptyState
+            title="No benchmark runs recorded"
+            message="Generate a deterministic baseline locally to populate the leaderboard."
+            command={emptyCommands}
+          />
         )}
       </section>
 
@@ -93,11 +134,30 @@ export default async function Home() {
         </div>
         <table className="data-table benchmark-table">
           <thead>
-            <tr><th>Pack</th><th>Cases</th><th>Purpose</th><th>Validation</th></tr>
+            <tr>
+              <th>Pack</th>
+              <th>Cases</th>
+              <th>Purpose</th>
+              <th>Validation</th>
+            </tr>
           </thead>
           <tbody>
-            <tr><td><code>benchmark_sets/v1</code></td><td>10</td><td>Baseline harness cases</td><td>review scoring + validation</td></tr>
-            <tr><td><code>benchmark_sets/audit_v1</code></td><td>10</td><td>Patch-required audit cases</td><td>patch apply + tests + validators</td></tr>
+            <tr>
+              <td>
+                <code>benchmark_sets/v1</code>
+              </td>
+              <td>10</td>
+              <td>Baseline harness cases</td>
+              <td>review scoring + validation</td>
+            </tr>
+            <tr>
+              <td>
+                <code>benchmark_sets/audit_v1</code>
+              </td>
+              <td>10</td>
+              <td>Patch-required audit cases</td>
+              <td>patch apply + tests + validators</td>
+            </tr>
           </tbody>
         </table>
       </section>
@@ -123,9 +183,14 @@ export default async function Home() {
         <div>
           <p className="section-kicker">Run locally</p>
           <h2>Reproduce the benchmark controls on your machine.</h2>
-          <p>Local execution is explicit. Use it with benchmark fixtures you trust.</p>
+          <p>
+            Local execution is explicit. Use it with benchmark fixtures you
+            trust.
+          </p>
         </div>
-        <CodeBlock compact label="Terminal">{runCommands}</CodeBlock>
+        <CodeBlock compact label="Terminal">
+          {runCommands}
+        </CodeBlock>
       </section>
     </>
   );
@@ -139,22 +204,39 @@ function BenchmarkArtifactPanel({ rows }: { rows: LeaderboardRow[] }) {
         <strong>10 patch-required cases</strong>
       </div>
       <dl>
-        <div><dt>Primary metric</dt><dd><code>validated_f_beta</code></dd></div>
-        <div><dt>Validation stages</dt><dd>patch apply, tests, structural validators</dd></div>
-        <div><dt>Baselines</dt><dd>reference-patch, keyword_gamer, custom-command</dd></div>
+        <div>
+          <dt>Primary metric</dt>
+          <dd>
+            <code>validated_f_beta</code>
+          </dd>
+        </div>
+        <div>
+          <dt>Validation stages</dt>
+          <dd>patch apply, tests, structural validators</dd>
+        </div>
+        <div>
+          <dt>Baselines</dt>
+          <dd>Reference Patch, Control: Keyword Gamer, Custom Command</dd>
+        </div>
       </dl>
       {rows.length ? (
         <div className="artifact-results">
           <p>Top recorded controls</p>
           {rows.slice(0, 3).map((row, index) => (
             <div key={row.run_id}>
-              <span>{index + 1}. {reviewerName(row)}</span>
-              <strong>{row.deterministic_metrics?.validated_f_beta.toFixed(3)}</strong>
+              <span>
+                {index + 1}. {reviewerDisplayName(row)}
+              </span>
+              <strong>
+                {row.deterministic_metrics?.validated_f_beta.toFixed(3)}
+              </strong>
             </div>
           ))}
         </div>
       ) : (
-        <CodeBlock compact label="Generate runs">{emptyCommands}</CodeBlock>
+        <CodeBlock compact label="Generate runs">
+          {emptyCommands}
+        </CodeBlock>
       )}
     </aside>
   );
@@ -165,21 +247,60 @@ function LeaderboardPreview({ rows }: { rows: LeaderboardRow[] }) {
     <div className="table-scroll">
       <table className="data-table preview-table">
         <thead>
-          <tr><th>Rank</th><th>Reviewer</th><th>Benchmark</th><th>Detection F-beta</th><th>Validated F-beta</th><th>Passes</th><th>Status</th></tr>
+          <tr>
+            <th>Rank</th>
+            <th>Reviewer</th>
+            <th>Benchmark</th>
+            <th>Detection F-beta</th>
+            <th>Validated F-beta</th>
+            <th>Passes</th>
+            <th>Status</th>
+          </tr>
         </thead>
         <tbody>
           {rows.map((row, index) => {
             const metrics = row.deterministic_metrics!;
-            const detectedOnly = metrics.detection_f_beta >= 0.8 && metrics.validated_f_beta <= 0.3;
+            const detectedOnly =
+              metrics.detection_f_beta >= 0.8 &&
+              metrics.validated_f_beta <= 0.3;
             return (
-              <tr key={row.run_id} style={{ animationDelay: `${index * 40}ms` }}>
+              <tr
+                key={row.run_id}
+                style={{ animationDelay: `${index * 40}ms` }}
+              >
                 <td className="numeric">{index + 1}</td>
-                <td><strong>{reviewerName(row)}</strong></td>
-                <td><code>{row.benchmark_set ?? "recorded"}</code></td>
-                <td className="numeric">{metrics.detection_f_beta.toFixed(3)}</td>
-                <td className="numeric strong-metric">{metrics.validated_f_beta.toFixed(3)}</td>
-                <td className="numeric">{row.deterministic_passes}/{row.case_count}</td>
-                <td><StatusBadge tone={detectedOnly ? "warning" : metrics.validated_f_beta >= 0.8 ? "success" : "danger"}>{detectedOnly ? "detected only" : metrics.validated_f_beta >= 0.8 ? "validated" : "not validated"}</StatusBadge></td>
+                <td>
+                  <strong>{reviewerDisplayName(row)}</strong>
+                </td>
+                <td>
+                  <code>{row.benchmark_set ?? "recorded"}</code>
+                </td>
+                <td className="numeric">
+                  {metrics.detection_f_beta.toFixed(3)}
+                </td>
+                <td className="numeric strong-metric">
+                  {metrics.validated_f_beta.toFixed(3)}
+                </td>
+                <td className="numeric">
+                  {row.deterministic_passes}/{row.case_count}
+                </td>
+                <td>
+                  <StatusBadge
+                    tone={
+                      detectedOnly
+                        ? "warning"
+                        : metrics.validated_f_beta >= 0.8
+                          ? "success"
+                          : "danger"
+                    }
+                  >
+                    {detectedOnly
+                      ? "detected only"
+                      : metrics.validated_f_beta >= 0.8
+                        ? "validated"
+                        : "not validated"}
+                  </StatusBadge>
+                </td>
               </tr>
             );
           })}
@@ -187,8 +308,4 @@ function LeaderboardPreview({ rows }: { rows: LeaderboardRow[] }) {
       </table>
     </div>
   );
-}
-
-function reviewerName(row: LeaderboardRow) {
-  return row.reviewer === "mock" && row.model ? `mock:${row.model}` : row.reviewer;
 }

@@ -6,6 +6,7 @@ import { CodeBlock } from "../../components/CodeBlock";
 import { PageHeader } from "../../components/PageHeader";
 import { StatusBadge } from "../../components/StatusBadge";
 import { EXPECTED_REPORT_SCHEMA_VERSION } from "../../lib/auditReport";
+import { identityFromSlug, reviewerDisplayName } from "../../lib/reviewers";
 
 type Check = {
   status: "passing" | "failing" | "unknown";
@@ -93,30 +94,69 @@ export default function VerifyPage() {
         eyebrow="Verification / Local evidence"
         title="Project Health"
         description="A generated snapshot of reproducible checks and deterministic control outcomes. Unknown means the command was not recorded in this snapshot."
-        actions={snapshot ? <span className="verification-time">Generated {new Date(snapshot.generated_at).toLocaleString()}</span> : undefined}
+        actions={
+          snapshot ? (
+            <span className="verification-time">
+              Generated {new Date(snapshot.generated_at).toLocaleString()}
+            </span>
+          ) : undefined
+        }
       />
       {!snapshot ? (
         <section className="panel empty section-space">
           <h2>No verification snapshot generated yet</h2>
-          <p>Generate a local evidence snapshot; checks not executed remain explicitly unknown.</p>
-          <CodeBlock compact>python scripts/generate_verification_snapshot.py --run-validation --run-quality-checks --generate-report</CodeBlock>
+          <p>
+            Generate a local evidence snapshot; checks not executed remain
+            explicitly unknown.
+          </p>
+          <CodeBlock compact>
+            python scripts/generate_verification_snapshot.py --run-validation
+            --run-quality-checks --generate-report
+          </CodeBlock>
         </section>
       ) : (
         <>
           <section className="health-grid">
-            <HealthCard label="Backend tests" check={snapshot.quality_checks.tests} />
+            <HealthCard
+              label="Backend tests"
+              check={snapshot.quality_checks.tests}
+            />
             <HealthCard label="Lint" check={snapshot.quality_checks.lint} />
-            <HealthCard label="Typecheck" check={snapshot.quality_checks.typecheck} />
-            <HealthCard label="Dashboard build" check={snapshot.quality_checks.dashboard_build} />
-            <HealthCard label="audit_v1 validation" check={snapshot.benchmark_sets.audit_v1} />
-            <BaselineHealth label="reference-patch baseline" baseline={snapshot.baselines["reference-patch"]} />
-            <BaselineHealth label="keyword_gamer adversarial baseline" baseline={snapshot.baselines["mock:keyword_gamer"]} />
-            <HealthCard label="Audit report generation" check={snapshot.capabilities.audit_report_generation} />
-            <HealthCard label="Custom-command reviewer" check={snapshot.capabilities.custom_command_reviewer} />
+            <HealthCard
+              label="Typecheck"
+              check={snapshot.quality_checks.typecheck}
+            />
+            <HealthCard
+              label="Dashboard build"
+              check={snapshot.quality_checks.dashboard_build}
+            />
+            <HealthCard
+              label="audit_v1 validation"
+              check={snapshot.benchmark_sets.audit_v1}
+            />
+            <BaselineHealth
+              label="Reference Patch baseline"
+              baseline={snapshot.baselines["reference-patch"]}
+            />
+            <BaselineHealth
+              label="Control: Keyword Gamer (adversarial) baseline"
+              baseline={snapshot.baselines["mock:keyword_gamer"]}
+            />
+            <HealthCard
+              label="Audit report generation"
+              check={snapshot.capabilities.audit_report_generation}
+            />
+            <HealthCard
+              label="Custom-command reviewer"
+              check={snapshot.capabilities.custom_command_reviewer}
+            />
           </section>
           <section className="panel section-space">
             <h2>Baseline Matrix</h2>
-            <p className="matrix-note">These rows are deterministic controls from saved local <code>audit_v1</code> runs, not real model performance claims.</p>
+            <p className="matrix-note">
+              These rows are deterministic controls from saved local{" "}
+              <code>audit_v1</code> runs, not real model performance claims.
+            </p>
             <div className="table-scroll">
               <table className="data-table">
                 <thead>
@@ -130,16 +170,29 @@ export default function VerifyPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {Object.entries(snapshot.baselines).map(([reviewer, row]) => (
-                    <tr key={reviewer}>
-                      <td><strong>{reviewer}</strong></td>
-                      <td><StatusBadge tone="neutral">Control</StatusBadge></td>
-                      <td>{metric(row.metrics?.detection_f_beta)}</td>
-                      <td className="strong-metric">{metric(row.metrics?.validated_f_beta)}</td>
-                      <td>{row.metrics ? `${row.metrics.deterministic_passes}/${row.metrics.case_count}` : "-"}</td>
-                      <td>{row.meaning}</td>
-                    </tr>
-                  ))}
+                  {Object.entries(snapshot.baselines).map(([slug, row]) => {
+                    const identity = identityFromSlug(slug);
+                    return (
+                      <tr key={slug}>
+                        <td>
+                          <strong>{reviewerDisplayName(identity)}</strong>
+                        </td>
+                        <td>
+                          <StatusBadge tone="neutral">Control</StatusBadge>
+                        </td>
+                        <td>{metric(row.metrics?.detection_f_beta)}</td>
+                        <td className="strong-metric">
+                          {metric(row.metrics?.validated_f_beta)}
+                        </td>
+                        <td>
+                          {row.metrics
+                            ? `${row.metrics.deterministic_passes}/${row.metrics.case_count}`
+                            : "-"}
+                        </td>
+                        <td>{row.meaning}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -153,8 +206,13 @@ export default function VerifyPage() {
         </div>
         <div className="panel">
           <h2>Troubleshooting</h2>
-          <p className="subtitle">Installation, stale dashboard data, missing reports, and empty-run guidance are documented step by step.</p>
-          <Link className="button" href="/docs/troubleshooting">Open troubleshooting -&gt;</Link>
+          <p className="subtitle">
+            Installation, stale dashboard data, missing reports, and empty-run
+            guidance are documented step by step.
+          </p>
+          <Link className="button" href="/docs/troubleshooting">
+            Open troubleshooting -&gt;
+          </Link>
         </div>
       </section>
     </>
@@ -168,12 +226,22 @@ function HealthCard({ label, check }: { label: string; check: Check }) {
       <h3>{label}</h3>
       <p>{check.explanation}</p>
       <p className="command">{check.command}</p>
-      <p>{check.checked_at ? `Checked ${new Date(check.checked_at).toLocaleString()}` : "Not checked in this snapshot"}</p>
+      <p>
+        {check.checked_at
+          ? `Checked ${new Date(check.checked_at).toLocaleString()}`
+          : "Not checked in this snapshot"}
+      </p>
     </article>
   );
 }
 
-function BaselineHealth({ label, baseline }: { label: string; baseline: Baseline }) {
+function BaselineHealth({
+  label,
+  baseline,
+}: {
+  label: string;
+  baseline: Baseline;
+}) {
   return (
     <HealthCard
       label={label}
@@ -194,5 +262,9 @@ function metric(value: number | null | undefined) {
 }
 
 function tone(status: Check["status"]) {
-  return status === "passing" ? "success" : status === "failing" ? "danger" : "neutral";
+  return status === "passing"
+    ? "success"
+    : status === "failing"
+      ? "danger"
+      : "neutral";
 }
