@@ -5,7 +5,7 @@ import { EmptyState } from "../components/EmptyState";
 import { StatusBadge } from "../components/StatusBadge";
 import { fetchJson, type LeaderboardRow } from "../lib/api";
 import { loadReportLeaderboardRows } from "../lib/auditReport";
-import { reviewerDisplayName } from "../lib/reviewers";
+import { CONTROL_BASELINE_NOTE, reviewerDisplayName } from "../lib/reviewers";
 
 const pipeline = [
   "Seeded PR",
@@ -232,6 +232,7 @@ function BenchmarkArtifactPanel({ rows }: { rows: LeaderboardRow[] }) {
               </strong>
             </div>
           ))}
+          <p className="artifact-note">{CONTROL_BASELINE_NOTE}</p>
         </div>
       ) : (
         <CodeBlock compact label="Generate runs">
@@ -251,8 +252,12 @@ function LeaderboardPreview({ rows }: { rows: LeaderboardRow[] }) {
             <th>Rank</th>
             <th>Reviewer</th>
             <th>Benchmark</th>
-            <th>Detection F-beta</th>
-            <th>Validated F-beta</th>
+            <th>
+              Detection <span className="nowrap">F-beta</span>
+            </th>
+            <th>
+              Validated <span className="nowrap">F-beta</span>
+            </th>
             <th>Passes</th>
             <th>Status</th>
           </tr>

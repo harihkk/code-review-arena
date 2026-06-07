@@ -1494,6 +1494,16 @@ input:focus-visible {
   color: var(--brand);
   font: 700 0.9rem var(--mono);
 }
+.artifact-results p.artifact-note {
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 400;
+  letter-spacing: normal;
+  line-height: 1.5;
+  margin: 12px 0 0;
+  text-transform: none;
+}
 .section-large {
   content-visibility: auto;
   contain-intrinsic-size: 1px 560px;
