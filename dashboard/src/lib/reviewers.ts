@@ -4,8 +4,6 @@
 
 export type ReviewerIdentity = { reviewer: string; model?: string | null };
 
-export type ReviewerType = "control" | "reference" | "custom" | "external";
-
 const CONTROL_DISPLAY_NAMES: Record<string, string> = {
   perfect_patch: "Control: Perfect Repair",
   keyword_gamer: "Control: Keyword Gamer",
@@ -23,12 +21,7 @@ const DISPLAY_NAMES: Record<string, string> = {
 export const CONTROL_BASELINE_NOTE =
   "Control baselines are deterministic harness checks, not external model results.";
 
-/** The internal reviewer:model slug, e.g. "mock:perfect_patch". Not for display. */
-export function reviewerSlug({ reviewer, model }: ReviewerIdentity): string {
-  return reviewer === "mock" && model ? `mock:${model}` : reviewer;
-}
-
-/** Inverse of {@link reviewerSlug}: recovers an identity from a stored slug key. */
+/** Recovers a reviewer identity from a stored slug key, e.g. "mock:perfect_patch". */
 export function identityFromSlug(slug: string): ReviewerIdentity {
   const separator = slug.indexOf(":");
   if (separator === -1) return { reviewer: slug };
@@ -43,16 +36,6 @@ export function isControlBaseline({
   model,
 }: ReviewerIdentity): boolean {
   return reviewer === "mock" && Boolean(model);
-}
-
-export function reviewerType({
-  reviewer,
-  model,
-}: ReviewerIdentity): ReviewerType {
-  if (isControlBaseline({ reviewer, model })) return "control";
-  if (reviewer === "reference-patch") return "reference";
-  if (reviewer === "custom-command") return "custom";
-  return "external";
 }
 
 export function reviewerDisplayName(identity: ReviewerIdentity): string {
