@@ -1,4 +1,4 @@
-# CodeReview Arena
+# Code Review Arena
 
 Execution-backed benchmark for AI code-review agents.
 
@@ -6,15 +6,21 @@ Execution-backed benchmark for AI code-review agents.
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 
-## Overview
+## About
 
-CodeReview Arena evaluates whether review agents can detect seeded pull-request bugs
+Code Review Arena evaluates whether review agents can detect seeded pull-request bugs
 and produce patches that pass deterministic validation. It reports detection and
 validation separately so a plausible finding is not confused with a working fix.
 
+Most review benchmarks stop at whether a model flagged the right line. This one runs the
+suggested fix in an isolated workspace and checks that it applies, passes the tests the
+case requires, and satisfies hand-authored structural validators. A reviewer only scores
+on the primary metric when its repair actually holds up.
+
 The project includes a local CLI, two benchmark packs, deterministic controls,
 custom-command reviewer support, saved run traces, and a dashboard for leaderboard and
-report inspection.
+report inspection. It is model-agnostic and ships no vendor adapters, so it makes no
+claims about any specific external model.
 
 ## Detection vs validation
 
@@ -100,7 +106,7 @@ workspaces. Use it only with fixtures you trust.
 
 ## Custom reviewers
 
-CodeReview Arena is model-agnostic. It ships no vendor adapters and makes no model
+Code Review Arena is model-agnostic. It ships no vendor adapters and makes no model
 performance claims; the built-in reviewers are the deterministic controls and
 `reference-patch`. To benchmark a real model, wrap it in any local command that reads
 the case JSON on stdin/args and prints structured review JSON, then point
@@ -162,7 +168,7 @@ cd dashboard && npm run build
 - Structural validators are hand-authored and may reject alternate valid repairs.
 - Passing tests supplies execution evidence, not proof of complete correctness.
 - Valid fixes can fail when a validator is intentionally narrow.
-- CodeReview Arena is a local audit harness, not a large-scale public ranking.
+- Code Review Arena is a local audit harness, not a large-scale public ranking.
 
 ## License
 
