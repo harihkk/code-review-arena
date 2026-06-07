@@ -8,14 +8,11 @@ Execution-backed benchmark for AI code-review agents.
 
 ## About
 
-Code Review Arena checks whether a review agent can find a seeded bug in a pull request
-and actually fix it. It applies the suggested patch in an isolated workspace, runs the
-tests the case requires, and runs structural validators, scoring detection and validation
-as separate signals so a good-looking comment is never mistaken for a working repair.
-
-Everything runs locally: a CLI, two benchmark packs, deterministic control reviewers, a
-hook for plugging in your own model, and a dashboard for browsing results. It is
-model-agnostic and ships no vendor adapters, so it makes no claims about any one model.
+Code Review Arena measures whether an AI review agent can find a seeded bug in a pull
+request and actually fix it. It applies each suggested patch in an isolated workspace,
+runs the required tests and validators, and scores detection separately from validation,
+so a sharp-looking comment is never mistaken for a working repair. Everything runs
+locally and the harness is model-agnostic.
 
 ## How it works
 
