@@ -1,8 +1,21 @@
+import Link from "next/link";
+
 import { CodeBlock } from "../../../components/CodeBlock";
 import { FailureReasonChart } from "../../../components/FailureReasonChart";
+import { shortFailureLabel } from "../../../components/FailureReasonList";
 import { PageHeader } from "../../../components/PageHeader";
 import { StatusBadge } from "../../../components/StatusBadge";
-import { AuditReviewerRow, displayReviewer, readAuditReport } from "../../../lib/auditReport";
+import {
+  AuditReport,
+  AuditReviewerRow,
+  readAuditReport,
+} from "../../../lib/auditReport";
+import {
+  CONTROL_BASELINE_NOTE,
+  reviewerDisplayName,
+} from "../../../lib/reviewers";
+
+type CaseStudy = AuditReport["case_studies"][number];
 
 export default function AuditV1ReportPage() {
   const { report, error } = readAuditReport();
@@ -33,8 +46,13 @@ export default function AuditV1ReportPage() {
         />
         <section className="panel empty">
           <h2>No audit report data found.</h2>
-          <p>Generate local run evidence and a report snapshot to populate this page.</p>
-          <CodeBlock compact>{`arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
+          <p>
+            Generate local run evidence and a report snapshot to populate this
+            page.
+          </p>
+          <CodeBlock
+            compact
+          >{`arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
 arena audit-report runs/ --output docs/reports/audit-v1-results.md`}</CodeBlock>
         </section>
       </>
@@ -54,10 +72,15 @@ arena audit-report runs/ --output docs/reports/audit-v1-results.md`}</CodeBlock>
         <dl className="report-summary">
           <ReportFact term="Cases" value={String(report.summary.case_count)} />
           <ReportFact term="Primary metric" value="validated_f_beta" code />
-          <ReportFact term="Validation" value="patch apply + tests + validators" />
+          <ReportFact
+            term="Validation"
+            value="patch apply + tests + validators"
+          />
           <ReportFact term="Source" value="local run artifacts" />
         </dl>
-        <p className="section-caption">Generated {new Date(report.generated_at).toLocaleString()}</p>
+        <p className="section-caption">
+          Generated {new Date(report.generated_at).toLocaleString()}
+        </p>
       </section>
 
       <section className="report-section">
@@ -66,7 +89,8 @@ arena audit-report runs/ --output docs/reports/audit-v1-results.md`}</CodeBlock>
           <StatusBadge tone="neutral">Generated local run data</StatusBadge>
         </div>
         <p className="section-caption">
-          Reference and mock rows are deterministic controls. No external model row is shown unless it exists in the report data.
+          {CONTROL_BASELINE_NOTE} No external model row is shown unless it
+          exists in the report data.
         </p>
         <ReviewerTable rows={report.reviewers} />
       </section>
@@ -77,12 +101,23 @@ arena audit-report runs/ --output docs/reports/audit-v1-results.md`}</CodeBlock>
           {report.reviewers.map((row) => (
             <article key={`${row.reviewer}-${row.model}-${row.mode}-gap`}>
               <div className="gap-row-head">
-                <strong><code>{displayReviewer(row)}</code></strong>
+                <span className="reviewer-name">
+                  <strong>{reviewerDisplayName(row)}</strong>
+                </span>
                 <span>Gap {gap(row)}</span>
               </div>
               <MetricBar label="Detection" value={row.detection_f_beta} />
-              <MetricBar label="Validation" value={row.validated_f_beta} accent />
-              <p>Primary failure mode: <code>{row.primary_failure_mode ?? "none"}</code></p>
+              <MetricBar
+                label="Validation"
+                value={row.validated_f_beta}
+                accent
+              />
+              <p className="section-caption">
+                Primary failure mode:{" "}
+                {row.primary_failure_mode
+                  ? shortFailureLabel(row.primary_failure_mode)
+                  : "None"}
+              </p>
             </article>
           ))}
         </div>
@@ -96,34 +131,37 @@ arena audit-report runs/ --output docs/reports/audit-v1-results.md`}</CodeBlock>
       <section className="report-section">
         <h2>Case studies</h2>
         {report.case_studies.length === 0 ? (
-          <p className="empty-inline">No failing case evidence appears in this generated report.</p>
+          <p className="empty-inline">
+            No failing case evidence appears in this generated report.
+          </p>
         ) : (
           <div className="case-studies">
             {report.case_studies.slice(0, 3).map((study) => (
-              <article className="panel case-study" key={`${study.case_id}-${study.reviewer}-${study.model}`}>
-                <h3><code>{study.case_id}</code></h3>
-                <p className="section-caption">Reviewer: <code>{displayReviewer(study)}</code></p>
-                <p><strong>Detected:</strong> {study.finding_summary || "No finding summary recorded."}</p>
-                <p><strong>Why validation failed:</strong> <code>{study.failure_reasons.join(", ")}</code></p>
-                {study.validator_evidence.map((evidence) => (
-                  <p key={evidence.name}><strong>Evidence:</strong> {evidence.name}: {evidence.message}</p>
-                ))}
-                {study.test_stderr_tail ? <p><strong>Test evidence:</strong> <code>{study.test_stderr_tail}</code></p> : null}
-              </article>
+              <CaseStudyCard
+                study={study}
+                key={`${study.case_id}-${study.reviewer}-${study.model}`}
+              />
             ))}
           </div>
         )}
       </section>
 
-      <section className="report-section report-two-columns">
-        <div className="panel">
+      <section className="report-section">
+        <div className="panel reproduce-panel">
           <h2>Reproduce</h2>
-          <CodeBlock compact>{report.reproducibility_commands.join("\n")}</CodeBlock>
+          <CodeBlock compact>
+            {report.reproducibility_commands.join("\n")}
+          </CodeBlock>
         </div>
+      </section>
+
+      <section className="report-section">
         <div className="panel">
           <h2>Limitations</h2>
-          <ul className="list">
-            {report.limitations.map((item) => <li key={item}>{item}</li>)}
+          <ul className="limitations-list">
+            {report.limitations.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
           </ul>
         </div>
       </section>
@@ -131,7 +169,66 @@ arena audit-report runs/ --output docs/reports/audit-v1-results.md`}</CodeBlock>
   );
 }
 
-function ReportFact({ term, value, code = false }: { term: string; value: string; code?: boolean }) {
+function CaseStudyCard({ study }: { study: CaseStudy }) {
+  const location = detectedLocation(study.finding_summary);
+  return (
+    <article className="panel case-study">
+      <dl className="case-study-fields">
+        <div>
+          <dt>Case</dt>
+          <dd>
+            <Link href={`/cases/${study.case_id}?benchmark_set=audit_v1`}>
+              {study.case_id}
+            </Link>
+          </dd>
+        </div>
+        <div>
+          <dt>Reviewer</dt>
+          <dd className="reviewer-name">{reviewerDisplayName(study)}</dd>
+        </div>
+        {location ? (
+          <div>
+            <dt>Detected</dt>
+            <dd className="file">{location}</dd>
+          </div>
+        ) : null}
+        <div>
+          <dt>Validation</dt>
+          <dd>
+            {study.failure_reasons.length ? (
+              <div className="validation-result">
+                <span className="failure-text">Failed validation</span>
+                <ul className="reason-chips">
+                  {study.failure_reasons.map((reason) => (
+                    <li key={reason}>{shortFailureLabel(reason)}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <span className="pass-text">Passed all validation stages.</span>
+            )}
+          </dd>
+        </div>
+      </dl>
+    </article>
+  );
+}
+
+/** Best-effort extraction of a file-like path from a reviewer's free-text finding summary. */
+function detectedLocation(summary: string): string | null {
+  const match = summary.match(/\b[\w-]+(?:\/[\w.-]+)*\.[A-Za-z0-9]{1,8}\b/);
+  return match ? match[0] : null;
+}
+
+function ReportFact({
+  term,
+  value,
+  code = false,
+}: {
+  term: string;
+  value: string;
+  code?: boolean;
+}) {
   return (
     <div className="report-fact">
       <dt>{term}</dt>
@@ -148,8 +245,12 @@ function ReviewerTable({ rows }: { rows: AuditReviewerRow[] }) {
           <tr>
             <th>Reviewer</th>
             <th>Model</th>
-            <th>Detection F-beta</th>
-            <th>Validated F-beta</th>
+            <th>
+              Detection <span className="nowrap">F-beta</span>
+            </th>
+            <th>
+              Validated <span className="nowrap">F-beta</span>
+            </th>
             <th>Deterministic Pass Rate</th>
             <th>Patch Apply Rate</th>
             <th>Test Pass Rate</th>
@@ -160,7 +261,11 @@ function ReviewerTable({ rows }: { rows: AuditReviewerRow[] }) {
         <tbody>
           {rows.map((row) => (
             <tr key={`${row.reviewer}-${row.model}-${row.mode}`}>
-              <td><code>{displayReviewer(row)}</code></td>
+              <td>
+                <span className="reviewer-name">
+                  <strong>{reviewerDisplayName(row)}</strong>
+                </span>
+              </td>
               <td>{row.model || "-"}</td>
               <td>{metric(row.detection_f_beta)}</td>
               <td className="strong-metric">{metric(row.validated_f_beta)}</td>
@@ -177,12 +282,22 @@ function ReviewerTable({ rows }: { rows: AuditReviewerRow[] }) {
   );
 }
 
-function MetricBar({ label, value, accent = false }: { label: string; value: number | null; accent?: boolean }) {
+function MetricBar({
+  label,
+  value,
+  accent = false,
+}: {
+  label: string;
+  value: number | null;
+  accent?: boolean;
+}) {
   const percent = Math.max(0, Math.min(1, value ?? 0)) * 100;
   return (
     <div className={`report-bar ${accent ? "accent" : ""}`}>
       <span>{label}</span>
-      <i><b style={{ width: `${percent}%` }} /></i>
+      <i>
+        <b style={{ width: `${percent}%` }} />
+      </i>
       <strong>{metric(value)}</strong>
     </div>
   );
