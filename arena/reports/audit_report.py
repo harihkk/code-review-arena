@@ -230,7 +230,7 @@ def _reproducibility_commands() -> list[str]:
     return [
         "arena validate benchmark_sets/audit_v1",
         "arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution",
-        "arena run benchmark_sets/audit_v1 --reviewer mock:keyword_gamer --mode full --allow-local-execution",
+        "arena run benchmark_sets/audit_v1 --reviewer control:keyword_gamer --mode full --allow-local-execution",
         "arena leaderboard runs/ --metric validated_f_beta --beta 1.0",
         "arena audit-report runs/ --output docs/reports/audit-v1-results.md",
     ]

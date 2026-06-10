@@ -24,7 +24,7 @@ case metadata. Finally update `manifest.yaml`, then run:
 
 ```bash
 arena validate benchmark_sets/v1
-arena run benchmark_sets/v1 --reviewer mock:perfect_patch --mode full --allow-local-execution
+arena run benchmark_sets/v1 --reviewer control:perfect_patch --mode full --allow-local-execution
 arena leaderboard runs/ --metric validated_f_beta --beta 1.0
 pytest
 ```

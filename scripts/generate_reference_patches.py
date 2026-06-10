@@ -2,7 +2,7 @@
 
 A reference patch is the canonical known-good repair: the unified diff that turns
 a case's buggy `after/` source into its fixed form. The fixed sources are the
-single source of truth held in ``MockReviewer.FIXED_FILES``; this script renders
+single source of truth held in ``ControlReviewer.FIXED_FILES``; this script renders
 them as diffs so the ``reference-patch`` reviewer and the validator have a gold
 artifact per case.
 
@@ -17,13 +17,13 @@ import difflib
 from pathlib import Path
 
 from arena.benchmark.case_loader import build_context, load_cases
-from arena.reviewers.mock import MockReviewer
+from arena.reviewers.controls import ControlReviewer
 from arena.reviewers.reference_patch import REFERENCE_PATCH_FILENAME
 
 
 def render_reference_patch(case_id: str, original: str) -> str:
-    path = MockReviewer.ANSWERS[case_id][2]
-    replacement = MockReviewer.FIXED_FILES[case_id]
+    path = ControlReviewer.ANSWERS[case_id][2]
+    replacement = ControlReviewer.FIXED_FILES[case_id]
     return "".join(
         difflib.unified_diff(
             original.splitlines(keepends=True),
@@ -37,13 +37,13 @@ def render_reference_patch(case_id: str, original: str) -> str:
 def generate(pack: Path, *, force: bool = False) -> list[str]:
     written: list[str] = []
     for case in load_cases(pack):
-        if case.id not in MockReviewer.FIXED_FILES or case.id not in MockReviewer.ANSWERS:
+        if case.id not in ControlReviewer.FIXED_FILES or case.id not in ControlReviewer.ANSWERS:
             continue
         assert case.case_dir is not None
         target = case.case_dir / REFERENCE_PATCH_FILENAME
         if target.exists() and not force:
             continue
-        path = MockReviewer.ANSWERS[case.id][2]
+        path = ControlReviewer.ANSWERS[case.id][2]
         original = build_context(case).relevant_files[path]
         target.write_text(render_reference_patch(case.id, original), encoding="utf-8")
         written.append(case.id)

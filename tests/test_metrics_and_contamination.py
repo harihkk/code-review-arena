@@ -14,7 +14,7 @@ from arena.core.models import (
     ReviewResult,
     ScoreBreakdown,
 )
-from arena.reviewers.mock import MockReviewer
+from arena.reviewers.controls import ControlReviewer
 from arena.scoring.deterministic_scorer import aggregate_deterministic_metrics
 from arena.scoring.metrics import f_beta_score, precision, recall
 from arena.scoring.scorer import score_case
@@ -167,7 +167,7 @@ def test_empty_review_detects_nothing():
 def test_false_positive_patch_control_detects_but_does_not_validate(tmp_path):
     run = run_benchmark(
         AUDIT,
-        MockReviewer("false_positive_patch"),
+        ControlReviewer("false_positive_patch"),
         output_dir=tmp_path / "runs",
         db_path=tmp_path / "arena.db",
         mode="full",

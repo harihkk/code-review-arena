@@ -9,7 +9,7 @@ class CreateRunRequest(BaseModel):
     # A pack name under the configured benchmark root. A legacy
     # "benchmark_sets/<name>" path is accepted and normalized to <name>.
     benchmark_set: str = "v1"
-    reviewer: str = "mock:perfect"
+    reviewer: str = "control:perfect"
     command: str | None = None
     mode: Literal["review", "patch", "full"] = "review"
     beta: float | None = None

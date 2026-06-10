@@ -30,7 +30,7 @@ def validate(benchmark_set: Path = typer.Argument(DEFAULT_BENCHMARK_SET)) -> Non
 @app.command()
 def run(
     benchmark_set: Path = typer.Argument(DEFAULT_BENCHMARK_SET),
-    reviewer: str = typer.Option("mock:perfect", "--reviewer"),
+    reviewer: str = typer.Option("control:perfect", "--reviewer"),
     mode: Literal["review", "patch", "full"] = typer.Option("review", "--mode"),
     beta: float | None = typer.Option(None, "--beta", min=0.01),
     allow_local_execution: bool = typer.Option(False, "--allow-local-execution"),

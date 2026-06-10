@@ -62,6 +62,20 @@ def test_repair_is_opt_in_for_custom_command():
     assert len(repaired.parsed_response.findings) == 1
 
 
+def test_control_spec_and_deprecated_mock_alias(capsys):
+    from arena.core.registry import create_reviewer
+    from arena.reviewers.controls import ControlReviewer
+
+    control = create_reviewer("control:keyword_gamer")
+    assert isinstance(control, ControlReviewer)
+    assert control.identifier == "control:keyword_gamer"
+    legacy = create_reviewer("mock:keyword_gamer")
+    assert isinstance(legacy, ControlReviewer)
+    assert legacy.identifier == "control:keyword_gamer"
+    assert "DEPRECATED" in capsys.readouterr().err
+    assert create_reviewer("control:reference_patch").name == "reference-patch"
+
+
 def test_verify_reviewer_accepts_valid_wrapper():
     result = runner.invoke(
         app,

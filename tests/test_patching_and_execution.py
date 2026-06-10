@@ -6,7 +6,7 @@ from arena.execution.test_executor import TestExecutionRequest, TestExecutor
 from arena.patching.patch_applier import PatchApplier
 from arena.patching.patch_models import PatchApplyRequest
 from arena.patching.patch_parser import touched_files
-from arena.reviewers.mock import MockReviewer
+from arena.reviewers.controls import ControlReviewer
 from arena.validators.base import ValidatorContext
 from arena.validators.registry import get_validator
 
@@ -19,7 +19,9 @@ def test_valid_patch_applies_without_mutating_fixture(benchmark_dir, tmp_path, m
     case = _case(benchmark_dir)
     source = (case.case_dir / case.input.after_dir).resolve()
     original = (source / "app/routes/admin.py").read_text(encoding="utf-8")
-    finding = MockReviewer("perfect_patch").review(build_context(case)).parsed_response.findings[0]
+    finding = (
+        ControlReviewer("perfect_patch").review(build_context(case)).parsed_response.findings[0]
+    )
     monkeypatch.chdir(tmp_path)
     result = PatchApplier(Path("runs")).apply(
         PatchApplyRequest(
@@ -54,9 +56,9 @@ def test_malformed_patch_fails_and_normalizes_paths(benchmark_dir, tmp_path):
 def test_negative_mock_patch_modes_expose_distinct_failures(benchmark_dir, tmp_path):
     case = _case(benchmark_dir)
     context = build_context(case)
-    missing = MockReviewer("detects_no_patch").review(context).parsed_response.findings[0]
+    missing = ControlReviewer("detects_no_patch").review(context).parsed_response.findings[0]
     assert missing.suggested_patch is None
-    malformed = MockReviewer("malformed_patch").review(context).parsed_response.findings[0]
+    malformed = ControlReviewer("malformed_patch").review(context).parsed_response.findings[0]
     malformed_result = PatchApplier(tmp_path / "runs").apply(
         PatchApplyRequest(
             case_id=case.id,
@@ -66,7 +68,7 @@ def test_negative_mock_patch_modes_expose_distinct_failures(benchmark_dir, tmp_p
         )
     )
     assert malformed_result.applied is False
-    bad = MockReviewer("bad_patch").review(context).parsed_response.findings[0]
+    bad = ControlReviewer("bad_patch").review(context).parsed_response.findings[0]
     bad_result = PatchApplier(tmp_path / "runs").apply(
         PatchApplyRequest(
             case_id=case.id,
@@ -86,7 +88,7 @@ def test_negative_mock_patch_modes_expose_distinct_failures(benchmark_dir, tmp_p
         )
     )
     assert validation.passed is False
-    noisy = MockReviewer("false_positive_patch").review(context).parsed_response
+    noisy = ControlReviewer("false_positive_patch").review(context).parsed_response
     assert len(noisy.findings) == 2
 
 

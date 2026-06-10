@@ -62,7 +62,7 @@ def test_api_run_trace_contains_dashboard_evidence(monkeypatch, tmp_path):
     created = client.post(
         "/runs",
         json={
-            "reviewer": "mock:false_positive_patch",
+            "reviewer": "control:false_positive_patch",
             "mode": "full",
             "allow_local_execution": True,
         },
@@ -113,7 +113,7 @@ def test_api_refuses_local_execution_without_server_opt_in(monkeypatch, tmp_path
     client = TestClient(server_app)
     refused = client.post(
         "/runs",
-        json={"reviewer": "mock:perfect", "mode": "full", "allow_local_execution": True},
+        json={"reviewer": "control:perfect", "mode": "full", "allow_local_execution": True},
     )
     assert refused.status_code == 403
 
@@ -131,11 +131,11 @@ def test_api_token_required_when_configured(monkeypatch, tmp_path):
     monkeypatch.setenv("ARENA_RUNS_DIR", str(tmp_path / "auth-runs"))
     monkeypatch.setenv("ARENA_API_TOKEN", "sekrit")
     client = TestClient(server_app)
-    denied = client.post("/runs", json={"reviewer": "mock:perfect"})
+    denied = client.post("/runs", json={"reviewer": "control:perfect"})
     assert denied.status_code == 401
     accepted = client.post(
         "/runs",
-        json={"reviewer": "mock:perfect"},
+        json={"reviewer": "control:perfect"},
         headers={"X-Arena-Token": "sekrit"},
     )
     job = _finished_job(client, accepted)
@@ -152,7 +152,7 @@ def test_cli_leaderboard_supports_validated_metric(monkeypatch, tmp_path):
             "run",
             str(source),
             "--reviewer",
-            "mock:perfect_patch",
+            "control:perfect_patch",
             "--mode",
             "full",
             "--allow-local-execution",

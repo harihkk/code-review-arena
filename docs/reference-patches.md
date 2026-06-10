@@ -12,11 +12,11 @@ The v1 patches are derived from the canonical fixed sources by
 `reference-patch` reads these static artifacts directly. It validates the benchmark
 fixtures and execution pipeline without inventing a reviewer result.
 
-`mock:perfect_patch` is different: it is a deterministic mock-reviewer happy path that
+`control:perfect_patch` is different: it is a deterministic mock-reviewer happy path that
 produces valid fixes through reviewer plumbing. The two controls should reach the same
 validated outcome for different reasons.
 
 ```bash
 arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
-arena run benchmark_sets/audit_v1 --reviewer mock:perfect_patch --mode full --allow-local-execution
+arena run benchmark_sets/audit_v1 --reviewer control:perfect_patch --mode full --allow-local-execution
 ```

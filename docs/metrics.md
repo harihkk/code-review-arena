@@ -55,7 +55,7 @@ arena leaderboard runs/ --metric patch_apply_rate
 
 ## Adversarial baseline: keyword_gamer
 
-`mock:keyword_gamer` is a deterministic adversarial reviewer for audit packs. It localizes
+`control:keyword_gamer` is a deterministic adversarial reviewer for audit packs. It localizes
 every seeded bug with plausible, keyword-rich findings (tenant scope, idempotency,
 citation validation, audience/issuer, cursor tiebreakers, and similar validator language)
 and always supplies a `suggested_patch`. The patch sounds credible but is superficial: it
@@ -68,5 +68,5 @@ shows why `validated_f_beta` is the primary full-mode metric: high detection sco
 do not prove a repair.
 
 ```bash
-arena run benchmark_sets/audit_v1 --reviewer mock:keyword_gamer --mode full --allow-local-execution
+arena run benchmark_sets/audit_v1 --reviewer control:keyword_gamer --mode full --allow-local-execution
 ```

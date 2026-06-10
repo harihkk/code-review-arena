@@ -11,7 +11,7 @@ cannot satisfy patch validation in full mode.
 
 ## Built-in reviewers
 
-- `mock:<mode>`: deterministic controls for testing the harness, not model comparisons.
+- `control:<mode>`: deterministic controls for testing the harness, not model comparisons.
   Modes: `perfect`, `partial`, `false_positive`, `invalid_json`, `perfect_patch`,
   `bad_patch`, `detects_no_patch`, `false_positive_patch`, `malformed_patch`,
   `keyword_gamer`. `keyword_gamer` emits keyword-rich reviews with superficial patches

@@ -9,7 +9,7 @@ from arena.reports.json_report import read_json_report
 from arena.reports.leaderboard import leaderboard_rows
 from arena.reports.markdown_report import render_markdown
 from arena.reviewers.base import BaseReviewer
-from arena.reviewers.mock import MockReviewer
+from arena.reviewers.controls import ControlReviewer
 
 
 @pytest.fixture
@@ -24,7 +24,7 @@ class _RaisesOnOneCase(BaseReviewer):
     model = "raises_one"
 
     def __init__(self, bad_case_id: str) -> None:
-        self._inner = MockReviewer("perfect_patch")
+        self._inner = ControlReviewer("perfect_patch")
         self._bad_case_id = bad_case_id
 
     def review(self, context):  # type: ignore[no-untyped-def]
@@ -44,7 +44,7 @@ def test_run_directory_reservation_never_reuses_an_existing_path(tmp_path):
 def test_runner_generates_reports_and_storage(benchmark_dir, tmp_path):
     run = run_benchmark(
         benchmark_dir,
-        MockReviewer("perfect"),
+        ControlReviewer("perfect"),
         output_dir=tmp_path / "runs",
         db_path=tmp_path / "arena.db",
     )
@@ -66,7 +66,7 @@ def test_runner_generates_reports_and_storage(benchmark_dir, tmp_path):
 def test_full_patch_run_generates_deterministic_reports(benchmark_dir, tmp_path):
     run = run_benchmark(
         benchmark_dir,
-        MockReviewer("perfect_patch"),
+        ControlReviewer("perfect_patch"),
         output_dir=tmp_path / "runs",
         db_path=tmp_path / "arena.db",
         mode="full",
@@ -96,7 +96,7 @@ def test_full_patch_run_generates_deterministic_reports(benchmark_dir, tmp_path)
 def _run_patch_mode(benchmark_dir, tmp_path, mode: str):
     return run_benchmark(
         benchmark_dir,
-        MockReviewer(mode),
+        ControlReviewer(mode),
         output_dir=tmp_path / "runs",
         db_path=tmp_path / "arena.db",
         mode="full",
@@ -150,7 +150,7 @@ def test_leaderboard_uses_validated_f_beta_as_the_primary_full_mode_metric(bench
 
     review_only = run_benchmark(
         benchmark_dir,
-        MockReviewer("perfect"),
+        ControlReviewer("perfect"),
         output_dir=tmp_path / "runs",
         db_path=tmp_path / "arena.db",
     )
@@ -163,7 +163,7 @@ def test_leaderboard_uses_validated_f_beta_as_the_primary_full_mode_metric(bench
 def _run_audit_patch_mode(audit_benchmark_dir: Path, tmp_path, mode: str):
     return run_benchmark(
         audit_benchmark_dir,
-        MockReviewer(mode),
+        ControlReviewer(mode),
         output_dir=tmp_path / "audit_runs",
         db_path=tmp_path / "audit.db",
         mode="full",
@@ -236,7 +236,7 @@ def test_audit_report_lists_keyword_gamer_as_detection_validation_gap(
     run = _run_audit_patch_mode(audit_benchmark_dir, tmp_path, "keyword_gamer")
     data = build_audit_report_data([run])
     gap_reviewers = {f"{gap['reviewer']}:{gap['model']}" for gap in data["gaps"]}
-    assert "mock:keyword_gamer" in gap_reviewers
+    assert "control:keyword_gamer" in gap_reviewers
     keyword_gap = next(gap for gap in data["gaps"] if gap["model"] == "keyword_gamer")
     assert keyword_gap["detection_f_beta"] == 1
     assert keyword_gap["validated_f_beta"] == 0

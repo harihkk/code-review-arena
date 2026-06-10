@@ -9,8 +9,8 @@ import pytest
 from arena.benchmark.benchmark_runner import run_benchmark
 from arena.core.config import project_root, resolve_benchmark_path
 from arena.core.errors import StorageError
+from arena.reviewers.controls import ControlReviewer
 from arena.reviewers.custom_command import redact_secrets
-from arena.reviewers.mock import MockReviewer
 from arena.storage.db import SCHEMA_VERSION, connect
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -58,20 +58,20 @@ def _score_fingerprint(run) -> list[tuple]:
 
 
 def test_identical_inputs_produce_identical_deterministic_scores(tmp_path):
-    first = run_benchmark(V1, MockReviewer("bad"), output_dir=tmp_path / "a", persist=False)
-    second = run_benchmark(V1, MockReviewer("bad"), output_dir=tmp_path / "b", persist=False)
+    first = run_benchmark(V1, ControlReviewer("bad"), output_dir=tmp_path / "a", persist=False)
+    second = run_benchmark(V1, ControlReviewer("bad"), output_dir=tmp_path / "b", persist=False)
     assert _score_fingerprint(first) == _score_fingerprint(second)
     assert first.total_score == second.total_score
     assert first.metadata.pack_checksum == second.metadata.pack_checksum
 
 
 def test_run_manifest_records_provenance_without_secrets(tmp_path):
-    run = run_benchmark(V1, MockReviewer("perfect"), output_dir=tmp_path / "runs", persist=False)
+    run = run_benchmark(V1, ControlReviewer("perfect"), output_dir=tmp_path / "runs", persist=False)
     manifest_path = tmp_path / "runs" / run.run_id / "run_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["run_id"] == run.run_id
     assert manifest["pack_checksum"] == run.metadata.pack_checksum
-    assert manifest["reviewer"]["identifier"] == "mock:perfect"
+    assert manifest["reviewer"]["identifier"] == "control:perfect"
     assert manifest["reviewer"]["config"] == {"mode": "perfect"}
     assert manifest["harness_version"]
     assert len(manifest["cases"]) == run.case_count

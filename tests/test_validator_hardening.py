@@ -7,7 +7,7 @@ import pytest
 from arena.benchmark.benchmark_runner import run_benchmark
 from arena.benchmark.contamination import scan_benchmark, scan_case
 from arena.core.models import BenchmarkCase
-from arena.reviewers.mock import MockReviewer
+from arena.reviewers.controls import ControlReviewer
 from arena.validators.base import ValidatorContext
 from arena.validators.registry import get_validator
 from arena.validators.source_text import extract_comments, stripped_source
@@ -103,7 +103,7 @@ def test_comment_only_fixes_fail_validators(tmp_path, validator_name, file_path,
 
 
 def test_real_fix_still_passes_validator(tmp_path):
-    fixed = MockReviewer.FIXED_FILES["async_balance_race_001"]
+    fixed = ControlReviewer.FIXED_FILES["async_balance_race_001"]
     result = get_validator("async_update_atomicity_guard").validate(
         _context(tmp_path, "app/balance.py", fixed)
     )
@@ -121,7 +121,7 @@ def test_stripped_source_removes_comments_not_strings():
 def test_keyword_gamer_passes_no_structural_validators(tmp_path):
     run = run_benchmark(
         AUDIT_DIR,
-        MockReviewer("keyword_gamer"),
+        ControlReviewer("keyword_gamer"),
         output_dir=tmp_path / "runs",
         persist=False,
         mode="full",

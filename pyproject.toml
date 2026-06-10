@@ -59,7 +59,7 @@ select = ["E", "F", "I", "UP", "B"]
 extend-immutable-calls = ["typer.Argument", "typer.Option"]
 
 [tool.ruff.lint.per-file-ignores]
-"arena/reviewers/mock.py" = ["E501"]
+"arena/reviewers/controls.py" = ["E501"]
 "arena/reports/audit_report.py" = ["E501"]
 
 [tool.mypy]

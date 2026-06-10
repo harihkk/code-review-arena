@@ -15,10 +15,10 @@ from arena.reports.report_schema import VerificationSnapshot
 PROJECT = "CodeReview Arena"
 BASELINES = {
     "reference-patch": "Known-good patch artifacts",
-    "mock:perfect_patch": "Harness happy path",
-    "mock:keyword_gamer": "Plausible comments fail validation",
-    "mock:bad_patch": "Detects but supplies bad fixes",
-    "mock:malformed_patch": "Detects but supplies an invalid patch",
+    "control:perfect_patch": "Harness happy path",
+    "control:keyword_gamer": "Plausible comments fail validation",
+    "control:bad_patch": "Detects but supplies bad fixes",
+    "control:malformed_patch": "Detects but supplies an invalid patch",
 }
 
 
@@ -105,9 +105,9 @@ def expected_status(key: str, metrics: dict[str, Any], passes: int, count: int) 
     validated = metrics.get("validated_f_beta")
     if count == 0:
         return "unknown"
-    if key in {"reference-patch", "mock:perfect_patch"}:
+    if key in {"reference-patch", "control:perfect_patch"}:
         return "passing" if validated == 1.0 and passes == count else "failing"
-    if key in {"mock:keyword_gamer", "mock:malformed_patch"}:
+    if key in {"control:keyword_gamer", "control:malformed_patch"}:
         return "passing" if detection == 1.0 and validated == 0.0 and passes == 0 else "failing"
     return "passing" if detection == 1.0 and validated is not None and validated < detection else "failing"
 

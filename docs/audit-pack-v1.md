@@ -26,7 +26,7 @@ canonical known-good unified diff for that case's `after/` tree: it applies clea
 regression tests, and satisfies structural validators. Contributors can inspect or replay the
 fix without reading mock reviewer internals.
 
-`reference-patch` is the reviewer that loads these artifacts. `mock:perfect_patch` proves
+`reference-patch` is the reviewer that loads these artifacts. `control:perfect_patch` proves
 the harness happy path by synthesizing equivalent fixes internally; `reference-patch` proves
 the same outcome using normal, human-readable patch files stored in the benchmark pack.
 
@@ -41,7 +41,7 @@ Expect `validated_f_beta=1.000` and `deterministic_pass_rate=100%` when every
 
 ```bash
 arena validate benchmark_sets/audit_v1
-arena run benchmark_sets/audit_v1 --reviewer mock:perfect_patch --mode full --allow-local-execution
+arena run benchmark_sets/audit_v1 --reviewer control:perfect_patch --mode full --allow-local-execution
 arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
 arena leaderboard runs/ --metric validated_f_beta --beta 1.0
 arena audit-report runs/ --output docs/reports/audit-v1-results.md

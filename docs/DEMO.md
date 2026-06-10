@@ -27,10 +27,10 @@ by default. These controls are deterministic, so the scores are reproducible.
 
 ```bash
 arena run benchmark_sets/audit_v1 --reviewer reference-patch     --mode full --allow-local-execution
-arena run benchmark_sets/audit_v1 --reviewer mock:perfect_patch  --mode full --allow-local-execution
-arena run benchmark_sets/audit_v1 --reviewer mock:keyword_gamer  --mode full --allow-local-execution
-arena run benchmark_sets/audit_v1 --reviewer mock:bad_patch      --mode full --allow-local-execution
-arena run benchmark_sets/audit_v1 --reviewer mock:malformed_patch --mode full --allow-local-execution
+arena run benchmark_sets/audit_v1 --reviewer control:perfect_patch  --mode full --allow-local-execution
+arena run benchmark_sets/audit_v1 --reviewer control:keyword_gamer  --mode full --allow-local-execution
+arena run benchmark_sets/audit_v1 --reviewer control:bad_patch      --mode full --allow-local-execution
+arena run benchmark_sets/audit_v1 --reviewer control:malformed_patch --mode full --allow-local-execution
 ```
 
 Rank them, and emit JSON for scripting:
@@ -40,8 +40,8 @@ arena leaderboard runs/ --metric validated_f_beta --beta 1.0
 arena leaderboard runs/ --metric validated_f_beta --json
 ```
 
-`reference-patch` and `mock:perfect_patch` reach `validated_f_beta=1.000`;
-`mock:keyword_gamer` shows `detection_f_beta=1.000` with `validated_f_beta=0.000`.
+`reference-patch` and `control:perfect_patch` reach `validated_f_beta=1.000`;
+`control:keyword_gamer` shows `detection_f_beta=1.000` with `validated_f_beta=0.000`.
 
 ## 4. Build the report snapshot the dashboard reads
 

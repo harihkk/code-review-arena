@@ -16,9 +16,11 @@ locally and the harness is model-agnostic.
 
 ## How it works
 
-Each case is a seeded pull request with a known bug, the files a fix should touch, and
-the checks a fix must pass. The reviewer sees the diff and the relevant files, never the
-ground truth. It returns its findings and an optional patch, and the harness takes it from
+Each case is a seeded pull request with one or more known bugs, the files a fix should
+touch, and the checks a fix must pass. The reviewer payload is blind: case id, stack,
+the diff, and a bounded set of relevant files — no title, description, category,
+severity, or any ground truth (`--reveal-metadata` exists for debugging only). The
+reviewer returns its findings and an optional patch, and the harness takes it from
 there:
 
 ```
@@ -29,13 +31,36 @@ Every run produces two numbers:
 
 | Metric | What it measures |
 |---|---|
-| `detection_f_beta` | The reviewer found and localized the seeded bug |
+| `detection_f_beta` | The reviewer found the seeded bugs (file granularity; line precision is reported separately as `localization_rate`) |
 | `validated_f_beta` | Its patch applied, passed the required tests, and satisfied the validators |
 
-The gap between them is the whole point. On `audit_v1` the `mock:keyword_gamer` control
-detects all ten bugs (`detection_f_beta=1.000`) yet validates none of its patches
-(`validated_f_beta=0.000`), while `reference-patch` validates all ten. `arena audit-report`
-and the dashboard show that gap per reviewer.
+The gap between them is the whole point. On `audit_v1` the `control:keyword_gamer`
+control detects all ten bugs (`detection_f_beta=1.000`) yet validates none of its
+patches (`validated_f_beta=0.000`), while `reference-patch` validates all ten.
+`arena audit-report` and the dashboard show that gap per reviewer.
+
+Signals are labeled by their strength: test execution and patch application are
+execution-backed evidence; structural validators and concept matching are deterministic
+heuristics (comment-stripped lexical and AST checks, not semantic understanding) and are
+documented as such.
+
+## Integrity and security model
+
+The harness assumes reviewers and benchmark packs may be adversarial:
+
+- Patches cannot touch the case's tests, any `conftest.py`/pytest config, or per-case
+  `protected_paths`; absolute or `..` diff paths are rejected before `git apply` runs.
+- Fixture test commands run with an allowlisted environment (no inherited shell
+  secrets; `ARENA_PASSTHROUGH_ENV` forwards named variables explicitly) and POSIX
+  resource limits (CPU, file size, open files, processes).
+- `arena pack-hash --write` pins a pack's content checksum; runs record it and warn on
+  mismatch. `arena lint-cases` flags ground-truth vocabulary leaking into the diff,
+  comments, or test names.
+- Every run writes `run_manifest.json` (harness version, git SHA, pack checksum,
+  sanitized reviewer config, budgets, timings) so published numbers are auditable.
+- The API server executes runs as bounded background jobs; local execution over HTTP
+  requires a server-side opt-in, and `ARENA_API_TOKEN` adds token auth. It is not
+  hardened for public exposure.
 
 ## Quickstart
 
@@ -58,10 +83,14 @@ workspaces. Use it only with fixtures you trust.
 
 The built-in reviewers are the deterministic controls and `reference-patch`. To score a
 real model, wrap it in any local command that reads the case JSON and prints review JSON,
-then point `custom-command` at it. Ground truth is never in that JSON, so a reviewer
-cannot pass on metadata alone.
+then point `custom-command` at it. The payload is blind — no ground truth and no
+descriptive metadata — so a reviewer cannot pass on metadata alone.
 
 ```bash
+arena schema                       # the JSON contract your wrapper must emit
+arena verify-reviewer benchmark_sets/audit_v1 \
+  --command "python scripts/fake_reviewer.py --case {case_json}"   # one-case dry run
+
 arena run benchmark_sets/audit_v1 \
   --reviewer custom-command \
   --command "python scripts/fake_reviewer.py --case {case_json}" \
@@ -70,7 +99,9 @@ arena run benchmark_sets/audit_v1 \
 ```
 
 `scripts/fake_reviewer.py` is a working example to copy. The placeholders `{case_json}`,
-`{diff_file}`, `{case_id}`, and `{workspace}` are expanded per case.
+`{diff_file}`, `{case_id}`, and `{workspace}` are expanded per case. `--max-wall-seconds`
+and `--max-cost` cap a run; `--enable-repair` opts into a deterministic salvage of
+almost-valid JSON (logged on the response).
 
 ## Reports and dashboard
 
@@ -111,12 +142,14 @@ Control reviewers (deterministic harness checks, not external model results):
 | Reviewer | Role |
 |---|---|
 | `reference-patch` | Loads committed known-good `reference.patch` artifacts |
-| `mock:perfect_patch` | Harness success control |
-| `mock:keyword_gamer` | Detection-only adversarial control |
-| `mock:bad_patch` | Detects bugs but supplies failing fixes |
-| `mock:detects_no_patch` | Detects bugs without a patch |
-| `mock:malformed_patch` | Supplies invalid patch output |
+| `control:perfect_patch` | Harness success control |
+| `control:keyword_gamer` | Detection-only adversarial control |
+| `control:bad_patch` | Detects bugs but supplies failing fixes |
+| `control:detects_no_patch` | Detects bugs without a patch |
+| `control:malformed_patch` | Supplies invalid patch output |
 | `custom-command` | Runs your local reviewer command over structured input and output |
+
+`mock:<mode>` remains a deprecated alias for `control:<mode>` for one release.
 
 Audit Pack v1 cases:
 
@@ -148,9 +181,14 @@ authoring, and the audit report.
 ## Limitations
 
 - `audit_v1` is curated and small.
-- Structural validators are hand-authored and may reject alternate valid repairs.
+- Concept matching is lexical (curated keywords), not semantic; well-paraphrased
+  findings can be under-credited. Execution metrics do not have this problem.
+- Structural validators are comment-stripped heuristics: hand-authored, may reject
+  alternate valid repairs, and string literals are not stripped. Tests are the gate.
+- `arena lint-cases` currently reports known vocabulary leaks in the shipped packs
+  (mostly test names visible in pre-patch test output); treat detection scores on
+  cases with `run_tests` pre-passes accordingly.
 - Passing tests is execution evidence, not proof of complete correctness.
-- A valid fix can still fail when a validator is intentionally narrow.
 - This is a local audit harness, not a large-scale public ranking.
 
 ## License
