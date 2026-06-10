@@ -331,6 +331,9 @@ class RunMetadata(BaseModel):
     benchmark_version: str
     temperature: float = 0.0
     git_commit: str | None = None
+    pack_checksum: str | None = None
+    # True/False when the pack ships a pack.sha256 to compare against; None otherwise.
+    pack_checksum_verified: bool | None = None
 
 
 class RunResult(BaseModel):

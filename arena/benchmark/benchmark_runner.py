@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Literal
 
 from arena.benchmark.case_loader import build_context, load_cases, load_manifest
+from arena.benchmark.pack_hash import pack_checksum, stored_checksum
 from arena.core.config import PROMPT_VERSION, database_path, runs_path
 from arena.core.models import (
     BenchmarkCase,
@@ -263,6 +264,8 @@ def run_benchmark(
     root.mkdir(parents=True, exist_ok=True)
     run_id, run_dir = _reserve_run_dir(root)
     manifest = load_manifest(benchmark_dir)
+    checksum = pack_checksum(benchmark_dir)
+    pinned = stored_checksum(benchmark_dir)
     started = datetime.now()
     case_results = []
     test_executor = TestExecutor()
@@ -300,6 +303,8 @@ def run_benchmark(
             prompt_version=PROMPT_VERSION,
             benchmark_version=manifest.version,
             git_commit=_git_commit(),
+            pack_checksum=checksum,
+            pack_checksum_verified=None if pinned is None else pinned == checksum,
         ),
         case_results=case_results,
         total_score=round(sum(item.score for item in case_results) / len(case_results), 2),

@@ -56,6 +56,23 @@ def run(
     )
 
 
+@app.command("pack-hash")
+def pack_hash(
+    benchmark_set: Path = typer.Argument(DEFAULT_BENCHMARK_SET),
+    write: bool = typer.Option(
+        False, "--write", help="Store the checksum as pack.sha256 inside the pack."
+    ),
+) -> None:
+    from arena.benchmark.pack_hash import pack_checksum, stored_checksum, write_checksum
+
+    checksum = write_checksum(benchmark_set) if write else pack_checksum(benchmark_set)
+    typer.echo(checksum)
+    pinned = stored_checksum(benchmark_set)
+    if not write and pinned is not None and pinned != checksum:
+        typer.echo(f"WARNING: pack content does not match stored pack.sha256 ({pinned})", err=True)
+        raise typer.Exit(code=1)
+
+
 @app.command()
 def report(
     run_path: Path = typer.Argument(...),

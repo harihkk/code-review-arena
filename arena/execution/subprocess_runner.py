@@ -10,6 +10,8 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from arena.execution.hardening import resource_limiter, sandbox_env
+
 
 class CommandResult(BaseModel):
     command: str
@@ -32,6 +34,8 @@ def run_command(command: str, cwd: Path, timeout_seconds: int) -> CommandResult:
             text=True,
             timeout=timeout_seconds,
             check=False,
+            env=sandbox_env(),
+            preexec_fn=resource_limiter(timeout_seconds),
         )
         output = (completed.stdout + "\n" + completed.stderr).strip()
         return CommandResult(

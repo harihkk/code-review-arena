@@ -13,6 +13,8 @@ from typing import ClassVar, Literal
 
 from pydantic import BaseModel, Field
 
+from arena.execution.hardening import resource_limiter, sandbox_env
+
 
 class TestExecutionRequest(BaseModel):
     __test__: ClassVar[bool] = False
@@ -97,8 +99,15 @@ class TestExecutor:
         mode: Literal["docker", "local"],
     ) -> TestExecutionResult:
         started = time.perf_counter()
-        # Keep run workspaces clean: tests must not leave __pycache__ behind.
-        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+        if mode == "local":
+            # Fixture commands are untrusted: allowlisted env, bounded resources.
+            env = sandbox_env()
+            preexec = resource_limiter(request.timeout_seconds)
+        else:
+            # The docker CLI needs the caller's docker config; isolation comes
+            # from the container itself.
+            env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+            preexec = None
         try:
             completed = subprocess.run(
                 args,
@@ -108,6 +117,7 @@ class TestExecutor:
                 timeout=request.timeout_seconds,
                 check=False,
                 env=env,
+                preexec_fn=preexec,
             )
             return TestExecutionResult(
                 case_id=request.case_id,

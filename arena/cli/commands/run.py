@@ -38,6 +38,11 @@ def run(
         Console(stderr=True).print(f"[red]ERROR[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
+    if result.metadata.pack_checksum_verified is False:
+        Console(stderr=True).print(
+            "[yellow]WARNING[/yellow] benchmark pack content does not match its stored "
+            "pack.sha256; results may come from a tampered pack."
+        )
     if as_json:
         typer.echo(result.model_dump_json(indent=2))
         return
