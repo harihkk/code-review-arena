@@ -35,12 +35,13 @@ export function isControlBaseline({
   reviewer,
   model,
 }: ReviewerIdentity): boolean {
-  return reviewer === "mock" && Boolean(model);
+  // "mock" is the pre-rename id kept for historical run data.
+  return (reviewer === "control" || reviewer === "mock") && Boolean(model);
 }
 
 export function reviewerDisplayName(identity: ReviewerIdentity): string {
   const { reviewer, model } = identity;
-  if (reviewer === "mock" && model) {
+  if ((reviewer === "control" || reviewer === "mock") && model) {
     return CONTROL_DISPLAY_NAMES[model] ?? `Control: ${titleCase(model)}`;
   }
   return DISPLAY_NAMES[reviewer] ?? reviewer;
