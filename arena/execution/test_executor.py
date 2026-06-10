@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import os
-import shlex
 import shutil
 import subprocess
-import sys
 import time
 from pathlib import Path
 from typing import ClassVar, Literal
 
 from pydantic import BaseModel, Field
 
+from arena.core.errors import ValidationError
+from arena.execution.commands import parse_test_commands, pin_interpreter
 from arena.execution.hardening import resource_limiter, sandbox_env
 
 
@@ -21,7 +21,7 @@ class TestExecutionRequest(BaseModel):
 
     case_id: str
     workspace_path: Path
-    test_command: str | list[str]
+    test_command: str | list[str] | list[list[str]]
     timeout_seconds: int = Field(ge=1)
     docker_image: str | None = None
     allow_local_execution: bool = False
@@ -46,22 +46,47 @@ class TestExecutor:
     def execute(self, request: TestExecutionRequest) -> TestExecutionResult:
         if not request.workspace_path.is_dir():
             return self._skipped(request.case_id, "workspace_not_found")
-        args = self._command_args(request.test_command)
-        if not args:
+        try:
+            commands = parse_test_commands(request.test_command)
+        except ValidationError as exc:
+            return self._skipped(request.case_id, f"invalid_test_command: {exc}")
+        if not commands:
             return self._skipped(request.case_id, "empty_test_command")
-        if request.docker_image and self._docker_available():
-            return self._run(request, self._docker_args(request, args), "docker")
-        if request.docker_image and not request.allow_local_execution:
+        use_docker = bool(request.docker_image) and self._docker_available()
+        if request.docker_image and not use_docker and not request.allow_local_execution:
             return self._skipped(request.case_id, "docker_unavailable_and_local_execution_disabled")
-        if not request.allow_local_execution:
+        if not use_docker and not request.allow_local_execution:
             return self._skipped(request.case_id, "local_execution_disabled")
-        if args[0] == "pytest":
-            args = [sys.executable, "-m", "pytest", *args[1:]]
-        return self._run(request, args, "local")
+
+        mode: Literal["docker", "local"] = "docker" if use_docker else "local"
+        results: list[TestExecutionResult] = []
+        for argv in commands:
+            args = self._docker_args(request, argv) if use_docker else pin_interpreter(argv)
+            result = self._run(request, args, mode)
+            results.append(result)
+            if not result.passed:
+                break
+        return self._combined(request.case_id, results, mode)
 
     @staticmethod
-    def _command_args(command: str | list[str]) -> list[str]:
-        return shlex.split(command) if isinstance(command, str) else list(command)
+    def _combined(
+        case_id: str, results: list[TestExecutionResult], mode: Literal["docker", "local"]
+    ) -> TestExecutionResult:
+        last = results[-1]
+        if len(results) == 1:
+            return last
+        return TestExecutionResult(
+            case_id=case_id,
+            ran=True,
+            passed=all(result.passed for result in results),
+            exit_code=last.exit_code,
+            stdout="\n".join(filter(None, (result.stdout for result in results))),
+            stderr="\n".join(filter(None, (result.stderr for result in results))),
+            duration_ms=sum(result.duration_ms for result in results),
+            timed_out=any(result.timed_out for result in results),
+            execution_mode=mode,
+            error=last.error,
+        )
 
     @staticmethod
     def _docker_available() -> bool:

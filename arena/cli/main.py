@@ -42,6 +42,18 @@ def run(
         "Debugging only: scored runs should stay blind.",
     ),
     as_json: bool = typer.Option(False, "--json", help="Emit the run result as JSON to stdout."),
+    max_wall_seconds: float | None = typer.Option(
+        None,
+        "--max-wall-seconds",
+        min=0,
+        help="Stop scheduling new cases once the run has taken this long.",
+    ),
+    max_cost: float | None = typer.Option(
+        None,
+        "--max-cost",
+        min=0,
+        help="Stop scheduling new cases once estimated reviewer cost reaches this budget.",
+    ),
 ) -> None:
     run_command(
         benchmark_set,
@@ -53,6 +65,8 @@ def run(
         reviewer_timeout_seconds,
         as_json,
         reveal_metadata=reveal_metadata,
+        max_wall_seconds=max_wall_seconds,
+        max_cost=max_cost,
     )
 
 

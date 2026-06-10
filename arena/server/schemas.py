@@ -14,3 +14,5 @@ class CreateRunRequest(BaseModel):
     mode: Literal["review", "patch", "full"] = "review"
     beta: float | None = None
     allow_local_execution: bool = False
+    max_wall_seconds: float | None = None
+    max_cost: float | None = None

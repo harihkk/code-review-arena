@@ -19,6 +19,8 @@ def run(
     reviewer_timeout_seconds: int,
     as_json: bool = False,
     reveal_metadata: bool = False,
+    max_wall_seconds: float | None = None,
+    max_cost: float | None = None,
 ) -> None:
     try:
         reviewer = create_reviewer(
@@ -33,11 +35,18 @@ def run(
             mode=mode,
             beta=beta,
             allow_local_execution=allow_local_execution,
+            max_wall_seconds=max_wall_seconds,
+            max_cost=max_cost,
         )
     except ArenaError as exc:
         Console(stderr=True).print(f"[red]ERROR[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
+    if result.budget_stopped_reason:
+        Console(stderr=True).print(
+            f"[yellow]Stopped early[/yellow] {result.budget_stopped_reason}; "
+            f"skipped {len(result.skipped_case_ids)} case(s). Partial results recorded."
+        )
     if result.metadata.pack_checksum_verified is False:
         Console(stderr=True).print(
             "[yellow]WARNING[/yellow] benchmark pack content does not match its stored "

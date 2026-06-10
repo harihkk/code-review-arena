@@ -102,7 +102,8 @@ class ScoringConfig(BaseModel):
 
 class ExecutionConfig(BaseModel):
     run_tests: bool = False
-    test_command: str | list[str] | None = None
+    # One command string, one argv list, or a list of argv lists run in order.
+    test_command: str | list[str] | list[list[str]] | None = None
     timeout_seconds: int = Field(default=30, ge=1)
     docker_image: str | None = None
     run_static_analysis: bool = False
@@ -346,6 +347,8 @@ class RunResult(BaseModel):
     metadata: RunMetadata
     case_results: list[CaseResult]
     total_score: float
+    budget_stopped_reason: str | None = None
+    skipped_case_ids: list[str] = Field(default_factory=list)
     mode: Literal["review", "patch", "full"] = "review"
     beta: float = 1.0
     deterministic_metrics: DeterministicMetrics | None = None

@@ -8,6 +8,7 @@ from arena.benchmark.case_loader import load_cases, load_manifest
 from arena.benchmark.diff_loader import load_diff, parse_added_lines
 from arena.core.errors import ValidationError
 from arena.core.models import BenchmarkCase
+from arena.execution.commands import parse_test_commands
 from arena.reviewers.reference_patch import REFERENCE_PATCH_FILENAME
 
 
@@ -30,6 +31,11 @@ def validate_case(case: BenchmarkCase) -> list[str]:
         errors.append(f"{case.id}: scoring weights must sum to 100")
     if case.execution.run_tests and not case.execution.test_command:
         errors.append(f"{case.id}: test_command is required when run_tests is enabled")
+    if case.execution.test_command is not None:
+        try:
+            parse_test_commands(case.execution.test_command)
+        except ValidationError as exc:
+            errors.append(f"{case.id}: {exc}")
     if case.validation.patch_required:
         patch_path = case.case_dir / REFERENCE_PATCH_FILENAME
         if not patch_path.is_file() or not patch_path.read_text(encoding="utf-8").strip():

@@ -259,6 +259,8 @@ def run_benchmark(
     mode: Literal["review", "patch", "full"] = "review",
     beta: float | None = None,
     allow_local_execution: bool = False,
+    max_wall_seconds: float | None = None,
+    max_cost: float | None = None,
 ) -> RunResult:
     root = output_dir or runs_path()
     root.mkdir(parents=True, exist_ok=True)
@@ -268,10 +270,24 @@ def run_benchmark(
     pinned = stored_checksum(benchmark_dir)
     started = datetime.now()
     case_results = []
+    skipped_case_ids: list[str] = []
+    budget_stopped_reason: str | None = None
+    running_cost = 0.0
     test_executor = TestExecutor()
     patch_applier = PatchApplier(root)
     selected_beta = beta or 1.0
     for case in load_cases(benchmark_dir):
+        if budget_stopped_reason is None:
+            elapsed = (datetime.now() - started).total_seconds()
+            if max_wall_seconds is not None and elapsed >= max_wall_seconds:
+                budget_stopped_reason = (
+                    f"max_wall_seconds={max_wall_seconds} exceeded after {elapsed:.1f}s"
+                )
+            elif max_cost is not None and running_cost >= max_cost:
+                budget_stopped_reason = f"max_cost={max_cost} exceeded at {running_cost:.6f}"
+        if budget_stopped_reason is not None:
+            skipped_case_ids.append(case.id)
+            continue
         if beta is None:
             selected_beta = case.metrics.beta
         try:
@@ -289,6 +305,7 @@ def run_benchmark(
             )
         except Exception as exc:  # noqa: BLE001 - one failing case must not abort the batch.
             case_results.append(_failed_case_result(case, exc, mode))
+        running_cost += case_results[-1].response.estimated_cost
     completed = datetime.now()
     total_cost = round(sum(item.response.estimated_cost for item in case_results), 6)
     total_latency = sum(item.response.latency_ms for item in case_results)
@@ -307,7 +324,13 @@ def run_benchmark(
             pack_checksum_verified=None if pinned is None else pinned == checksum,
         ),
         case_results=case_results,
-        total_score=round(sum(item.score for item in case_results) / len(case_results), 2),
+        total_score=(
+            round(sum(item.score for item in case_results) / len(case_results), 2)
+            if case_results
+            else 0.0
+        ),
+        budget_stopped_reason=budget_stopped_reason,
+        skipped_case_ids=skipped_case_ids,
         mode=mode,
         beta=selected_beta,
         deterministic_metrics=(

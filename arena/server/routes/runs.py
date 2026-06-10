@@ -48,6 +48,8 @@ def create_run(request: CreateRunRequest) -> dict[str, object]:
             mode=request.mode,
             beta=request.beta,
             allow_local_execution=request.allow_local_execution,
+            max_wall_seconds=request.max_wall_seconds,
+            max_cost=request.max_cost,
         ).run_id
 
     job = job_queue().submit(execute)
