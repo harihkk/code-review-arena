@@ -18,12 +18,14 @@ def run(
     command: str | None,
     reviewer_timeout_seconds: int,
     as_json: bool = False,
+    reveal_metadata: bool = False,
 ) -> None:
     try:
         reviewer = create_reviewer(
             reviewer_spec,
             command=command,
             reviewer_timeout_seconds=reviewer_timeout_seconds,
+            reveal_metadata=reveal_metadata,
         )
         result = run_benchmark(
             benchmark_set,

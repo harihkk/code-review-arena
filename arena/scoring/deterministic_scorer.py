@@ -39,6 +39,10 @@ def score_deterministic_case(
 
     if not review.bug_found:
         reasons.append("detection_failed")
+    if patch.unsafe_paths:
+        reasons.append("patch_unsafe_paths")
+    if patch.touched_protected:
+        reasons.append("patch_touched_protected_files")
     if case.validation.patch_required and not patch_provided:
         reasons.append("patch_required_but_missing")
     if case.validation.patch_required and not patch.applied:

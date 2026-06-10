@@ -114,6 +114,7 @@ class ValidationConfig(BaseModel):
     tests_required: bool = False
     structural_validators: list[str] = Field(default_factory=list)
     max_false_positives: int = Field(default=0, ge=0)
+    protected_paths: list[str] = Field(default_factory=list)
 
 
 class MetricsConfig(BaseModel):
@@ -187,6 +188,8 @@ class CaseContext(BaseModel):
     case: ReviewerCaseMetadata
     diff: str
     relevant_files: dict[str, str]
+    context_truncated: bool = False
+    omitted_files: list[str] = Field(default_factory=list)
     test_output: str = ""
     static_analysis_output: str = ""
     case_dir: Path | None = None

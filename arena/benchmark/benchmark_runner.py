@@ -101,7 +101,9 @@ def _evaluate_case(
             )
     context = build_context(case, test_output=test_output, static_analysis_output=static_output)
     response = reviewer.review(context)
-    review_result = score_case(case, response, test_output=test_output)
+    review_result = score_case(case, response, test_output=test_output).model_copy(
+        update={"context_truncated": context.context_truncated}
+    )
     if mode == "review":
         return review_result
     assert case.case_dir is not None
@@ -112,12 +114,16 @@ def _evaluate_case(
         (item.finding for item in review_result.scored_findings if item.is_true_positive), None
     )
     patch_text = matching_finding.suggested_patch if matching_finding else None
+    protected_paths = list(case.validation.protected_paths)
+    if case.input.tests_dir:
+        protected_paths.append(case.input.tests_dir)
     patch = patch_applier.apply(
         PatchApplyRequest(
             case_id=case.id,
             source_dir=case.case_dir / case.input.after_dir,
             patch_text=patch_text or "",
             run_id=run_id,
+            protected_paths=protected_paths,
         )
     )
     executed_tests: TestExecutionResult | None = None

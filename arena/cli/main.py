@@ -35,6 +35,12 @@ def run(
     allow_local_execution: bool = typer.Option(False, "--allow-local-execution"),
     command: str | None = typer.Option(None, "--command"),
     reviewer_timeout_seconds: int = typer.Option(120, "--reviewer-timeout-seconds", min=1),
+    reveal_metadata: bool = typer.Option(
+        False,
+        "--reveal-metadata",
+        help="Include case title/description/category/severity in the reviewer payload. "
+        "Debugging only: scored runs should stay blind.",
+    ),
     as_json: bool = typer.Option(False, "--json", help="Emit the run result as JSON to stdout."),
 ) -> None:
     run_command(
@@ -46,6 +52,7 @@ def run(
         command,
         reviewer_timeout_seconds,
         as_json,
+        reveal_metadata=reveal_metadata,
     )
 
 

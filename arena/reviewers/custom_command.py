@@ -15,18 +15,28 @@ from arena.reviewers.base import BaseReviewer
 from arena.reviewers.response_parser import parse_review_response
 
 
-def serialize_reviewer_case(context: CaseContext) -> dict[str, object]:
-    """Reviewer-visible fields only; never includes ground truth or scoring metadata."""
+def serialize_reviewer_case(
+    context: CaseContext, *, reveal_metadata: bool = False
+) -> dict[str, object]:
+    """Blind reviewer payload: code and diff only, never ground truth.
+
+    Case title/description/category/severity frequently paraphrase the seeded
+    bug, so they are excluded unless reveal_metadata is set (debugging only;
+    scored runs should stay blind).
+    """
     payload: dict[str, object] = {
         "case_id": context.case.id,
-        "title": context.case.title,
-        "category": context.case.category,
-        "severity": context.case.severity,
         "stack": context.case.stack,
-        "description": context.case.description,
         "pr_diff": context.diff,
         "relevant_files": context.relevant_files,
     }
+    if context.context_truncated:
+        payload["context_truncated"] = True
+    if reveal_metadata:
+        payload["title"] = context.case.title
+        payload["category"] = context.case.category
+        payload["severity"] = context.case.severity
+        payload["description"] = context.case.description
     if context.test_output:
         payload["test_output"] = context.test_output
     if context.static_analysis_output:
@@ -55,9 +65,15 @@ class CustomCommandReviewer(BaseReviewer):
     name = "custom-command"
     model = "custom"
 
-    def __init__(self, command_template: str, timeout_seconds: int = 120) -> None:
+    def __init__(
+        self,
+        command_template: str,
+        timeout_seconds: int = 120,
+        reveal_metadata: bool = False,
+    ) -> None:
         self.command_template = command_template
         self.timeout_seconds = timeout_seconds
+        self.reveal_metadata = reveal_metadata
 
     def review(self, context: CaseContext) -> ReviewerResponse:
         started = time.perf_counter()
@@ -68,7 +84,10 @@ class CustomCommandReviewer(BaseReviewer):
             case_json = temp_dir / "case.json"
             diff_file = temp_dir / "pr.diff"
             case_json.write_text(
-                json.dumps(serialize_reviewer_case(context), indent=2),
+                json.dumps(
+                    serialize_reviewer_case(context, reveal_metadata=self.reveal_metadata),
+                    indent=2,
+                ),
                 encoding="utf-8",
             )
             diff_file.write_text(context.diff, encoding="utf-8")

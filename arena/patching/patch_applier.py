@@ -5,10 +5,29 @@ from __future__ import annotations
 import shutil
 import subprocess
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from arena.patching.patch_models import PatchApplyRequest, PatchApplyResult
-from arena.patching.patch_parser import touched_files
+from arena.patching.patch_parser import touched_files, unsafe_patch_paths
+
+# Files that influence test collection or execution regardless of location;
+# a patch may never create or modify them.
+PROTECTED_BASENAMES = frozenset(
+    {"conftest.py", "pytest.ini", "tox.ini", "setup.cfg", "pyproject.toml"}
+)
+
+
+def is_protected_path(path: str, protected_paths: list[str]) -> bool:
+    """True when a diff path is a protected file or sits under a protected prefix."""
+    if PurePosixPath(path).name in PROTECTED_BASENAMES:
+        return True
+    for rule in protected_paths:
+        normalized = rule.strip("/")
+        if not normalized:
+            continue
+        if path == normalized or path.startswith(normalized + "/"):
+            return True
+    return False
 
 
 class PatchApplier:
@@ -26,6 +45,29 @@ class PatchApplier:
         paths = touched_files(request.patch_text or "")
         if not request.patch_text.strip():
             return self._result(request, workspace, False, "no_patch_provided", paths, started)
+
+        unsafe = unsafe_patch_paths(request.patch_text)
+        if unsafe:
+            return self._result(
+                request,
+                workspace,
+                False,
+                f"patch_unsafe_paths: {', '.join(unsafe)}",
+                paths,
+                started,
+                unsafe_paths=unsafe,
+            )
+        protected = [path for path in paths if is_protected_path(path, request.protected_paths)]
+        if protected:
+            return self._result(
+                request,
+                workspace,
+                False,
+                f"patch_touched_protected_files: {', '.join(protected)}",
+                paths,
+                started,
+                touched_protected=protected,
+            )
 
         patch_file = workspace / ".arena-suggested.patch"
         patch_file.write_text(request.patch_text, encoding="utf-8")
@@ -71,6 +113,9 @@ class PatchApplier:
         error: str | None,
         paths: list[str],
         started: float,
+        *,
+        touched_protected: list[str] | None = None,
+        unsafe_paths: list[str] | None = None,
     ) -> PatchApplyResult:
         return PatchApplyResult(
             case_id=request.case_id,
@@ -78,6 +123,8 @@ class PatchApplier:
             applied=applied,
             error=error,
             touched_files=paths,
+            touched_protected=touched_protected or [],
+            unsafe_paths=unsafe_paths or [],
             workspace_path=str(workspace),
             patch_text=request.patch_text,
             duration_ms=int((time.perf_counter() - started) * 1000),

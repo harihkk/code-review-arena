@@ -15,6 +15,7 @@ class PatchApplyRequest(BaseModel):
     patch_text: str
     run_id: str
     finding_id: str | None = None
+    protected_paths: list[str] = Field(default_factory=list)
 
 
 class PatchApplyResult(BaseModel):
@@ -23,6 +24,8 @@ class PatchApplyResult(BaseModel):
     applied: bool
     error: str | None = None
     touched_files: list[str] = Field(default_factory=list)
+    touched_protected: list[str] = Field(default_factory=list)
+    unsafe_paths: list[str] = Field(default_factory=list)
     workspace_path: str
     patch_text: str
     duration_ms: int
