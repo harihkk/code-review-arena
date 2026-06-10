@@ -8,7 +8,7 @@ from arena.validators.base import (
     BaseValidator,
     ValidatorContext,
     ValidatorResult,
-    read_expected_file,
+    read_expected_source,
 )
 
 
@@ -16,7 +16,7 @@ class RAGCitationIdsValidated(BaseValidator):
     name = "rag_citation_ids_validated"
 
     def validate(self, context: ValidatorContext) -> ValidatorResult:
-        _, text = read_expected_file(context)
+        _, text = read_expected_source(context)
         lower = text.lower()
         source = any(
             term in lower
@@ -57,7 +57,7 @@ class RAGRetrievedContextIsUntrusted(BaseValidator):
     name = "rag_retrieved_context_is_untrusted"
 
     def validate(self, context: ValidatorContext) -> ValidatorResult:
-        _, text = read_expected_file(context)
+        _, text = read_expected_source(context)
         lower = text.lower()
         evidence: list[str] = []
         labels = [

@@ -6,7 +6,7 @@ from arena.validators.base import (
     BaseValidator,
     ValidatorContext,
     ValidatorResult,
-    read_expected_file,
+    read_expected_source,
 )
 
 
@@ -14,7 +14,7 @@ class ReactUsesFunctionalStateUpdate(BaseValidator):
     name = "react_uses_functional_state_update"
 
     def validate(self, context: ValidatorContext) -> ValidatorResult:
-        _, text = read_expected_file(context)
+        _, text = read_expected_source(context)
         normalized = text.replace(" ", "")
         passed = "setMessages(previous=>[...previous,message])" in normalized or (
             "setMessages(" in text and "=>" in text and "...previous" in text
@@ -34,7 +34,7 @@ class GraphQLUsesBatchingOrDataLoader(BaseValidator):
     name = "graphql_uses_batching_or_dataloader"
 
     def validate(self, context: ValidatorContext) -> ValidatorResult:
-        _, text = read_expected_file(context)
+        _, text = read_expected_source(context)
         lower = text.lower()
         passed = "dataloader" in lower or "loadmany" in lower or "batch" in lower
         return ValidatorResult(

@@ -6,7 +6,7 @@ from arena.validators.base import (
     BaseValidator,
     ValidatorContext,
     ValidatorResult,
-    read_expected_file,
+    read_expected_source,
 )
 
 
@@ -14,7 +14,7 @@ class SQLHasTenantOrOwnerFilter(BaseValidator):
     name = "sql_has_tenant_or_owner_filter"
 
     def validate(self, context: ValidatorContext) -> ValidatorResult:
-        _, text = read_expected_file(context)
+        _, text = read_expected_source(context)
         lower = text.lower()
         scopes = [
             "tenant_id",

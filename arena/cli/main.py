@@ -78,6 +78,31 @@ def run(
     )
 
 
+@app.command("lint-cases")
+def lint_cases(
+    benchmark_set: Path = typer.Argument(DEFAULT_BENCHMARK_SET),
+    strict: bool = typer.Option(
+        False, "--strict", help="Exit nonzero when any contamination is found."
+    ),
+) -> None:
+    """Scan cases for ground-truth vocabulary leaking into reviewer-visible surfaces."""
+    from arena.benchmark.contamination import scan_benchmark
+
+    warnings = scan_benchmark(resolve_benchmark_path(benchmark_set))
+    for warning in warnings:
+        typer.echo(warning.render())
+    if warnings:
+        typer.echo(
+            f"{len(warnings)} potential leak(s); leaked phrases hand reviewers the answer "
+            "(test names appear in pre-patch test output).",
+            err=True,
+        )
+        if strict:
+            raise typer.Exit(code=1)
+    else:
+        typer.echo("No contamination found.")
+
+
 @app.command()
 def schema(
     output: Path | None = typer.Option(

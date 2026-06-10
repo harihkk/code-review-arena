@@ -9,7 +9,7 @@ from arena.validators.base import (
     BaseValidator,
     ValidatorContext,
     ValidatorResult,
-    read_expected_file,
+    read_expected_source,
 )
 
 
@@ -17,7 +17,7 @@ class FastAPIRequiresAdminAuthorization(BaseValidator):
     name = "fastapi_requires_admin_authorization"
 
     def validate(self, context: ValidatorContext) -> ValidatorResult:
-        _, text = read_expected_file(context)
+        _, text = read_expected_source(context)
         lower = text.lower()
         evidence: list[str] = []
         try:
@@ -76,7 +76,7 @@ class KafkaIdempotencyGuard(BaseValidator):
     name = "kafka_idempotency_guard"
 
     def validate(self, context: ValidatorContext) -> ValidatorResult:
-        _, text = read_expected_file(context)
+        _, text = read_expected_source(context)
         lower = text.lower()
         key_positions = [
             lower.find(token) for token in ["event_id", "message_id", "idempotency_key"]
@@ -126,7 +126,7 @@ class FastAPITenantAdminAuthorization(BaseValidator):
     name = "fastapi_tenant_admin_authorization"
 
     def validate(self, context: ValidatorContext) -> ValidatorResult:
-        _, text = read_expected_file(context)
+        _, text = read_expected_source(context)
         lower = text.lower()
         evidence: list[str] = []
         tenant_dependency = any(
@@ -188,7 +188,7 @@ class AsyncUpdateAtomicityGuard(BaseValidator):
     name = "async_update_atomicity_guard"
 
     def validate(self, context: ValidatorContext) -> ValidatorResult:
-        _, text = read_expected_file(context)
+        _, text = read_expected_source(context)
         lower = text.lower()
         evidence: list[str] = []
         lock_guard = "asyncio.lock" in lower and "async with" in lower
@@ -226,7 +226,7 @@ class TenantScopedIdempotencyKey(BaseValidator):
     name = "tenant_scoped_idempotency_key"
 
     def validate(self, context: ValidatorContext) -> ValidatorResult:
-        _, text = read_expected_file(context)
+        _, text = read_expected_source(context)
         lower = text.lower()
         expression = lower
         try:
@@ -276,7 +276,7 @@ class RedisCacheKeyHasTenantScope(BaseValidator):
     name = "redis_cache_key_has_tenant_scope"
 
     def validate(self, context: ValidatorContext) -> ValidatorResult:
-        _, text = read_expected_file(context)
+        _, text = read_expected_source(context)
         expression = ""
         try:
             tree = ast.parse(text)
@@ -320,8 +320,22 @@ class JWTAudienceIssuerValidated(BaseValidator):
     name = "jwt_audience_issuer_validated"
 
     def validate(self, context: ValidatorContext) -> ValidatorResult:
-        _, text = read_expected_file(context)
+        _, text = read_expected_source(context)
+        # Match inside executable function bodies only: a leftover import of
+        # EXPECTED_AUDIENCE/EXPECTED_ISSUER must not satisfy the check.
         lower = text.lower()
+        try:
+            tree = ast.parse(text)
+            bodies = [
+                statement
+                for node in ast.walk(tree)
+                if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+                for statement in node.body
+            ]
+            if bodies:
+                lower = "\n".join(ast.unparse(statement) for statement in bodies).lower()
+        except SyntaxError:
+            pass
         evidence: list[str] = []
         audience = any(
             marker in lower for marker in ['"aud"', "'aud'", "audience", "expected_audience"]
@@ -329,7 +343,7 @@ class JWTAudienceIssuerValidated(BaseValidator):
         issuer = any(marker in lower for marker in ['"iss"', "'iss'", "issuer", "expected_issuer"])
         signature_only = bool(
             re.search(
-                r"def\s+verify_token[\s\S]{0,220}return\s+bool\([^)]*signature",
+                r"return\s+bool\([^)]*signature",
                 lower,
             )
             and not audience
@@ -360,7 +374,7 @@ class EventVersionMonotonicGuard(BaseValidator):
     name = "event_version_monotonic_guard"
 
     def validate(self, context: ValidatorContext) -> ValidatorResult:
-        _, text = read_expected_file(context)
+        _, text = read_expected_source(context)
         lower = text.lower()
         evidence: list[str] = []
         stale_guard = bool(
@@ -408,7 +422,7 @@ class PaginationUsesStableTiebreaker(BaseValidator):
     name = "pagination_uses_stable_tiebreaker"
 
     def validate(self, context: ValidatorContext) -> ValidatorResult:
-        _, text = read_expected_file(context)
+        _, text = read_expected_source(context)
         lower = text.lower()
         evidence: list[str] = []
         composite = bool(

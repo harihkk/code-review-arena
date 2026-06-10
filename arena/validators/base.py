@@ -39,3 +39,11 @@ def read_expected_file(context: ValidatorContext) -> tuple[str, str]:
     path = context.case_metadata.ground_truth.primary_bug.files[0].path
     full_path = context.workspace_path / path
     return path, full_path.read_text(encoding="utf-8")
+
+
+def read_expected_source(context: ValidatorContext) -> tuple[str, str]:
+    """The bug file with comments stripped: validators must match code, not prose."""
+    from arena.validators.source_text import stripped_source
+
+    path, text = read_expected_file(context)
+    return path, stripped_source(path, text)
