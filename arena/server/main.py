@@ -1,4 +1,10 @@
-"""FastAPI application entrypoint."""
+"""FastAPI application entrypoint.
+
+Intended for local or trusted-network use; do not expose publicly as-is.
+Set ARENA_API_TOKEN to require a token on run creation, and leave
+ARENA_SERVER_ALLOW_LOCAL_EXECUTION unset so HTTP callers cannot trigger
+local command execution.
+"""
 
 from fastapi import FastAPI
 

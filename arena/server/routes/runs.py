@@ -1,9 +1,12 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from arena.benchmark.benchmark_runner import run_benchmark
 from arena.benchmark.case_loader import build_context, load_cases
-from arena.core.config import database_path, resolve_benchmark_set
+from arena.core.config import benchmark_root, database_path, resolve_benchmark_set
+from arena.core.errors import ReviewerError
 from arena.core.registry import create_reviewer
+from arena.server.auth import require_api_token, server_local_execution_enabled
+from arena.server.jobs import job_queue
 from arena.server.schemas import CreateRunRequest
 from arena.storage.repository import RunRepository
 
@@ -15,16 +18,50 @@ def runs() -> list[dict[str, object]]:
     return RunRepository(database_path()).list_runs()
 
 
-@router.post("")
+def _normalize_benchmark_set(value: str) -> str:
+    root_prefix = benchmark_root().as_posix().rstrip("/") + "/"
+    if value.startswith(root_prefix):
+        return value[len(root_prefix) :]
+    return value
+
+
+@router.post("", status_code=202, dependencies=[Depends(require_api_token)])
 def create_run(request: CreateRunRequest) -> dict[str, object]:
-    reviewer = create_reviewer(request.reviewer, command=request.command)
-    return run_benchmark(
-        request.benchmark_set,
-        reviewer,
-        mode=request.mode,
-        beta=request.beta,
-        allow_local_execution=request.allow_local_execution,
-    ).model_dump(mode="json")
+    benchmark_dir = resolve_benchmark_set(_normalize_benchmark_set(request.benchmark_set))
+    if benchmark_dir is None:
+        raise HTTPException(status_code=400, detail="Unknown benchmark set")
+    if request.allow_local_execution and not server_local_execution_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail="Local execution over HTTP is disabled; set "
+            "ARENA_SERVER_ALLOW_LOCAL_EXECUTION=1 on the server to opt in.",
+        )
+    try:
+        reviewer = create_reviewer(request.reviewer, command=request.command)
+    except ReviewerError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    def execute() -> str:
+        return run_benchmark(
+            benchmark_dir,
+            reviewer,
+            mode=request.mode,
+            beta=request.beta,
+            allow_local_execution=request.allow_local_execution,
+        ).run_id
+
+    job = job_queue().submit(execute)
+    if job is None:
+        raise HTTPException(status_code=429, detail="Run queue is full; retry later")
+    return {"job_id": job.id, "status": job.status, "status_url": f"/runs/jobs/{job.id}"}
+
+
+@router.get("/jobs/{job_id}")
+def job_status(job_id: str) -> dict[str, object]:
+    job = job_queue().get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job.model_dump(mode="json")
 
 
 @router.get("/{run_id}")

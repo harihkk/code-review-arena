@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -7,6 +8,18 @@ from arena.cli.main import app
 from arena.server.main import app as server_app
 
 runner = CliRunner()
+
+
+def _finished_job(client: TestClient, created_response, timeout: float = 180.0) -> dict:
+    assert created_response.status_code == 202
+    job_id = created_response.json()["job_id"]
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        job = client.get(f"/runs/jobs/{job_id}").json()
+        if job["status"] in {"completed", "failed"}:
+            return job
+        time.sleep(0.05)
+    raise AssertionError("job did not finish in time")
 
 
 def test_cli_list_and_validate():
@@ -44,6 +57,7 @@ def test_api_can_browse_audit_pack_reference_patches():
 def test_api_run_trace_contains_dashboard_evidence(monkeypatch, tmp_path):
     monkeypatch.setenv("ARENA_DB_PATH", str(tmp_path / "api.db"))
     monkeypatch.setenv("ARENA_RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("ARENA_SERVER_ALLOW_LOCAL_EXECUTION", "1")
     client = TestClient(server_app)
     created = client.post(
         "/runs",
@@ -53,8 +67,9 @@ def test_api_run_trace_contains_dashboard_evidence(monkeypatch, tmp_path):
             "allow_local_execution": True,
         },
     )
-    assert created.status_code == 200
-    run_id = created.json()["run_id"]
+    job = _finished_job(client, created)
+    assert job["status"] == "completed"
+    run_id = job["run_id"]
     trace = client.get(f"/runs/{run_id}/cases/fastapi_auth_bypass_001").json()
     assert "delete_user" in trace["diff"]
     assert trace["breakdown"]["total"] == 90
@@ -71,22 +86,60 @@ def test_api_run_trace_contains_dashboard_evidence(monkeypatch, tmp_path):
 def test_api_audit_trace_uses_the_runs_benchmark_pack(monkeypatch, tmp_path):
     monkeypatch.setenv("ARENA_DB_PATH", str(tmp_path / "audit-api.db"))
     monkeypatch.setenv("ARENA_RUNS_DIR", str(tmp_path / "audit-runs"))
+    monkeypatch.setenv("ARENA_SERVER_ALLOW_LOCAL_EXECUTION", "1")
     client = TestClient(server_app)
     created = client.post(
         "/runs",
         json={
+            # Legacy path form must normalize to the pack name.
             "benchmark_set": "benchmark_sets/audit_v1",
             "reviewer": "reference-patch",
             "mode": "full",
             "allow_local_execution": True,
         },
     )
-    assert created.status_code == 200
-    run_id = created.json()["run_id"]
+    job = _finished_job(client, created)
+    assert job["status"] == "completed"
+    run_id = job["run_id"]
     trace = client.get(f"/runs/{run_id}/cases/security_fastapi_multitenant_admin_bypass_001").json()
     assert "tenant_admin" in trace["diff"]
     assert trace["ground_truth"]["primary_bug"]["summary"]
     assert trace["deterministic_pass"] is True
+
+
+def test_api_refuses_local_execution_without_server_opt_in(monkeypatch, tmp_path):
+    monkeypatch.setenv("ARENA_DB_PATH", str(tmp_path / "gate.db"))
+    monkeypatch.delenv("ARENA_SERVER_ALLOW_LOCAL_EXECUTION", raising=False)
+    client = TestClient(server_app)
+    refused = client.post(
+        "/runs",
+        json={"reviewer": "mock:perfect", "mode": "full", "allow_local_execution": True},
+    )
+    assert refused.status_code == 403
+
+
+def test_api_rejects_unknown_benchmark_set_and_reviewer(monkeypatch, tmp_path):
+    monkeypatch.setenv("ARENA_DB_PATH", str(tmp_path / "bad.db"))
+    client = TestClient(server_app)
+    assert client.post("/runs", json={"benchmark_set": "../etc"}).status_code == 400
+    assert client.post("/runs", json={"benchmark_set": "missing_pack"}).status_code == 400
+    assert client.post("/runs", json={"reviewer": "nonsense"}).status_code == 400
+
+
+def test_api_token_required_when_configured(monkeypatch, tmp_path):
+    monkeypatch.setenv("ARENA_DB_PATH", str(tmp_path / "auth.db"))
+    monkeypatch.setenv("ARENA_RUNS_DIR", str(tmp_path / "auth-runs"))
+    monkeypatch.setenv("ARENA_API_TOKEN", "sekrit")
+    client = TestClient(server_app)
+    denied = client.post("/runs", json={"reviewer": "mock:perfect"})
+    assert denied.status_code == 401
+    accepted = client.post(
+        "/runs",
+        json={"reviewer": "mock:perfect"},
+        headers={"X-Arena-Token": "sekrit"},
+    )
+    job = _finished_job(client, accepted)
+    assert job["status"] == "completed"
 
 
 def test_cli_leaderboard_supports_validated_metric(monkeypatch, tmp_path):
