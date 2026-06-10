@@ -1,3 +1,5 @@
+from pathlib import PurePosixPath
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from arena.benchmark.benchmark_runner import run_benchmark
@@ -19,9 +21,10 @@ def runs() -> list[dict[str, object]]:
 
 
 def _normalize_benchmark_set(value: str) -> str:
-    root_prefix = benchmark_root().as_posix().rstrip("/") + "/"
-    if value.startswith(root_prefix):
-        return value[len(root_prefix) :]
+    """Accept the legacy "benchmark_sets/<name>" form by reducing it to <name>."""
+    parts = PurePosixPath(value.replace("\\", "/")).parts
+    if len(parts) == 2 and parts[0] == benchmark_root().name:
+        return parts[1]
     return value
 
 

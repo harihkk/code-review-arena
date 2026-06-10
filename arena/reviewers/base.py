@@ -18,3 +18,7 @@ class BaseReviewer(ABC):
     @property
     def identifier(self) -> str:
         return f"{self.name}:{self.model}" if self.model else self.name
+
+    def safe_config(self) -> dict[str, object]:
+        """Reviewer configuration safe to persist in run manifests (no secrets)."""
+        return {}

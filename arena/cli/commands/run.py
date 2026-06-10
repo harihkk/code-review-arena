@@ -5,6 +5,7 @@ import typer
 from rich.console import Console
 
 from arena.benchmark.benchmark_runner import run_benchmark
+from arena.core.config import runs_path
 from arena.core.errors import ArenaError
 from arena.core.registry import create_reviewer
 
@@ -71,7 +72,7 @@ def run(
             f"patch_apply_rate={_format_rate(metrics.patch_apply_rate)}, "
             f"structural_pass_rate={_format_rate(metrics.structural_pass_rate)}"
         )
-    Console().print(f"Reports: runs/{result.run_id}/")
+    Console().print(f"Reports: {runs_path() / result.run_id}/")
 
 
 def _format_rate(value: float | None) -> str:

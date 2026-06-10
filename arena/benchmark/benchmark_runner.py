@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
+import platform
 import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
+from arena import __version__
 from arena.benchmark.case_loader import build_context, load_cases, load_manifest
 from arena.benchmark.pack_hash import pack_checksum, stored_checksum
 from arena.core.config import PROMPT_VERSION, database_path, runs_path
@@ -348,10 +351,68 @@ def run_benchmark(
     write_json_report(run, run_dir / "run.json")
     write_markdown_report(run, run_dir / "report.md")
     write_html_report(run, run_dir / "report.html")
+    _write_run_manifest(
+        run_dir,
+        run,
+        reviewer,
+        benchmark_dir,
+        max_wall_seconds=max_wall_seconds,
+        max_cost=max_cost,
+    )
     shutil.copyfile(run_dir / "run.json", root / "latest.json")
     if persist:
         RunRepository(db_path or database_path()).save(run)
     return run
+
+
+def _write_run_manifest(
+    run_dir: Path,
+    run: RunResult,
+    reviewer: BaseReviewer,
+    benchmark_dir: Path,
+    *,
+    max_wall_seconds: float | None,
+    max_cost: float | None,
+) -> None:
+    """Everything needed to reproduce or audit the run, with secrets redacted."""
+    payload = {
+        "harness_version": __version__,
+        "harness_git_commit": run.metadata.git_commit,
+        "run_id": run.run_id,
+        "benchmark_set": run.benchmark_set,
+        "benchmark_dir": str(benchmark_dir),
+        "pack_checksum": run.metadata.pack_checksum,
+        "pack_checksum_verified": run.metadata.pack_checksum_verified,
+        "prompt_version": run.metadata.prompt_version,
+        "reviewer": {
+            "identifier": reviewer.identifier,
+            "name": reviewer.name,
+            "model": reviewer.model,
+            "config": reviewer.safe_config(),
+        },
+        "mode": run.mode,
+        "beta": run.beta,
+        "budgets": {"max_wall_seconds": max_wall_seconds, "max_cost": max_cost},
+        "budget_stopped_reason": run.budget_stopped_reason,
+        "skipped_case_ids": run.skipped_case_ids,
+        "started_at": run.started_at.isoformat(),
+        "completed_at": run.completed_at.isoformat(),
+        "environment": {
+            "python": platform.python_version(),
+            "platform": platform.platform(),
+        },
+        "cases": [
+            {
+                "case_id": case.case_id,
+                "score": case.score,
+                "deterministic_pass": case.deterministic_pass,
+                "latency_ms": case.response.latency_ms,
+                "estimated_cost": case.response.estimated_cost,
+            }
+            for case in run.case_results
+        ],
+    }
+    (run_dir / "run_manifest.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 def _tail(output: str, limit: int = 2000) -> str:

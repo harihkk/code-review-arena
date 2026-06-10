@@ -15,3 +15,7 @@ class ReviewerError(ArenaError):
 
 class InvalidReviewerOutput(ReviewerError):
     """Raised when a model cannot produce a valid structured result."""
+
+
+class StorageError(ArenaError):
+    """Raised when the results database cannot be used safely."""

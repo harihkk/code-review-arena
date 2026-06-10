@@ -547,6 +547,9 @@ def build_prompt(
         self.mode = mode.replace("-", "_")
         self.model = self.mode
 
+    def safe_config(self) -> dict[str, object]:
+        return {"mode": self.mode}
+
     def _patch(self, context: CaseContext, *, bad: bool = False) -> str:
         _, _, path, _, _ = self.ANSWERS[context.case.id]
         original = context.relevant_files[path]

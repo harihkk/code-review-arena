@@ -37,6 +37,7 @@ def leaderboard(
         "False Positives",
         "Cost",
         "Latency",
+        "Pack",
     ]:
         table.add_column(column)
     for row in rows:
@@ -48,6 +49,7 @@ def leaderboard(
             str(row["false_positives"]),
             f"${row['cost']:.4f}",
             f"{row['latency_ms'] / 1000:.2f}s",
+            str(row["pack"]),
         )
     Console(width=140).print(table)
 

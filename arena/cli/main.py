@@ -11,19 +11,19 @@ from arena.cli.commands.list_cases import list_cases as list_cases_command
 from arena.cli.commands.report import report as report_command
 from arena.cli.commands.run import run as run_command
 from arena.cli.commands.validate import validate as validate_command
-from arena.core.config import DEFAULT_BENCHMARK_SET, DEFAULT_RUNS_DIR
+from arena.core.config import DEFAULT_BENCHMARK_SET, DEFAULT_RUNS_DIR, resolve_benchmark_path
 
 app = typer.Typer(help="Benchmark AI code reviewers on realistic pull-request bugs.")
 
 
 @app.command("list-cases")
 def list_cases(benchmark_set: Path = typer.Argument(DEFAULT_BENCHMARK_SET)) -> None:
-    list_cases_command(benchmark_set)
+    list_cases_command(resolve_benchmark_path(benchmark_set))
 
 
 @app.command()
 def validate(benchmark_set: Path = typer.Argument(DEFAULT_BENCHMARK_SET)) -> None:
-    validate_command(benchmark_set)
+    validate_command(resolve_benchmark_path(benchmark_set))
 
 
 @app.command()
@@ -56,7 +56,7 @@ def run(
     ),
 ) -> None:
     run_command(
-        benchmark_set,
+        resolve_benchmark_path(benchmark_set),
         reviewer,
         mode,
         beta,
@@ -79,6 +79,7 @@ def pack_hash(
 ) -> None:
     from arena.benchmark.pack_hash import pack_checksum, stored_checksum, write_checksum
 
+    benchmark_set = resolve_benchmark_path(benchmark_set)
     checksum = write_checksum(benchmark_set) if write else pack_checksum(benchmark_set)
     typer.echo(checksum)
     pinned = stored_checksum(benchmark_set)

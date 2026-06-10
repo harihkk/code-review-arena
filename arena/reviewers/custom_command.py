@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import shutil
 import subprocess
@@ -61,6 +62,15 @@ def expand_command_template(
     return shlex.split(expanded)
 
 
+_SECRET_VALUE = re.compile(r"(?i)(\b\w*(?:key|token|secret|password)\w*\s*[=:]\s*)(\S+)")
+_BEARER_VALUE = re.compile(r"(?i)\b(bearer\s+)(\S+)")
+
+
+def redact_secrets(text: str) -> str:
+    """Mask credential-looking values so command templates can be persisted."""
+    return _BEARER_VALUE.sub(r"\1***", _SECRET_VALUE.sub(r"\1***", text))
+
+
 class CustomCommandReviewer(BaseReviewer):
     name = "custom-command"
     model = "custom"
@@ -74,6 +84,13 @@ class CustomCommandReviewer(BaseReviewer):
         self.command_template = command_template
         self.timeout_seconds = timeout_seconds
         self.reveal_metadata = reveal_metadata
+
+    def safe_config(self) -> dict[str, object]:
+        return {
+            "command_template": redact_secrets(self.command_template),
+            "timeout_seconds": self.timeout_seconds,
+            "reveal_metadata": self.reveal_metadata,
+        }
 
     def review(self, context: CaseContext) -> ReviewerResponse:
         started = time.perf_counter()

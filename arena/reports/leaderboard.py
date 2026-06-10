@@ -22,6 +22,7 @@ class LeaderboardRow(TypedDict):
     mode: str
     completed_at: str
     metric_value: float | None
+    pack: str
 
 
 def load_runs(runs_dir: Path) -> list[RunResult]:
@@ -51,6 +52,7 @@ def leaderboard_rows(
             "mode": run.mode,
             "completed_at": run.completed_at.isoformat(),
             "metric_value": _metric(run, metric, beta),
+            "pack": _pack_label(run),
         }
         for run in latest.values()
     ]
@@ -63,6 +65,14 @@ def leaderboard_rows(
         rows,
         key=lambda item: _sort_key(item["metric_value"], descending),
     )
+
+
+def _pack_label(run: RunResult) -> str:
+    checksum = run.metadata.pack_checksum
+    if not checksum:
+        return run.benchmark_set
+    suffix = " (tampered!)" if run.metadata.pack_checksum_verified is False else ""
+    return f"{run.benchmark_set}@{checksum[:10]}{suffix}"
 
 
 def _sort_key(value: float | None, descending: bool) -> tuple[bool, float]:

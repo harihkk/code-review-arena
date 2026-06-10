@@ -1,12 +1,28 @@
-"""SQLite connection lifecycle."""
+"""SQLite connection lifecycle with versioned, idempotent migrations."""
+
+from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
+
+from arena.core.errors import StorageError
+
+SCHEMA_VERSION = 1
 
 
 def connect(path: Path) -> sqlite3.Connection:
-    connection = sqlite3.connect(path)
+    connection = sqlite3.connect(path, timeout=5.0)
     connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("PRAGMA busy_timeout=5000")
+    connection.execute("PRAGMA foreign_keys=ON")
+    _migrate(connection)
+    return connection
+
+
+def _migrate_v1(connection: sqlite3.Connection) -> None:
+    """Base schema plus the columns that were added before versioning existed."""
     schema = Path(__file__).with_name("schema.sql").read_text(encoding="utf-8")
     connection.executescript(schema)
     _add_columns(
@@ -51,7 +67,25 @@ def connect(path: Path) -> sqlite3.Connection:
             "patch_error": "TEXT",
         },
     )
-    return connection
+
+
+# Ordered migration steps; entry N migrates a version-(N-1) database to N.
+_MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_migrate_v1]
+
+
+def _migrate(connection: sqlite3.Connection) -> None:
+    version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+    if version == SCHEMA_VERSION:
+        return
+    if version > SCHEMA_VERSION:
+        raise StorageError(
+            f"database schema version {version} is newer than this arena understands "
+            f"({SCHEMA_VERSION}); upgrade codereview-arena instead of downgrading the database"
+        )
+    for step in range(version, SCHEMA_VERSION):
+        _MIGRATIONS[step](connection)
+    connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    connection.commit()
 
 
 def _add_columns(connection: sqlite3.Connection, table: str, expected: dict[str, str]) -> None:
