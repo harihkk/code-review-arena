@@ -1,28 +1,16 @@
-"""Deterministic lexical concept matching baseline."""
+"""Deprecated alias for :mod:`arena.scoring.concept_matcher`.
+
+The matcher is lexical, not semantic; the module was renamed so the name stops
+implying capability it does not have. This shim keeps old imports working for
+one release.
+"""
 
 from __future__ import annotations
 
 from arena.core.models import BenchmarkCase, Finding
-
-
-def _mentions(text: str, phrase: str) -> bool:
-    normalized = text.casefold()
-    phrase = phrase.casefold()
-    return phrase in normalized or all(token in normalized for token in phrase.split())
+from arena.scoring.concept_matcher import concept_ratio, mentions  # noqa: F401
 
 
 def concept_score(finding: Finding, case: BenchmarkCase) -> float:
-    bug = case.ground_truth.primary_bug
-    text = " ".join([finding.title, finding.summary, finding.evidence, finding.suggested_fix or ""])
-    category = 10 if finding.category == case.category else 0
-    must_ratio = (
-        sum(_mentions(text, phrase) for phrase in bug.must_mention) / len(bug.must_mention)
-        if bug.must_mention
-        else 1
-    )
-    concept_ratio = (
-        sum(_mentions(text, phrase) for phrase in bug.concepts) / len(bug.concepts)
-        if bug.concepts
-        else 1
-    )
-    return round(category + (15 * must_ratio) + (10 * concept_ratio), 2)
+    """Legacy 0..35 concept score for the primary bug."""
+    return round(concept_ratio(finding, case.ground_truth.primary_bug, case.category) * 35, 2)

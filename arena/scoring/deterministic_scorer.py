@@ -22,8 +22,11 @@ def score_deterministic_case(
     validators: list[ValidatorResult],
     beta: float,
 ) -> DeterministicCaseScore:
-    true_positives = 1 if review.bug_found and review.correct_file and review.correct_line else 0
-    false_negatives = 0 if true_positives else 1
+    # Detection is judged at file granularity (concept + file); line-level
+    # localization is a separate, finer signal and never collapses a detected
+    # bug into a miss.
+    true_positives = review.bugs_matched
+    false_negatives = max(review.bugs_total - review.bugs_matched, 0)
     false_positives = review.false_positive_count
     value_precision = precision(true_positives, false_positives)
     value_recall = recall(true_positives, false_negatives)
@@ -36,8 +39,6 @@ def score_deterministic_case(
 
     if not review.bug_found:
         reasons.append("detection_failed")
-    if not (review.correct_file and review.correct_line):
-        reasons.append("localization_failed")
     if case.validation.patch_required and not patch_provided:
         reasons.append("patch_required_but_missing")
     if case.validation.patch_required and not patch.applied:
@@ -53,7 +54,7 @@ def score_deterministic_case(
     return DeterministicCaseScore(
         case_id=case.id,
         detected_bug=review.bug_found,
-        localized_correctly=review.correct_file and review.correct_line,
+        localized_correctly=review.correct_line,
         patch_provided=patch_provided,
         patch_applied=patch.applied,
         tests_ran=tests_ran,
@@ -82,12 +83,14 @@ def aggregate_deterministic_metrics(
     total_latency_ms: int,
 ) -> DeterministicMetrics:
     scores = [case.deterministic_case_score for case in cases if case.deterministic_case_score]
-    detection_tp = sum(score.detected_bug and score.localized_correctly for score in scores)
+    detection_tp = sum(score.true_positive_count for score in scores)
+    detection_fn = sum(score.false_negative_count for score in scores)
     fp = sum(score.false_positive_count for score in scores)
     case_count = len(scores)
-    detection_fn = case_count - detection_tp
     detection_precision = precision(detection_tp, fp)
     detection_recall = recall(detection_tp, detection_fn)
+    detected_cases = sum(score.detected_bug for score in scores)
+    localized_cases = sum(score.detected_bug and score.localized_correctly for score in scores)
     validated_tp = sum(score.deterministic_pass for score in scores)
     validated_fn = case_count - validated_tp
     validated_precision = precision(validated_tp, fp)
@@ -109,6 +112,7 @@ def aggregate_deterministic_metrics(
         validated_f_beta=round(f_beta_score(validated_precision, validated_recall, beta), 6),
         beta=beta,
         deterministic_pass_rate=round(validated_tp / case_count, 6) if case_count else 0.0,
+        localization_rate=rate(localized_cases, detected_cases),
         patch_apply_rate=rate(patch_applied, patch_provided),
         test_pass_rate=rate(tests_passed, tests_ran),
         structural_pass_rate=rate(validation_passed, validation_ran),

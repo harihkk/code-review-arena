@@ -37,18 +37,25 @@ def validate_case(case: BenchmarkCase) -> list[str]:
                 f"{case.id}: patch_required is set but {REFERENCE_PATCH_FILENAME} "
                 "is missing or empty"
             )
-    for expected_file in case.ground_truth.primary_bug.files:
-        path = after_dir / expected_file.path
-        if not path.is_file():
-            errors.append(f"{case.id}: ground truth file not found: {expected_file.path}")
-            continue
-        line_count = len(path.read_text(encoding="utf-8").splitlines())
-        for line_range in expected_file.line_ranges:
-            if line_range.end > line_count:
+    for bug_index, bug in enumerate(case.ground_truth.bugs):
+        for expected_file in bug.files:
+            path = after_dir / expected_file.path
+            if not path.is_file():
                 errors.append(
-                    f"{case.id}: line range {line_range.start}-{line_range.end} "
-                    f"exceeds {expected_file.path} ({line_count} lines)"
+                    f"{case.id}: ground truth file not found "
+                    f"(bugs[{bug_index}]): {expected_file.path}"
                 )
+                continue
+            line_count = len(path.read_text(encoding="utf-8").splitlines())
+            for line_range in expected_file.line_ranges:
+                if line_range.end > line_count:
+                    errors.append(
+                        f"{case.id}: line range {line_range.start}-{line_range.end} "
+                        f"exceeds {expected_file.path} ({line_count} lines)"
+                    )
+    for acceptable in case.ground_truth.acceptable_findings:
+        if acceptable.path and not (after_dir / acceptable.path).is_file():
+            errors.append(f"{case.id}: acceptable_findings path not found: {acceptable.path}")
     return errors
 
 

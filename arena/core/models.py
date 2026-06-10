@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 Severity = Literal["critical", "high", "medium", "low"]
 Risk = Literal["critical", "high", "medium", "low", "none"]
@@ -30,16 +30,48 @@ class GroundTruthFile(BaseModel):
     line_ranges: list[LineRange]
 
 
-class PrimaryBug(BaseModel):
+class GroundTruthBug(BaseModel):
     summary: str
     files: list[GroundTruthFile]
     concepts: list[str]
-    must_mention: list[str]
-    acceptable_fix_keywords: list[str]
+    must_mention: list[str] = Field(default_factory=list)
+    acceptable_fix_keywords: list[str] = Field(default_factory=list)
+
+
+# Back-compat alias: cases authored against the single-bug model import PrimaryBug.
+PrimaryBug = GroundTruthBug
+
+
+class AcceptableFinding(BaseModel):
+    """A known-good extra finding that is scored neutral, not as a false positive."""
+
+    path: str | None = None
+    concepts: list[str] = Field(min_length=1)
 
 
 class GroundTruth(BaseModel):
-    primary_bug: PrimaryBug
+    bugs: list[GroundTruthBug] = Field(min_length=1)
+    acceptable_findings: list[AcceptableFinding] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_legacy_primary_bug(cls, value: Any) -> Any:
+        if not isinstance(value, dict) or "primary_bug" not in value:
+            return value
+        converted = dict(value)
+        legacy = converted.pop("primary_bug")
+        bugs = converted.get("bugs")
+        if not bugs:
+            converted["bugs"] = [legacy]
+        elif bugs[0] != legacy:
+            raise ValueError("primary_bug and bugs[0] disagree; declare the bug once in bugs")
+        return converted
+
+    # Serialized for dashboards and tooling built on the single-bug shape.
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def primary_bug(self) -> GroundTruthBug:
+        return self.bugs[0]
 
 
 class CaseInput(BaseModel):
@@ -64,6 +96,7 @@ class ScoreWeights(BaseModel):
 class ScoringConfig(BaseModel):
     weights: ScoreWeights = Field(default_factory=ScoreWeights)
     false_positive_penalty: float = 5
+    false_positive_penalty_cap: float = Field(default=15, ge=0)
     invalid_json_penalty: float = 20
 
 
@@ -186,6 +219,8 @@ class ScoreBreakdown(BaseModel):
 class ScoredFinding(BaseModel):
     finding: Finding
     is_true_positive: bool
+    matched_bug_index: int | None = None
+    is_neutral: bool = False
     false_positive_reason: str | None = None
 
 
@@ -224,6 +259,7 @@ class DeterministicMetrics(BaseModel):
     validated_f_beta: float = 0.0
     beta: float
     deterministic_pass_rate: float = 0.0
+    localization_rate: float | None = None
     patch_apply_rate: float | None = None
     test_pass_rate: float | None = None
     structural_pass_rate: float | None = None
@@ -265,7 +301,10 @@ class CaseResult(BaseModel):
     correct_file: bool
     correct_line: bool
     line_match: str
+    bugs_total: int = 1
+    bugs_matched: int = 0
     false_positive_count: int
+    context_truncated: bool = False
     test_output: str = ""
     deterministic_case_score: DeterministicCaseScore | None = None
     patch_provided: bool = False

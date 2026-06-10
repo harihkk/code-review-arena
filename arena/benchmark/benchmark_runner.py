@@ -31,7 +31,7 @@ from arena.scoring.deterministic_scorer import (
     aggregate_deterministic_metrics,
     score_deterministic_case,
 )
-from arena.scoring.scorer import score_case
+from arena.scoring.scorer import apply_execution_fix_quality, score_case
 from arena.storage.repository import RunRepository
 from arena.tools.static_analyzer import run_static_analysis
 from arena.validators.base import ValidatorContext
@@ -106,6 +106,9 @@ def _evaluate_case(
         return review_result
     assert case.case_dir is not None
     matching_finding = next(
+        (item.finding for item in review_result.scored_findings if item.matched_bug_index == 0),
+        None,
+    ) or next(
         (item.finding for item in review_result.scored_findings if item.is_true_positive), None
     )
     patch_text = matching_finding.suggested_patch if matching_finding else None
@@ -151,6 +154,16 @@ def _evaluate_case(
     deterministic = score_deterministic_case(
         case, review_result, patch, executed_tests, validators, selected_beta
     )
+    blocking = {
+        "patch_required_but_missing",
+        "patch_apply_failed",
+        "tests_failed",
+        "structural_validation_failed",
+    }
+    execution_validated = deterministic.patch_applied and not (
+        blocking & set(deterministic.failure_reasons)
+    )
+    review_result = apply_execution_fix_quality(case, review_result, validated=execution_validated)
     return review_result.model_copy(
         update={
             "deterministic_case_score": deterministic,
@@ -195,7 +208,7 @@ def _failed_case_result(
             structural_validation_passed=None,
             true_positive_count=0,
             false_positive_count=0,
-            false_negative_count=1,
+            false_negative_count=len(case.ground_truth.bugs),
             precision=0.0,
             recall=0.0,
             f1=0.0,
@@ -221,6 +234,8 @@ def _failed_case_result(
         correct_file=False,
         correct_line=False,
         line_match="wrong_file",
+        bugs_total=len(case.ground_truth.bugs),
+        bugs_matched=0,
         false_positive_count=0,
         deterministic_case_score=deterministic,
         deterministic_pass=False if mode != "review" else None,
