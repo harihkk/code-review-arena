@@ -20,6 +20,7 @@ def run(
     reviewer_timeout_seconds: int,
     as_json: bool = False,
     reveal_metadata: bool = False,
+    enable_repair: bool = False,
     max_wall_seconds: float | None = None,
     max_cost: float | None = None,
 ) -> None:
@@ -29,6 +30,7 @@ def run(
             command=command,
             reviewer_timeout_seconds=reviewer_timeout_seconds,
             reveal_metadata=reveal_metadata,
+            enable_repair=enable_repair,
         )
         result = run_benchmark(
             benchmark_set,

@@ -1,0 +1,77 @@
+"""Run a reviewer wrapper against one case and validate its output contract."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import typer
+from pydantic import ValidationError as PydanticValidationError
+from rich.console import Console
+
+from arena.benchmark.case_loader import build_context, load_cases
+from arena.core.errors import ArenaError
+from arena.core.models import ReviewResult
+from arena.reviewers.custom_command import CustomCommandReviewer
+
+
+def _diagnose(raw: str, console: Console) -> None:
+    """Explain why raw output failed the ReviewResult contract."""
+    if not raw.strip():
+        console.print("  The command produced no output on stdout.")
+        return
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        console.print(f"  stdout is not JSON: {exc.msg} at line {exc.lineno}, column {exc.colno}.")
+        tail = raw.strip()[-300:]
+        console.print(f"  Output tail: {tail!r}")
+        return
+    try:
+        ReviewResult.model_validate(data)
+    except PydanticValidationError as exc:
+        console.print("  JSON parsed but does not match the ReviewResult schema:")
+        for error in exc.errors()[:10]:
+            location = ".".join(str(part) for part in error["loc"]) or "<root>"
+            console.print(f"    - {location}: {error['msg']}")
+        console.print("  Run `arena schema` to see the full expected JSON Schema.")
+
+
+def verify_reviewer(
+    benchmark_set: Path,
+    command: str,
+    case_id: str | None,
+    timeout_seconds: int,
+    reveal_metadata: bool,
+    enable_repair: bool,
+) -> None:
+    console = Console()
+    try:
+        cases = load_cases(benchmark_set)
+    except ArenaError as exc:
+        Console(stderr=True).print(f"[red]ERROR[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    case = next((item for item in cases if item.id == case_id), None) if case_id else cases[0]
+    if case is None:
+        Console(stderr=True).print(f"[red]ERROR[/red] case not found: {case_id}")
+        raise typer.Exit(code=1)
+
+    console.print(f"Running wrapper against case [bold]{case.id}[/bold] (blind payload)...")
+    reviewer = CustomCommandReviewer(command, timeout_seconds, reveal_metadata, enable_repair)
+    response = reviewer.review(build_context(case))
+    console.print(f"latency={response.latency_ms}ms parse_attempts={response.parse_attempts}")
+    if not response.invalid_output and response.parsed_response is not None:
+        parsed = response.parsed_response
+        console.print(
+            f"[green]VALID[/green] {len(parsed.findings)} finding(s), "
+            f"overall_risk={parsed.overall_risk}"
+        )
+        if response.parse_attempts > 1:
+            console.print(
+                "[yellow]note[/yellow] output needed tolerant parsing or repair; "
+                "emit a single clean JSON object to avoid penalties."
+            )
+        return
+    console.print("[red]INVALID[/red] the wrapper's output failed the reviewer contract:")
+    _diagnose(response.raw_response, console)
+    raise typer.Exit(code=1)

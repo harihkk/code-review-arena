@@ -15,6 +15,7 @@ def create_reviewer(
     command: str | None = None,
     reviewer_timeout_seconds: int = 120,
     reveal_metadata: bool = False,
+    enable_repair: bool = False,
 ) -> BaseReviewer:
     if spec.startswith("mock"):
         mode = spec.partition(":")[2] or "perfect"
@@ -24,7 +25,9 @@ def create_reviewer(
     if spec == "custom-command":
         if not command:
             raise ReviewerError("--command is required for the custom-command reviewer.")
-        return CustomCommandReviewer(command, reviewer_timeout_seconds, reveal_metadata)
+        return CustomCommandReviewer(
+            command, reviewer_timeout_seconds, reveal_metadata, enable_repair
+        )
     raise ReviewerError(
         f"Unknown reviewer: {spec}. "
         "Available: mock:<mode>, reference-patch, custom-command. "

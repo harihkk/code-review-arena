@@ -13,7 +13,7 @@ from pathlib import Path
 
 from arena.core.models import CaseContext, ReviewerResponse, ReviewResult
 from arena.reviewers.base import BaseReviewer
-from arena.reviewers.response_parser import parse_review_response
+from arena.reviewers.response_parser import naive_repair, parse_review_response
 
 
 def serialize_reviewer_case(
@@ -80,16 +80,19 @@ class CustomCommandReviewer(BaseReviewer):
         command_template: str,
         timeout_seconds: int = 120,
         reveal_metadata: bool = False,
+        enable_repair: bool = False,
     ) -> None:
         self.command_template = command_template
         self.timeout_seconds = timeout_seconds
         self.reveal_metadata = reveal_metadata
+        self.enable_repair = enable_repair
 
     def safe_config(self) -> dict[str, object]:
         return {
             "command_template": redact_secrets(self.command_template),
             "timeout_seconds": self.timeout_seconds,
             "reveal_metadata": self.reveal_metadata,
+            "enable_repair": self.enable_repair,
         }
 
     def review(self, context: CaseContext) -> ReviewerResponse:
@@ -133,7 +136,10 @@ class CustomCommandReviewer(BaseReviewer):
                 error_notes.append(f"command exited with code {completed.returncode}")
             if completed.stderr.strip():
                 error_notes.append(completed.stderr.strip()[-500:])
-            parsed, attempts = parse_review_response(raw if raw else "{}")
+            parsed, attempts = parse_review_response(
+                raw if raw else "{}",
+                repair=naive_repair if self.enable_repair else None,
+            )
             invalid = parsed is None or completed.returncode != 0 or not raw
             if invalid and error_notes:
                 summary = "; ".join(error_notes)

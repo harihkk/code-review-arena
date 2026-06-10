@@ -6,7 +6,9 @@ import json
 import re
 from collections.abc import Callable
 
-from arena.core.models import ReviewResult
+from pydantic import ValidationError as PydanticValidationError
+
+from arena.core.models import Finding, ReviewResult
 
 
 def _parse(candidate: str) -> ReviewResult | None:
@@ -26,6 +28,43 @@ def tolerant_candidate(raw: str) -> str:
     if first >= 0 and last > first:
         text = text[first : last + 1]
     return re.sub(r",(\s*[}\]])", r"\1", text)
+
+
+def naive_repair(raw: str) -> str:
+    """Deterministic salvage for almost-valid reviewer JSON; never calls a model.
+
+    Wraps a bare findings list into the expected envelope, fills missing
+    top-level fields with neutral defaults, and drops individual findings that
+    fail validation rather than rejecting the whole response. Used only when a
+    reviewer opts in (--enable-repair); the attempt is visible as
+    parse_attempts=3 on the response.
+    """
+    data = None
+    for candidate in (raw, tolerant_candidate(raw)):
+        try:
+            data = json.loads(candidate)
+            break
+        except json.JSONDecodeError:
+            continue
+    if data is None:
+        return raw
+    if isinstance(data, list):
+        data = {"findings": data}
+    if not isinstance(data, dict):
+        return raw
+    data.setdefault("overall_risk", "medium")
+    data.setdefault("review_summary", "")
+    findings = data.get("findings")
+    kept: list[object] = []
+    if isinstance(findings, list):
+        for item in findings:
+            try:
+                Finding.model_validate(item)
+            except PydanticValidationError:
+                continue
+            kept.append(item)
+    data["findings"] = kept
+    return json.dumps(data)
 
 
 def parse_review_response(

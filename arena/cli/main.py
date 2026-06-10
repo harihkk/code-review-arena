@@ -11,6 +11,7 @@ from arena.cli.commands.list_cases import list_cases as list_cases_command
 from arena.cli.commands.report import report as report_command
 from arena.cli.commands.run import run as run_command
 from arena.cli.commands.validate import validate as validate_command
+from arena.cli.commands.verify_reviewer import verify_reviewer as verify_reviewer_command
 from arena.core.config import DEFAULT_BENCHMARK_SET, DEFAULT_RUNS_DIR, resolve_benchmark_path
 
 app = typer.Typer(help="Benchmark AI code reviewers on realistic pull-request bugs.")
@@ -41,6 +42,12 @@ def run(
         help="Include case title/description/category/severity in the reviewer payload. "
         "Debugging only: scored runs should stay blind.",
     ),
+    enable_repair: bool = typer.Option(
+        False,
+        "--enable-repair",
+        help="Attempt a deterministic salvage of malformed reviewer JSON "
+        "(logged as parse_attempts=3) instead of taking the invalid-output penalty.",
+    ),
     as_json: bool = typer.Option(False, "--json", help="Emit the run result as JSON to stdout."),
     max_wall_seconds: float | None = typer.Option(
         None,
@@ -65,8 +72,58 @@ def run(
         reviewer_timeout_seconds,
         as_json,
         reveal_metadata=reveal_metadata,
+        enable_repair=enable_repair,
         max_wall_seconds=max_wall_seconds,
         max_cost=max_cost,
+    )
+
+
+@app.command()
+def schema(
+    output: Path | None = typer.Option(
+        None, "--output", help="Write the schema to a file instead of stdout."
+    ),
+) -> None:
+    """Emit the versioned JSON Schema a reviewer's output must satisfy."""
+    import json
+
+    from arena.core.config import REVIEW_SCHEMA_VERSION
+    from arena.core.models import ReviewResult
+
+    payload = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": (
+            "https://github.com/harihkk/code-review-arena/"
+            f"schema/review-result-{REVIEW_SCHEMA_VERSION}.json"
+        ),
+        "version": REVIEW_SCHEMA_VERSION,
+        **ReviewResult.model_json_schema(),
+    }
+    rendered = json.dumps(payload, indent=2)
+    if output is not None:
+        output.write_text(rendered + "\n", encoding="utf-8")
+        typer.echo(f"Wrote {output}")
+    else:
+        typer.echo(rendered)
+
+
+@app.command("verify-reviewer")
+def verify_reviewer(
+    benchmark_set: Path = typer.Argument(DEFAULT_BENCHMARK_SET),
+    command: str = typer.Option(..., "--command", help="Wrapper command template to verify."),
+    case_id: str | None = typer.Option(None, "--case-id"),
+    reviewer_timeout_seconds: int = typer.Option(120, "--reviewer-timeout-seconds", min=1),
+    reveal_metadata: bool = typer.Option(False, "--reveal-metadata"),
+    enable_repair: bool = typer.Option(False, "--enable-repair"),
+) -> None:
+    """Run a wrapper against one case and validate its output with actionable errors."""
+    verify_reviewer_command(
+        resolve_benchmark_path(benchmark_set),
+        command,
+        case_id,
+        reviewer_timeout_seconds,
+        reveal_metadata,
+        enable_repair,
     )
 
 

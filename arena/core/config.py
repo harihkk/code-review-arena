@@ -14,6 +14,10 @@ PROMPT_VERSION = "v1"
 # Bump on any breaking shape change; the dashboard refuses to render a mismatch.
 REPORT_SCHEMA_VERSION = "1.0"
 
+# Version of the reviewer output contract (ReviewResult JSON). Bump on any
+# breaking change to the shape a reviewer wrapper must emit.
+REVIEW_SCHEMA_VERSION = "1.0"
+
 
 def project_root() -> Path:
     """Anchor for default paths so commands behave the same from any directory.
