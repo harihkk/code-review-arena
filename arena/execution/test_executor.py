@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import ClassVar, Literal
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -44,6 +47,8 @@ class TestExecutionResult(BaseModel):
     timed_out: bool = False
     execution_mode: Literal["docker", "local", "skipped"]
     error: str | None = None
+    # Resolved image digest (docker mode only) for reproducibility.
+    image_digest: str | None = None
 
 
 class TestExecutor:
@@ -56,21 +61,37 @@ class TestExecutor:
             return self._skipped(request.case_id, f"invalid_test_command: {exc}")
         if not commands:
             return self._skipped(request.case_id, "empty_test_command")
-        use_docker = bool(request.docker_image) and self._docker_available()
-        if request.docker_image and not use_docker and not request.allow_local_execution:
-            return self._skipped(request.case_id, "docker_unavailable_and_local_execution_disabled")
-        if not use_docker and not request.allow_local_execution:
+        # Docker is the standard backend. There is no silent Docker->local
+        # fallback: a case that declares an image must run in Docker or be
+        # skipped. Trusted-local is only for image-less cases that explicitly
+        # opt in via allow_local_execution.
+        if request.docker_image:
+            if not self._docker_available():
+                return self._skipped(request.case_id, "docker_required_but_unavailable")
+            mode: Literal["docker", "local"] = "docker"
+        elif request.allow_local_execution:
+            mode = "local"
+        else:
             return self._skipped(request.case_id, "local_execution_disabled")
 
-        mode: Literal["docker", "local"] = "docker" if use_docker else "local"
         results: list[TestExecutionResult] = []
         for argv in commands:
-            args = self._docker_args(request, argv) if use_docker else pin_interpreter(argv)
-            result = self._run(request, args, mode)
+            if mode == "docker":
+                container = self._container_name(request.case_id)
+                args = self._docker_args(request, argv, container_name=container)
+            else:
+                container = None
+                args = pin_interpreter(argv)
+            result = self._run(request, args, mode, container_name=container)
             results.append(result)
             if not result.passed:
                 break
-        return self._combined(request.case_id, results, mode)
+        combined = self._combined(request.case_id, results, mode)
+        if mode == "docker":
+            return combined.model_copy(
+                update={"image_digest": self._image_digest(request.docker_image)}
+            )
+        return combined
 
     @staticmethod
     def _combined(
@@ -105,27 +126,88 @@ class TestExecutor:
         return result.returncode == 0
 
     @staticmethod
-    def _docker_args(request: TestExecutionRequest, args: list[str]) -> list[str]:
+    def _container_name(case_id: str) -> str:
+        slug = re.sub(r"[^a-zA-Z0-9_.-]", "-", case_id)[:40]
+        return f"arena-{slug}-{uuid4().hex[:8]}"
+
+    @staticmethod
+    def _docker_args(
+        request: TestExecutionRequest, args: list[str], *, container_name: str
+    ) -> list[str]:
         assert request.docker_image is not None
-        return [
+        memory = os.getenv("ARENA_DOCKER_MEMORY", "2g")
+        cpus = os.getenv("ARENA_DOCKER_CPUS", "2")
+        pids = os.getenv("ARENA_DOCKER_PIDS", "256")
+        tmpfs_size = os.getenv("ARENA_DOCKER_TMPFS_SIZE", "256m")
+        command = [
             "docker",
             "run",
             "--rm",
+            "--name",
+            container_name,
+            "--network",
+            "none",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--pids-limit",
+            pids,
+            "--memory",
+            memory,
+            "--cpus",
+            cpus,
+            "--read-only",
+            "--tmpfs",
+            f"/tmp:rw,noexec,nosuid,size={tmpfs_size}",
+            "-e",
+            "PYTHONDONTWRITEBYTECODE=1",
+            "-e",
+            "HOME=/tmp",
             "-v",
             f"{request.workspace_path.resolve()}:/workspace",
             "-w",
             "/workspace",
-            "-e",
-            "PYTHONDONTWRITEBYTECODE=1",
-            request.docker_image,
-            *args,
         ]
+        if sys.platform != "win32":
+            # Run as the host user so the bind-mounted workspace stays writable
+            # while the container process is non-root.
+            command += ["--user", f"{os.getuid()}:{os.getgid()}"]
+        command += [request.docker_image, *args]
+        return command
+
+    @staticmethod
+    def _image_digest(image: str | None) -> str | None:
+        if not image:
+            return None
+        result = subprocess.run(
+            ["docker", "image", "inspect", image, "--format", "{{index .RepoDigests 0}}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        digest = result.stdout.strip()
+        return digest or None
+
+    @staticmethod
+    def _force_remove_container(name: str) -> None:
+        # docker run leaves the container running when its CLI is killed, so on
+        # timeout we remove it by name; best-effort.
+        subprocess.run(
+            ["docker", "rm", "-f", name],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
 
     def _run(
         self,
         request: TestExecutionRequest,
         args: list[str],
         mode: Literal["docker", "local"],
+        *,
+        container_name: str | None = None,
     ) -> TestExecutionResult:
         started = time.perf_counter()
         # run_supervised starts the child in its own session and kills the whole
@@ -153,6 +235,8 @@ class TestExecutor:
                 preexec_fn=None,
                 output_limit=OUTPUT_LIMIT_BYTES,
             )
+            if result.timed_out and container_name:
+                self._force_remove_container(container_name)
         duration_ms = int((time.perf_counter() - started) * 1000)
         if result.timed_out:
             return TestExecutionResult(
