@@ -267,12 +267,22 @@ class DeterministicMetrics(BaseModel):
     detection_recall: float = 0.0
     detection_f1: float = 0.0
     detection_f_beta: float = 0.0
+    # DEPRECATED: validated_precision/f1/f_beta mix a case-level numerator
+    # (validated cases) with a finding-level denominator (false-positive
+    # findings), so they are not unit-coherent and are not comparable across
+    # packs. They remain only so existing run JSON keeps loading. Use
+    # validated_case_rate as the case-level repair metric instead; the unit-clean
+    # per-finding/per-bug repair metrics arrive with the evidence layer.
     validated_precision: float = 0.0
     validated_recall: float = 0.0
     validated_f1: float = 0.0
     validated_f_beta: float = 0.0
     beta: float
     deterministic_pass_rate: float = 0.0
+    # Canonical, unit-coherent case-level repair metric: validated cases over
+    # eligible cases (numerically equal to deterministic_pass_rate, which stays
+    # as a legacy alias). This is the default leaderboard sort.
+    validated_case_rate: float = 0.0
     localization_rate: float | None = None
     patch_apply_rate: float | None = None
     test_pass_rate: float | None = None
@@ -295,6 +305,9 @@ class DeterministicMetrics(BaseModel):
         converted.setdefault("validated_recall", converted.get("recall", 0.0))
         converted.setdefault("validated_f1", converted.get("f1", 0.0))
         converted.setdefault("validated_f_beta", converted.get("f_beta", 0.0))
+        converted.setdefault(
+            "validated_case_rate", converted.get("deterministic_pass_rate", 0.0)
+        )
         converted.setdefault("latency_per_case_ms", converted.get("latency_per_case", 0.0))
         converted.setdefault("cost_per_validated_fix", converted.get("cost_per_true_positive"))
         return converted

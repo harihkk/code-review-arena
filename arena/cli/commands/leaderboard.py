@@ -10,7 +10,7 @@ from arena.reports.leaderboard import leaderboard_rows
 
 def leaderboard(
     runs_dir: Path,
-    metric: str = "validated_f_beta",
+    metric: str = "validated_case_rate",
     beta: float = 1.0,
     as_json: bool = False,
 ) -> None:

@@ -41,7 +41,7 @@ def leaderboard_eligible(run: RunResult) -> bool:
 
 
 def leaderboard_rows(
-    runs_dir: Path, metric: str = "validated_f_beta", beta: float = 1.0
+    runs_dir: Path, metric: str = "validated_case_rate", beta: float = 1.0
 ) -> list[LeaderboardRow]:
     latest: dict[tuple[str, str | None, str], RunResult] = {}
     for run in load_runs(runs_dir):
@@ -115,6 +115,7 @@ def _metric(run: RunResult, metric: str, beta: float) -> float | None:
         "validated_f1",
         "validated_precision",
         "validated_recall",
+        "validated_case_rate",
         "deterministic_pass_rate",
         "patch_apply_rate",
         "test_pass_rate",
@@ -134,6 +135,7 @@ def _metric(run: RunResult, metric: str, beta: float) -> float | None:
         "validated_f1": metrics.validated_f1,
         "validated_precision": metrics.validated_precision,
         "validated_recall": metrics.validated_recall,
+        "validated_case_rate": metrics.validated_case_rate,
         "deterministic_pass_rate": metrics.deterministic_pass_rate,
         "patch_apply_rate": metrics.patch_apply_rate,
         "test_pass_rate": metrics.test_pass_rate,

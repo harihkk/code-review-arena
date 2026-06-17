@@ -104,6 +104,28 @@ def _run_patch_mode(benchmark_dir, tmp_path, mode: str):
     )
 
 
+def test_validated_case_rate_is_the_coherent_default_metric(benchmark_dir, tmp_path):
+    perfect = _run_patch_mode(benchmark_dir, tmp_path, "perfect_patch")
+    missing = _run_patch_mode(benchmark_dir, tmp_path, "detects_no_patch")
+    assert perfect.deterministic_metrics is not None
+    assert missing.deterministic_metrics is not None
+
+    # Unit-coherent case-level metric, equal to the legacy pass rate by construction.
+    assert perfect.deterministic_metrics.validated_case_rate == 1.0
+    assert missing.deterministic_metrics.validated_case_rate == 0.0
+    assert (
+        perfect.deterministic_metrics.validated_case_rate
+        == perfect.deterministic_metrics.deterministic_pass_rate
+    )
+
+    # leaderboard_rows now defaults to validated_case_rate.
+    ranked = leaderboard_rows(tmp_path / "runs")
+    by_model = {row["model"]: row["metric_value"] for row in ranked}
+    assert ranked[0]["model"] == "perfect_patch"
+    assert by_model["perfect_patch"] == 1.0
+    assert by_model["detects_no_patch"] == 0.0
+
+
 def test_validated_metrics_distinguish_detection_from_a_valid_fix(benchmark_dir, tmp_path):
     perfect = _run_patch_mode(benchmark_dir, tmp_path, "perfect_patch")
     bad = _run_patch_mode(benchmark_dir, tmp_path, "bad_patch")

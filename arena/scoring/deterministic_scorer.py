@@ -116,6 +116,9 @@ def aggregate_deterministic_metrics(
         validated_f_beta=round(f_beta_score(validated_precision, validated_recall, beta), 6),
         beta=beta,
         deterministic_pass_rate=round(validated_tp / case_count, 6) if case_count else 0.0,
+        # Unit-coherent case-level repair rate (see DeterministicMetrics). Equal
+        # to deterministic_pass_rate; named for the leaderboard/product surface.
+        validated_case_rate=round(validated_tp / case_count, 6) if case_count else 0.0,
         localization_rate=rate(localized_cases, detected_cases),
         patch_apply_rate=rate(patch_applied, patch_provided),
         test_pass_rate=rate(tests_passed, tests_ran),

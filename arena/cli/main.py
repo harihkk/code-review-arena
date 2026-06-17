@@ -196,7 +196,7 @@ def audit_report(
 @app.command()
 def leaderboard(
     runs_dir: Path = typer.Argument(DEFAULT_RUNS_DIR),
-    metric: str = typer.Option("validated_f_beta", "--metric"),
+    metric: str = typer.Option("validated_case_rate", "--metric"),
     beta: float = typer.Option(1.0, "--beta", min=0.01),
     as_json: bool = typer.Option(False, "--json", help="Emit leaderboard rows as JSON to stdout."),
 ) -> None:

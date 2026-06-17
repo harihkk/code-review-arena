@@ -69,8 +69,8 @@ def run(
         Console().print(f"Detection: detection_f_beta={metrics.detection_f_beta:.3f}")
         Console().print(
             f"Validation: passes={deterministic_passes}/{result.case_count}, "
-            f"validated_f_beta={metrics.validated_f_beta:.3f}, "
-            f"deterministic_pass_rate={_format_rate(metrics.deterministic_pass_rate)}, "
+            f"validated_case_rate={_format_rate(metrics.validated_case_rate)}, "
+            f"validated_f_beta={metrics.validated_f_beta:.3f} (deprecated), "
             f"patch_apply_rate={_format_rate(metrics.patch_apply_rate)}, "
             f"structural_pass_rate={_format_rate(metrics.structural_pass_rate)}"
         )
