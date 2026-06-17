@@ -1,4 +1,4 @@
-# Code Review Arena — v2 Architecture & Migration Plan
+# Code Review Arena - v2 Architecture & Migration Plan
 
 Status: design of record for the v2 rebuild. This document is written *before*
 the code so that every later change has a precise target. It is grounded in the
@@ -97,7 +97,7 @@ Rules:
 - **Backward-compatible parsing, no ambiguous semantics:** if `proposed_patch`
   is absent but **exactly one** finding carries a patch, adopt it as the case
   patch (unambiguous). If `proposed_patch` is absent and **two or more** findings
-  carry patches, do **not** guess — `patch_provided = False`, failure reason
+  carry patches, do **not** guess - `patch_provided = False`, failure reason
   `ambiguous_patch_source`.
 
 Each `Finding` keeps: stable id (new), title, summary, category, severity, file,
@@ -144,14 +144,14 @@ Distinguish **textual review completeness** (did findings name every bug) from
 **behavioral repair completeness** (did the patch fix every bug). They are
 reported separately and never collapsed.
 
-### 4.3 Scoring — four dimensions, consistent units
+### 4.3 Scoring - four dimensions, consistent units
 
 The cardinal rule: **never combine units in one formula.** Units are: *bug*
 (each ground-truth bug), *finding* (each reviewer claim), *case*.
 
 **Review Accuracy**
 - `detection_recall = bugs_matched / bugs_total` (bug)
-- `detection_precision = supported_findings / total_findings` (finding) — standard
+- `detection_precision = supported_findings / total_findings` (finding) - standard
   IR precision-over-predictions; this pairing is conventional and unit-clean.
 - `detection_f_beta` from the two above (kept; well-defined).
 - `localization_accuracy = correctly_localized / bugs_matched` (bug)
@@ -161,7 +161,7 @@ The cardinal rule: **never combine units in one formula.** Units are: *bug*
 **Repair Success** (case + bug units only; **no finding-level FP mixed in**)
 - `patch_apply_rate = applied / provided` (case)
 - `validated_bug_rate = bugs_behaviorally_repaired / required_bugs` (bug)
-- `validated_case_rate = fully_validated_cases / eligible_cases` (case) — fully
+- `validated_case_rate = fully_validated_cases / eligible_cases` (case) - fully
   validated = all required bugs repaired + required tests pass + no regression.
 - `complete_repair_rate = all_required_bugs_repaired_cases / eligible_cases` (case)
 - `regression_free_rate = no_regression / applied` (case)
@@ -202,7 +202,7 @@ Rules:
 - Hard **run deadline** (monotonic) threaded through reviewer → patch → tests →
   oracles → validators; each stage receives `min(stage_timeout, remaining)`.
 
-### 4.5 Execution — Docker-standard
+### 4.5 Execution - Docker-standard
 
 ```
 docker run --rm
@@ -362,12 +362,12 @@ acceptance tests. Docker-dependent gates require a running daemon.
 3. **Evidence attribution**
    - AT: each finding gets the correct `evidence_status`; `detected_but_unrepaired`
      vs `repair_validated` distinguished; `irrelevant_repair` detected.
-4. **Reviewer red-team suite** — AT: each control yields its intended failure.
-5. **Pack certification** — AT: `certify-pack` rejects a leaking/non-deterministic
+4. **Reviewer red-team suite** - AT: each control yields its intended failure.
+5. **Pack certification** - AT: `certify-pack` rejects a leaking/non-deterministic
    /non-failing-baseline case; mutant-kill measured.
-6. **Reproducibility** — AT: `verify-run` detects an edited artifact.
-7. **CLI + dashboard** — AT: smoke each command; evidence view renders.
-8. **Release** — AT: fresh-clone offline demo green end-to-end.
+6. **Reproducibility** - AT: `verify-run` detects an edited artifact.
+7. **CLI + dashboard** - AT: smoke each command; evidence view renders.
+8. **Release** - AT: fresh-clone offline demo green end-to-end.
 
 ## 9. Constraints and honest limitations
 
@@ -376,6 +376,6 @@ acceptance tests. Docker-dependent gates require a running daemon.
   This is recorded, not glossed.
 - v2 is a **multi-session** effort. "Finished v2" is declared only when official
   packs actually execute, Docker behavior is verified, the dashboard has the
-  evidence view, and the fresh-clone offline demo is green — per §8.8.
+  evidence view, and the fresh-clone offline demo is green - per §8.8.
 - Static-only cases remain useful for detection but are excluded from
   execution-backed claims until they ship real oracles.
