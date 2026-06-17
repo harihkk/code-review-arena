@@ -30,6 +30,7 @@ def test_docker_args_are_hardened():
         "--cpus",
         "--read-only",
         "--tmpfs",
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1",
     ):
         assert flag in joined, flag
     # The image and command are always last, in order.

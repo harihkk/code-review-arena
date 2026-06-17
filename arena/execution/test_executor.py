@@ -163,6 +163,8 @@ class TestExecutor:
             "-e",
             "PYTHONDONTWRITEBYTECODE=1",
             "-e",
+            "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1",
+            "-e",
             "HOME=/tmp",
             "-v",
             f"{request.workspace_path.resolve()}:/workspace",
@@ -214,8 +216,9 @@ class TestExecutor:
         # process tree on timeout, so descendants cannot outlive the case.
         if mode == "local":
             # Untrusted fixtures: allowlisted env, isolated HOME/TMPDIR, bounded
-            # resources.
-            with sandboxed_home_env() as env:
+            # resources, and no autoloaded pytest plugins (a candidate cannot
+            # inject one via the workspace).
+            with sandboxed_home_env(extra={"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}) as env:
                 result = run_supervised(
                     args,
                     cwd=request.workspace_path,
