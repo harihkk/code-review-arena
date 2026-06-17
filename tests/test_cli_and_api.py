@@ -145,6 +145,11 @@ def test_api_token_required_when_configured(monkeypatch, tmp_path):
 def test_cli_leaderboard_supports_validated_metric(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     runs_dir = tmp_path / "runs"
+    # Pin the runs/db locations like the sibling tests do, so the run writes
+    # where the leaderboard reads regardless of how project_root() resolves the
+    # working directory during a full-suite run.
+    monkeypatch.setenv("ARENA_RUNS_DIR", str(runs_dir))
+    monkeypatch.setenv("ARENA_DB_PATH", str(tmp_path / "leaderboard.db"))
     source = Path(__file__).parent.parent / "benchmark_sets" / "v1"
     created = runner.invoke(
         app,
