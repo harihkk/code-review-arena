@@ -30,22 +30,30 @@ def load_runs(runs_dir: Path) -> list[RunResult]:
     return [read_json_report(path) for path in paths]
 
 
-def leaderboard_eligible(run: RunResult) -> bool:
-    """Only complete v2 runs are comparable on the default leaderboard.
+def leaderboard_eligible(run: RunResult, *, include_unverified: bool = False) -> bool:
+    """Only complete, verified v2 runs are comparable on the default leaderboard.
 
     Pre-v2 runs (schema_version < 2) are legacy and excluded; partial, invalid,
     failed, and cancelled runs are excluded because their numbers are not
-    comparable to a full run.
+    comparable to a full run. Trusted-local runs executed outside Docker are
+    unverified and excluded unless include_unverified is set.
     """
-    return run.schema_version >= 2 and run.run_status == "complete"
+    if run.schema_version < 2 or run.run_status != "complete":
+        return False
+    if not include_unverified and run.execution_backend == "trusted-local":
+        return False
+    return True
 
 
 def leaderboard_rows(
-    runs_dir: Path, metric: str = "validated_case_rate", beta: float = 1.0
+    runs_dir: Path,
+    metric: str = "validated_case_rate",
+    beta: float = 1.0,
+    include_unverified: bool = False,
 ) -> list[LeaderboardRow]:
     latest: dict[tuple[str, str | None, str], RunResult] = {}
     for run in load_runs(runs_dir):
-        if not leaderboard_eligible(run):
+        if not leaderboard_eligible(run, include_unverified=include_unverified):
             continue
         key = (run.reviewer, run.model, run.mode)
         previous = latest.get(key)

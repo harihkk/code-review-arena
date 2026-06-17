@@ -206,8 +206,13 @@ def leaderboard(
     metric: str = typer.Option("validated_case_rate", "--metric"),
     beta: float = typer.Option(1.0, "--beta", min=0.01),
     as_json: bool = typer.Option(False, "--json", help="Emit leaderboard rows as JSON to stdout."),
+    include_unverified: bool = typer.Option(
+        False,
+        "--include-unverified",
+        help="Include trusted-local (non-Docker) runs, which are excluded by default.",
+    ),
 ) -> None:
-    leaderboard_command(runs_dir, metric, beta, as_json)
+    leaderboard_command(runs_dir, metric, beta, as_json, include_unverified)
 
 
 @app.command()

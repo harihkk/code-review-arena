@@ -7,5 +7,5 @@ router = APIRouter(tags=["leaderboard"])
 
 
 @router.get("/leaderboard")
-def leaderboard() -> list[dict[str, object]]:
-    return RunRepository(database_path()).leaderboard()
+def leaderboard(include_unverified: bool = False) -> list[dict[str, object]]:
+    return RunRepository(database_path()).leaderboard(include_unverified=include_unverified)

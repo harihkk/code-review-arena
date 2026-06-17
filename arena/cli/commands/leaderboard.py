@@ -13,12 +13,15 @@ def leaderboard(
     metric: str = "validated_case_rate",
     beta: float = 1.0,
     as_json: bool = False,
+    include_unverified: bool = False,
 ) -> None:
     if not runs_dir.exists():
         Console(stderr=True).print(f"[red]ERROR[/red] runs directory not found: {runs_dir}")
         raise typer.Exit(code=1)
     try:
-        rows = leaderboard_rows(runs_dir, metric=metric, beta=beta)
+        rows = leaderboard_rows(
+            runs_dir, metric=metric, beta=beta, include_unverified=include_unverified
+        )
     except ValueError as exc:
         Console(stderr=True).print(f"[red]ERROR[/red] {exc}")
         raise typer.Exit(code=1) from exc

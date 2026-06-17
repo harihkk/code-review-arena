@@ -77,7 +77,9 @@ def test_api_run_trace_contains_dashboard_evidence(monkeypatch, tmp_path):
     assert trace["patch_applied"] is True
     assert trace["tests_passed"] is True
     assert trace["deterministic_pass"] is False
-    leaderboard = client.get("/leaderboard").json()
+    # This run executes trusted-local, so it is excluded from the default
+    # (verified) leaderboard; opt in to see it.
+    leaderboard = client.get("/leaderboard?include_unverified=true").json()
     assert leaderboard[0]["false_positives"] == 10
     assert leaderboard[0]["deterministic_metrics"]["detection_f_beta"] < 1
     assert leaderboard[0]["deterministic_metrics"]["validated_f_beta"] == 0
@@ -166,14 +168,23 @@ def test_cli_leaderboard_supports_validated_metric(monkeypatch, tmp_path):
     assert created.exit_code == 0
     assert "Detection: detection_f_beta=1.000" in created.stdout
     assert "validated_f_beta=1.000" in created.stdout
+    # The run is trusted-local, so include it explicitly (excluded by default).
     ranked = runner.invoke(
         app,
-        ["leaderboard", str(runs_dir), "--metric", "validated_f_beta", "--beta", "1.0"],
+        [
+            "leaderboard",
+            str(runs_dir),
+            "--metric",
+            "validated_f_beta",
+            "--beta",
+            "1.0",
+            "--include-unverified",
+        ],
     )
     assert ranked.exit_code == 0
     from arena.reports.leaderboard import leaderboard_rows
 
-    rows = leaderboard_rows(runs_dir, metric="validated_f_beta", beta=1.0)
+    rows = leaderboard_rows(runs_dir, metric="validated_f_beta", beta=1.0, include_unverified=True)
     assert rows
     assert rows[0]["model"] == "perfect_patch"
     assert rows[0]["metric_value"] == 1.0

@@ -177,7 +177,7 @@ class RunRepository:
             row = db.execute("SELECT run_json FROM runs WHERE id = ?", (run_id,)).fetchone()
         return RunResult.model_validate_json(row["run_json"]) if row else None
 
-    def leaderboard(self) -> list[dict[str, object]]:
+    def leaderboard(self, *, include_unverified: bool = False) -> list[dict[str, object]]:
         # Reads the stored run JSON directly rather than rebuilding the full nested
         # RunResult/CaseResult object graph: a leaderboard row is a summary, so this
         # stays responsive with hundreds of runs.
@@ -187,10 +187,13 @@ class RunRepository:
         history: dict[tuple[str, str | None, str], int] = {}
         for row in rows:
             data: dict[str, Any] = json.loads(row["run_json"])
-            # Only complete v2 runs are comparable; legacy and non-complete runs
-            # are preserved in storage but never ranked (mirrors leaderboard_rows).
+            # Only complete, verified v2 runs are comparable; legacy, non-complete,
+            # and (unless opted in) trusted-local runs are preserved in storage but
+            # never ranked (mirrors leaderboard_rows / leaderboard_eligible).
             is_v2 = data.get("schema_version", 1) >= 2
             if not is_v2 or data.get("run_status", "complete") != "complete":
+                continue
+            if not include_unverified and data.get("execution_backend") == "trusted-local":
                 continue
             key = (data["reviewer"], data.get("model"), data.get("mode", "review"))
             history[key] = history.get(key, 0) + 1

@@ -103,3 +103,7 @@ def test_leaderboard_eligibility_rules():
     assert leaderboard_eligible(_minimal_run(schema_version=1, run_status="complete")) is False
     for status in ("partial", "invalid", "failed", "cancelled", "legacy"):
         assert leaderboard_eligible(_minimal_run(schema_version=2, run_status=status)) is False
+    # Trusted-local runs are unverified: excluded by default, included on opt-in.
+    local = _minimal_run(schema_version=2, run_status="complete", execution_backend="trusted-local")
+    assert leaderboard_eligible(local) is False
+    assert leaderboard_eligible(local, include_unverified=True) is True

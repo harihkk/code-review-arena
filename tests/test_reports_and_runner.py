@@ -119,7 +119,7 @@ def test_validated_case_rate_is_the_coherent_default_metric(benchmark_dir, tmp_p
     )
 
     # leaderboard_rows now defaults to validated_case_rate.
-    ranked = leaderboard_rows(tmp_path / "runs")
+    ranked = leaderboard_rows(tmp_path / "runs", include_unverified=True)
     by_model = {row["model"]: row["metric_value"] for row in ranked}
     assert ranked[0]["model"] == "perfect_patch"
     assert by_model["perfect_patch"] == 1.0
@@ -151,7 +151,9 @@ def test_leaderboard_uses_validated_f_beta_as_the_primary_full_mode_metric(bench
     for mode in ("bad_patch", "malformed_patch", "detects_no_patch", "perfect_patch"):
         _run_patch_mode(benchmark_dir, tmp_path, mode)
 
-    validated = leaderboard_rows(tmp_path / "runs", metric="validated_f_beta", beta=1.0)
+    validated = leaderboard_rows(
+        tmp_path / "runs", metric="validated_f_beta", beta=1.0, include_unverified=True
+    )
     metrics_by_model = {row["model"]: row["metric_value"] for row in validated}
     assert validated[0]["model"] == "perfect_patch"
     assert metrics_by_model["perfect_patch"] == 1
@@ -159,14 +161,18 @@ def test_leaderboard_uses_validated_f_beta_as_the_primary_full_mode_metric(bench
     assert metrics_by_model["detects_no_patch"] == 0
     assert metrics_by_model["malformed_patch"] == 0
 
-    detection = leaderboard_rows(tmp_path / "runs", metric="detection_f_beta", beta=1.0)
+    detection = leaderboard_rows(
+        tmp_path / "runs", metric="detection_f_beta", beta=1.0, include_unverified=True
+    )
     detection_by_model = {row["model"]: row["metric_value"] for row in detection}
     assert detection_by_model["perfect_patch"] == 1
     assert detection_by_model["bad_patch"] == 1
     assert detection_by_model["detects_no_patch"] == 1
     assert detection_by_model["malformed_patch"] == 1
 
-    legacy_alias = leaderboard_rows(tmp_path / "runs", metric="f_beta", beta=1.0)
+    legacy_alias = leaderboard_rows(
+        tmp_path / "runs", metric="f_beta", beta=1.0, include_unverified=True
+    )
     alias_by_model = {row["model"]: row["metric_value"] for row in legacy_alias}
     assert alias_by_model == detection_by_model
 
@@ -177,7 +183,9 @@ def test_leaderboard_uses_validated_f_beta_as_the_primary_full_mode_metric(bench
         db_path=tmp_path / "arena.db",
     )
     assert review_only.deterministic_metrics is None
-    cost_ranked = leaderboard_rows(tmp_path / "runs", metric="cost_per_validated_fix")
+    cost_ranked = leaderboard_rows(
+        tmp_path / "runs", metric="cost_per_validated_fix", include_unverified=True
+    )
     assert cost_ranked[-1]["model"] == "perfect"
     assert cost_ranked[-1]["metric_value"] is None
 
@@ -213,13 +221,17 @@ def test_leaderboard_ranks_perfect_patch_above_keyword_gamer(audit_benchmark_dir
     _run_audit_patch_mode(audit_benchmark_dir, tmp_path, "keyword_gamer")
     _run_audit_patch_mode(audit_benchmark_dir, tmp_path, "perfect_patch")
 
-    validated = leaderboard_rows(tmp_path / "audit_runs", metric="validated_f_beta", beta=1.0)
+    validated = leaderboard_rows(
+        tmp_path / "audit_runs", metric="validated_f_beta", beta=1.0, include_unverified=True
+    )
     metrics_by_model = {row["model"]: row["metric_value"] for row in validated}
     assert validated[0]["model"] == "perfect_patch"
     assert metrics_by_model["perfect_patch"] == 1
     assert metrics_by_model["keyword_gamer"] == 0
 
-    detection = leaderboard_rows(tmp_path / "audit_runs", metric="detection_f_beta", beta=1.0)
+    detection = leaderboard_rows(
+        tmp_path / "audit_runs", metric="detection_f_beta", beta=1.0, include_unverified=True
+    )
     detection_by_model = {row["model"]: row["metric_value"] for row in detection}
     assert detection_by_model["keyword_gamer"] == 1
 

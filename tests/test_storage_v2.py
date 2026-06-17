@@ -17,7 +17,15 @@ def _metrics(case_rate: float) -> DeterministicMetrics:
     )
 
 
-def _run(run_id: str, model: str, *, status: str, schema: int = 2, case_rate: float = 1.0):
+def _run(
+    run_id: str,
+    model: str,
+    *,
+    status: str,
+    schema: int = 2,
+    case_rate: float = 1.0,
+    backend: str = "trusted-local",
+):
     return RunResult(
         run_id=run_id,
         benchmark_set="v1",
@@ -30,7 +38,7 @@ def _run(run_id: str, model: str, *, status: str, schema: int = 2, case_rate: fl
         total_score=0.0,
         schema_version=schema,
         run_status=status,  # type: ignore[arg-type]
-        execution_backend="trusted-local",
+        execution_backend=backend,  # type: ignore[arg-type]
         mode="full",
         deterministic_metrics=_metrics(case_rate),
         bugs_found=0,
@@ -56,8 +64,19 @@ def test_get_round_trips_v2_run_fields(tmp_path):
 
 def test_repository_leaderboard_excludes_partial_and_legacy(tmp_path):
     repo = RunRepository(tmp_path / "arena.db")
-    repo.save(_run("c1", "perfect", status="complete", case_rate=1.0))
-    repo.save(_run("p1", "flaky", status="partial", case_rate=0.5))
-    repo.save(_run("l1", "old", status="complete", schema=1, case_rate=1.0))
+    repo.save(_run("c1", "perfect", status="complete", case_rate=1.0, backend="docker"))
+    repo.save(_run("p1", "flaky", status="partial", case_rate=0.5, backend="docker"))
+    repo.save(_run("l1", "old", status="complete", schema=1, case_rate=1.0, backend="docker"))
     board = repo.leaderboard()
     assert {row["model"] for row in board} == {"perfect"}
+
+
+def test_repository_leaderboard_excludes_trusted_local_by_default(tmp_path):
+    repo = RunRepository(tmp_path / "arena.db")
+    repo.save(_run("d1", "docker-run", status="complete", backend="docker"))
+    repo.save(_run("t1", "local-run", status="complete", backend="trusted-local"))
+    # Default: only the Docker-verified run is comparable.
+    assert {row["model"] for row in repo.leaderboard()} == {"docker-run"}
+    # Opt in to see unverified runs too.
+    both = {row["model"] for row in repo.leaderboard(include_unverified=True)}
+    assert both == {"docker-run", "local-run"}
