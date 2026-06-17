@@ -15,13 +15,16 @@ from arena.benchmark.case_loader import build_context, load_cases, load_manifest
 from arena.benchmark.pack_hash import pack_checksum, stored_checksum
 from arena.core.config import PROMPT_VERSION, database_path, runs_path
 from arena.core.models import (
+    RUN_SCHEMA_VERSION,
     BenchmarkCase,
     CaseResult,
     DeterministicCaseScore,
+    ExecutionBackend,
     ReviewerResponse,
     ReviewResult,
     RunMetadata,
     RunResult,
+    RunStatus,
     ScoreBreakdown,
 )
 from arena.execution.sandbox import materialized_case
@@ -53,6 +56,21 @@ def _git_commit() -> str | None:
         ).stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
+
+
+def _run_status(*, results: int, skipped: bool, checksum_verified: bool | None) -> RunStatus:
+    """Classify a finished run's trust level (see RunStatus).
+
+    A tampered pack invalidates the whole run; a run that produced no results at
+    all failed; a budget-truncated run is partial; otherwise it is complete.
+    """
+    if checksum_verified is False:
+        return "invalid"
+    if skipped:
+        return "partial"
+    if results == 0:
+        return "failed"
+    return "complete"
 
 
 def _reserve_run_dir(root: Path) -> tuple[str, Path]:
@@ -307,6 +325,7 @@ def run_benchmark(
     skipped_case_ids: list[str] = []
     budget_stopped_reason: str | None = None
     running_cost = 0.0
+    errored = 0
     test_executor = TestExecutor()
     patch_applier = PatchApplier(root)
     selected_beta = beta or 1.0
@@ -339,10 +358,20 @@ def run_benchmark(
             )
         except Exception as exc:  # noqa: BLE001 - one failing case must not abort the batch.
             case_results.append(_failed_case_result(case, exc, mode))
+            errored += 1
         running_cost += case_results[-1].response.estimated_cost
     completed = datetime.now()
     total_cost = round(sum(item.response.estimated_cost for item in case_results), 6)
     total_latency = sum(item.response.latency_ms for item in case_results)
+    produced = len(case_results)
+    eligible = produced + len(skipped_case_ids)
+    checksum_verified = None if pinned is None else pinned == checksum
+    if mode == "review":
+        execution_backend: ExecutionBackend = "none"
+    else:
+        # Docker is not wired yet; until then the only real execution path is the
+        # opt-in trusted-local one. Phase 2 makes this "docker" for normal runs.
+        execution_backend = "trusted-local" if allow_local_execution else "none"
     run = RunResult(
         run_id=run_id,
         benchmark_set=manifest.version,
@@ -355,7 +384,7 @@ def run_benchmark(
             benchmark_version=manifest.version,
             git_commit=_git_commit(),
             pack_checksum=checksum,
-            pack_checksum_verified=None if pinned is None else pinned == checksum,
+            pack_checksum_verified=checksum_verified,
         ),
         case_results=case_results,
         total_score=(
@@ -365,6 +394,18 @@ def run_benchmark(
         ),
         budget_stopped_reason=budget_stopped_reason,
         skipped_case_ids=skipped_case_ids,
+        schema_version=RUN_SCHEMA_VERSION,
+        run_status=_run_status(
+            results=produced,
+            skipped=bool(skipped_case_ids),
+            checksum_verified=checksum_verified,
+        ),
+        execution_backend=execution_backend,
+        eligible_case_count=eligible,
+        completed_case_count=produced - errored,
+        failed_case_count=errored,
+        skipped_case_count=len(skipped_case_ids),
+        coverage_rate=round(produced / eligible, 6) if eligible else 0.0,
         mode=mode,
         beta=selected_beta,
         deterministic_metrics=(

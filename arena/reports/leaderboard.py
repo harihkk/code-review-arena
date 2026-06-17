@@ -30,11 +30,23 @@ def load_runs(runs_dir: Path) -> list[RunResult]:
     return [read_json_report(path) for path in paths]
 
 
+def leaderboard_eligible(run: RunResult) -> bool:
+    """Only complete v2 runs are comparable on the default leaderboard.
+
+    Pre-v2 runs (schema_version < 2) are legacy and excluded; partial, invalid,
+    failed, and cancelled runs are excluded because their numbers are not
+    comparable to a full run.
+    """
+    return run.schema_version >= 2 and run.run_status == "complete"
+
+
 def leaderboard_rows(
     runs_dir: Path, metric: str = "validated_f_beta", beta: float = 1.0
 ) -> list[LeaderboardRow]:
     latest: dict[tuple[str, str | None, str], RunResult] = {}
     for run in load_runs(runs_dir):
+        if not leaderboard_eligible(run):
+            continue
         key = (run.reviewer, run.model, run.mode)
         previous = latest.get(key)
         if previous is None or run.completed_at > previous.completed_at:

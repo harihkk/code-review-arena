@@ -10,6 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validat
 
 Severity = Literal["critical", "high", "medium", "low"]
 Risk = Literal["critical", "high", "medium", "low", "none"]
+# A run's trust level. Only `complete` v2 runs are leaderboard-eligible; the rest
+# are preserved and inspectable but excluded from normal comparisons.
+RunStatus = Literal["complete", "partial", "invalid", "failed", "cancelled", "legacy"]
+ExecutionBackend = Literal["docker", "trusted-local", "none"]
+# Bumped when the run JSON shape changes in a way that breaks comparability.
+RUN_SCHEMA_VERSION = 2
 
 
 class LineRange(BaseModel):
@@ -353,6 +359,17 @@ class RunResult(BaseModel):
     total_score: float
     budget_stopped_reason: str | None = None
     skipped_case_ids: list[str] = Field(default_factory=list)
+    # Run validity and coverage. schema_version defaults to 1 so runs loaded from
+    # pre-v2 JSON (which never carried these fields) read as legacy v1 and are
+    # excluded from the v2 leaderboard; run_benchmark sets RUN_SCHEMA_VERSION.
+    schema_version: int = 1
+    run_status: RunStatus = "complete"
+    execution_backend: ExecutionBackend = "none"
+    eligible_case_count: int = 0
+    completed_case_count: int = 0
+    failed_case_count: int = 0
+    skipped_case_count: int = 0
+    coverage_rate: float = 1.0
     mode: Literal["review", "patch", "full"] = "review"
     beta: float = 1.0
     deterministic_metrics: DeterministicMetrics | None = None
