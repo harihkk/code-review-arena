@@ -1,11 +1,106 @@
 """Tamper detection: content manifests catch changes to hidden tests/oracles."""
 
 import sys
+from pathlib import Path
 
 import pytest
 
+from arena.benchmark.benchmark_runner import run_benchmark
+from arena.core.models import CaseContext, Finding, ReviewerResponse, ReviewResult
 from arena.execution.integrity import file_manifest, manifest_changes, unsafe_entries
 from arena.execution.test_executor import TestExecutionRequest, TestExecutor
+from arena.reviewers.base import BaseReviewer
+
+TAMPER_PATCH = "--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-VALUE = 1\n+VALUE = 2\n"
+
+
+class _TamperReviewer(BaseReviewer):
+    name = "tamper-test"
+    model = "x"
+
+    def review(self, context: CaseContext) -> ReviewerResponse:
+        finding = Finding(
+            title="value bug",
+            summary="the app value is wrong",
+            category="correctness",
+            severity="high",
+            file="app.py",
+            line_start=1,
+            line_end=1,
+            evidence="value",
+            confidence=0.9,
+        )
+        result = ReviewResult(
+            findings=[finding],
+            proposed_patch=TAMPER_PATCH,
+            overall_risk="high",
+            review_summary="value bug",
+        )
+        return ReviewerResponse(raw_response=result.model_dump_json(), parsed_response=result)
+
+
+def _build_tamper_pack(root: Path) -> Path:
+    pack = root / "pack"
+    case = pack / "tamper_case"
+    (case / "before").mkdir(parents=True)
+    (case / "after").mkdir(parents=True)
+    (case / "tests").mkdir(parents=True)
+    (pack / "manifest.yaml").write_text("version: tamper_v1\nname: tamper\ncases: [tamper_case]\n")
+    (case / "before" / "app.py").write_text("VALUE = 1\n")
+    (case / "after" / "app.py").write_text("VALUE = 1\n")
+    (case / "pr.diff").write_text(TAMPER_PATCH)
+    (case / "tests" / "test_victim.py").write_text("def test_v():\n    assert True\n")
+    # An attacker test rewrites a sibling test file when collected.
+    (case / "tests" / "test_attacker.py").write_text(
+        "from pathlib import Path\n"
+        "Path(__file__).parent.joinpath('test_victim.py').write_text("
+        "'def test_v():\\n    assert True  # rewritten\\n')\n"
+        "def test_a():\n    assert True\n"
+    )
+    (case / "case.yaml").write_text(
+        "id: tamper_case\n"
+        "title: Tamper case\n"
+        "category: correctness\n"
+        "severity: high\n"
+        "stack: [python]\n"
+        "description: A case whose tests get rewritten during the run.\n"
+        "input: {diff: pr.diff, before_dir: before, after_dir: after, tests_dir: tests}\n"
+        "ground_truth:\n"
+        "  bugs:\n"
+        "    - summary: app value bug\n"
+        "      files: [{path: app.py, line_ranges: [{start: 1, end: 1}]}]\n"
+        "      concepts: [correctness]\n"
+        "      must_mention: [value]\n"
+        "      acceptable_fix_keywords: [value]\n"
+        "execution: {run_tests: true, test_command: 'pytest -q tests', timeout_seconds: 60}\n"
+        "validation: {patch_required: true, tests_required: true}\n"
+    )
+    return pack
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX local execution")
+def test_tampering_case_is_excluded_from_aggregate_metrics(tmp_path):
+    pack = _build_tamper_pack(tmp_path)
+    run = run_benchmark(
+        pack,
+        _TamperReviewer(),
+        output_dir=tmp_path / "runs",
+        persist=False,
+        mode="full",
+        allow_local_execution=True,
+    )
+    result = run.case_results[0]
+    assert result.case_status == "tampering"
+    assert "test_integrity_violation" in result.failure_reasons
+    assert result.deterministic_pass is False
+    # The P1 fix: the stored nested score must also reflect the violation, or the
+    # aggregate would still count this as a validated fix.
+    assert result.deterministic_case_score is not None
+    assert result.deterministic_case_score.deterministic_pass is False
+    assert "test_integrity_violation" in result.deterministic_case_score.failure_reasons
+    assert run.deterministic_metrics is not None
+    assert run.deterministic_metrics.validated_case_rate == 0.0
+    assert run.deterministic_metrics.complete_repair_rate == 0.0
 
 
 def test_manifest_is_stable_for_unchanged_files(tmp_path):

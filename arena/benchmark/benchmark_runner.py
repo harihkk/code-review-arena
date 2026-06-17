@@ -291,19 +291,26 @@ def _evaluate_case(
     deterministic = score_deterministic_case(
         case, review_result, patch, executed_tests, validators, selected_beta
     )
-    if integrity_changes:
-        extra_reasons.append("test_integrity_violation")
+    integrity_violated = bool(integrity_changes)
+    if integrity_violated:
+        # Fold tampering into the stored score itself, not just the top-level
+        # flag: aggregate metrics read deterministic_case_score, so a tampering
+        # case with otherwise-passing tests must not count as a validated fix.
+        deterministic = deterministic.model_copy(
+            update={
+                "deterministic_pass": False,
+                "failure_reasons": [*deterministic.failure_reasons, "test_integrity_violation"],
+            }
+        )
     blocking = {
         "patch_required_but_missing",
         "patch_apply_failed",
         "tests_failed",
         "structural_validation_failed",
+        "test_integrity_violation",
     }
-    integrity_violated = bool(integrity_changes)
-    execution_validated = (
-        deterministic.patch_applied
-        and not (blocking & set(deterministic.failure_reasons))
-        and not integrity_violated
+    execution_validated = deterministic.patch_applied and not (
+        blocking & set(deterministic.failure_reasons)
     )
     review_result = apply_execution_fix_quality(case, review_result, validated=execution_validated)
     bug_repairs, scored_findings, case_status = _attribute_evidence(
@@ -332,7 +339,7 @@ def _evaluate_case(
             "validators_run": [item.name for item in validators],
             "validators_passed": deterministic.structural_validation_passed,
             "validator_results": [item.model_dump() for item in validators],
-            "deterministic_pass": deterministic.deterministic_pass and not integrity_violated,
+            "deterministic_pass": deterministic.deterministic_pass,
             "failure_reasons": deterministic.failure_reasons + extra_reasons,
             "raw_suggested_patch": patch_text,
         }
