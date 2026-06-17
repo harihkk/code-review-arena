@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from arena.core.errors import ValidationError
 from arena.execution.commands import parse_test_commands, pin_interpreter
-from arena.execution.hardening import resource_limiter, sandbox_env
+from arena.execution.hardening import resource_limiter, sandboxed_home_env
 from arena.execution.process import run_supervised
 
 # Cap captured stdout/stderr so a noisy or malicious fixture cannot exhaust memory.
@@ -128,25 +128,31 @@ class TestExecutor:
         mode: Literal["docker", "local"],
     ) -> TestExecutionResult:
         started = time.perf_counter()
+        # run_supervised starts the child in its own session and kills the whole
+        # process tree on timeout, so descendants cannot outlive the case.
         if mode == "local":
-            # Fixture commands are untrusted: allowlisted env, bounded resources.
-            env = sandbox_env()
-            preexec = resource_limiter(request.timeout_seconds)
+            # Untrusted fixtures: allowlisted env, isolated HOME/TMPDIR, bounded
+            # resources.
+            with sandboxed_home_env() as env:
+                result = run_supervised(
+                    args,
+                    cwd=request.workspace_path,
+                    env=env,
+                    timeout=request.timeout_seconds,
+                    preexec_fn=resource_limiter(request.timeout_seconds),
+                    output_limit=OUTPUT_LIMIT_BYTES,
+                )
         else:
             # The docker CLI needs the caller's docker config; isolation comes
             # from the container itself.
-            env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
-            preexec = None
-        # run_supervised starts the child in its own session and kills the whole
-        # process tree on timeout, so descendants cannot outlive the case.
-        result = run_supervised(
-            args,
-            cwd=request.workspace_path,
-            env=env,
-            timeout=request.timeout_seconds,
-            preexec_fn=preexec,
-            output_limit=OUTPUT_LIMIT_BYTES,
-        )
+            result = run_supervised(
+                args,
+                cwd=request.workspace_path,
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+                timeout=request.timeout_seconds,
+                preexec_fn=None,
+                output_limit=OUTPUT_LIMIT_BYTES,
+            )
         duration_ms = int((time.perf_counter() - started) * 1000)
         if result.timed_out:
             return TestExecutionResult(

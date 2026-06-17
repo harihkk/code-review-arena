@@ -1,35 +1,37 @@
 """Reduced-privilege environment and resource limits for fixture commands.
 
 Benchmark fixtures are untrusted: packs can come from third parties, and the
-test commands they declare run on the host (when local execution is allowed).
-Two mitigations apply to every locally executed fixture command:
+test commands they declare run on the host (when trusted-local execution is
+allowed). Three mitigations apply to every locally executed fixture command:
 
 - the child environment is built from an allowlist instead of inheriting the
   parent environment, so shell secrets and API keys are never exposed;
+- HOME and TMPDIR point at a fresh, empty, per-run temporary directory, so a
+  fixture cannot read ~/.ssh, ~/.aws, ~/.config, or the host temp space;
 - POSIX resource limits bound CPU time, file size, open files, and process
   count so a runaway or malicious fixture cannot exhaust the host.
 
-Neither replaces real isolation (containers); they raise the bar for the
-default subprocess executor.
+None of this replaces real isolation (containers): it is containment, not a
+security boundary. Use the Docker backend for untrusted packs.
 """
 
 from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Callable
+import tempfile
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 
-# Variables forwarded from the parent environment when present. Everything
-# else requires an explicit opt-in via ARENA_PASSTHROUGH_ENV.
+# Variables forwarded from the parent environment when present. HOME and the
+# temp-dir vars are deliberately excluded: they are replaced with an isolated
+# per-run directory (see sandboxed_home_env). Everything else requires an
+# explicit opt-in via ARENA_PASSTHROUGH_ENV.
 SAFE_ENV_KEYS = (
     "PATH",
-    "HOME",
     "LANG",
     "LC_ALL",
     "LC_CTYPE",
-    "TMPDIR",
-    "TEMP",
-    "TMP",
     "SYSTEMROOT",
     "COMSPEC",
     "PATHEXT",
@@ -52,6 +54,20 @@ def sandbox_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     if extra:
         env.update(extra)
     return env
+
+
+@contextmanager
+def sandboxed_home_env(extra: dict[str, str] | None = None) -> Iterator[dict[str, str]]:
+    """Allowlisted env with an isolated, empty HOME/TMPDIR for the child.
+
+    A fresh temporary directory becomes the fixture's HOME and temp space, then is
+    removed when the command finishes. Containment, not isolation (see the module
+    docstring) -- it stops casual credential reads, not a determined escape.
+    """
+    with tempfile.TemporaryDirectory(prefix="arena-home-") as home:
+        env = sandbox_env(extra=extra)
+        env.update({"HOME": home, "TMPDIR": home, "TEMP": home, "TMP": home})
+        yield env
 
 
 def _clamped(limit: int, desired: int) -> tuple[int, int]:

@@ -1,11 +1,12 @@
 """Execution security: env allowlist, resource limits, pack checksums, path validation."""
 
+import os
 import sys
 from pathlib import Path
 
 from arena.benchmark.pack_hash import pack_checksum, stored_checksum, write_checksum
 from arena.core.config import resolve_benchmark_set
-from arena.execution.hardening import sandbox_env
+from arena.execution.hardening import sandbox_env, sandboxed_home_env
 from arena.execution.test_executor import TestExecutionRequest, TestExecutor
 
 
@@ -24,6 +25,40 @@ def test_sandbox_env_passthrough_is_explicit(monkeypatch):
     env = sandbox_env()
     assert env["HTTPS_PROXY"] == "http://proxy:3128"
     assert "SUPER_SECRET_API_KEY" not in env
+
+
+def test_sandbox_env_does_not_forward_parent_home(monkeypatch):
+    monkeypatch.setenv("HOME", "/Users/secret")
+    # HOME must be supplied as an isolated dir, never inherited from the host.
+    assert "HOME" not in sandbox_env()
+
+
+def test_sandboxed_home_env_is_isolated_and_cleaned_up():
+    real_home = os.path.expanduser("~")
+    with sandboxed_home_env() as env:
+        home = env["HOME"]
+        assert home != real_home
+        assert "arena-home-" in home
+        assert os.path.isdir(home)
+        assert env["TMPDIR"] == home
+    assert not os.path.exists(home)  # removed when the command finishes
+
+
+def test_fixture_runs_with_isolated_home(tmp_path):
+    seen = tmp_path / "seen_home.txt"
+    script = f"import os; open(r'{seen}', 'w').write(os.environ.get('HOME', 'MISSING'))"
+    TestExecutor().execute(
+        TestExecutionRequest(
+            case_id="case",
+            workspace_path=tmp_path,
+            test_command=[sys.executable, "-c", script],
+            timeout_seconds=10,
+            allow_local_execution=True,
+        )
+    )
+    home_seen = seen.read_text()
+    assert home_seen != os.path.expanduser("~")
+    assert "arena-home-" in home_seen
 
 
 def test_fixture_commands_cannot_read_host_secrets(tmp_path, monkeypatch):

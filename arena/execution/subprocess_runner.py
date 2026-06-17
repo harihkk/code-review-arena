@@ -10,7 +10,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from arena.execution.hardening import resource_limiter, sandbox_env
+from arena.execution.hardening import resource_limiter, sandboxed_home_env
 
 
 class CommandResult(BaseModel):
@@ -27,16 +27,17 @@ def run_command(command: str, cwd: Path, timeout_seconds: int) -> CommandResult:
     if arguments and arguments[0] == "pytest":
         arguments = [sys.executable, "-m", "pytest", *arguments[1:]]
     try:
-        completed = subprocess.run(
-            arguments,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-            check=False,
-            env=sandbox_env(),
-            preexec_fn=resource_limiter(timeout_seconds),
-        )
+        with sandboxed_home_env() as env:
+            completed = subprocess.run(
+                arguments,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+                check=False,
+                env=env,
+                preexec_fn=resource_limiter(timeout_seconds),
+            )
         output = (completed.stdout + "\n" + completed.stderr).strip()
         return CommandResult(
             command=command,
