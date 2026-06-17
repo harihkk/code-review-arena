@@ -14,6 +14,10 @@ from pydantic import BaseModel, Field
 from arena.core.errors import ValidationError
 from arena.execution.commands import parse_test_commands, pin_interpreter
 from arena.execution.hardening import resource_limiter, sandbox_env
+from arena.execution.process import run_supervised
+
+# Cap captured stdout/stderr so a noisy or malicious fixture cannot exhaust memory.
+OUTPUT_LIMIT_BYTES = 512_000
 
 
 class TestExecutionRequest(BaseModel):
@@ -133,39 +137,39 @@ class TestExecutor:
             # from the container itself.
             env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
             preexec = None
-        try:
-            completed = subprocess.run(
-                args,
-                cwd=request.workspace_path,
-                capture_output=True,
-                text=True,
-                timeout=request.timeout_seconds,
-                check=False,
-                env=env,
-                preexec_fn=preexec,
-            )
-            return TestExecutionResult(
-                case_id=request.case_id,
-                ran=True,
-                passed=completed.returncode == 0,
-                exit_code=completed.returncode,
-                stdout=completed.stdout,
-                stderr=completed.stderr,
-                duration_ms=int((time.perf_counter() - started) * 1000),
-                execution_mode=mode,
-            )
-        except subprocess.TimeoutExpired as exc:
+        # run_supervised starts the child in its own session and kills the whole
+        # process tree on timeout, so descendants cannot outlive the case.
+        result = run_supervised(
+            args,
+            cwd=request.workspace_path,
+            env=env,
+            timeout=request.timeout_seconds,
+            preexec_fn=preexec,
+            output_limit=OUTPUT_LIMIT_BYTES,
+        )
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        if result.timed_out:
             return TestExecutionResult(
                 case_id=request.case_id,
                 ran=True,
                 passed=False,
-                stdout=(exc.stdout or "") if isinstance(exc.stdout, str) else "",
-                stderr=(exc.stderr or "") if isinstance(exc.stderr, str) else "",
-                duration_ms=int((time.perf_counter() - started) * 1000),
+                stdout=result.stdout,
+                stderr=result.stderr,
+                duration_ms=duration_ms,
                 timed_out=True,
                 execution_mode=mode,
                 error="test_execution_timed_out",
             )
+        return TestExecutionResult(
+            case_id=request.case_id,
+            ran=True,
+            passed=result.returncode == 0,
+            exit_code=result.returncode,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            duration_ms=duration_ms,
+            execution_mode=mode,
+        )
 
     @staticmethod
     def _skipped(case_id: str, error: str) -> TestExecutionResult:
