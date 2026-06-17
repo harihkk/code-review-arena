@@ -35,6 +35,12 @@ def run(
     beta: float | None = typer.Option(None, "--beta", min=0.01),
     allow_local_execution: bool = typer.Option(False, "--allow-local-execution"),
     command: str | None = typer.Option(None, "--command"),
+    model: str | None = typer.Option(
+        None,
+        "--model",
+        help="Model name for openai:/http: reviewers (e.g. llama3). "
+        "Falls back to ARENA_HTTP_MODEL.",
+    ),
     reviewer_timeout_seconds: int = typer.Option(120, "--reviewer-timeout-seconds", min=1),
     reveal_metadata: bool = typer.Option(
         False,
@@ -75,6 +81,7 @@ def run(
         enable_repair=enable_repair,
         max_wall_seconds=max_wall_seconds,
         max_cost=max_cost,
+        model=model,
     )
 
 

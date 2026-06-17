@@ -23,11 +23,13 @@ def run(
     enable_repair: bool = False,
     max_wall_seconds: float | None = None,
     max_cost: float | None = None,
+    model: str | None = None,
 ) -> None:
     try:
         reviewer = create_reviewer(
             reviewer_spec,
             command=command,
+            model=model,
             reviewer_timeout_seconds=reviewer_timeout_seconds,
             reveal_metadata=reveal_metadata,
             enable_repair=enable_repair,
