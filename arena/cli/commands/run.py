@@ -76,6 +76,12 @@ def run(
             f"patch_apply_rate={_format_rate(metrics.patch_apply_rate)}, "
             f"structural_pass_rate={_format_rate(metrics.structural_pass_rate)}"
         )
+        Console().print(
+            "Dimensions: "
+            f"review_accuracy(bug_completeness)={_format_rate(metrics.bug_completeness_rate)}, "
+            f"repair_success(complete_repair)={_format_rate(metrics.complete_repair_rate)}, "
+            f"trustworthiness(supported_claims)={_format_rate(metrics.supported_claim_rate)}"
+        )
     Console().print(f"Reports: {runs_path() / result.run_id}/")
 
 

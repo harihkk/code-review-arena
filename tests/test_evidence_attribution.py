@@ -4,7 +4,10 @@ from arena.benchmark.benchmark_runner import _attribute_evidence
 from arena.core.models import BenchmarkCase, Finding, ReviewerResponse, ReviewResult
 from arena.execution.test_executor import TestExecutionResult
 from arena.patching.patch_models import PatchApplyResult
-from arena.scoring.deterministic_scorer import score_deterministic_case
+from arena.scoring.deterministic_scorer import (
+    aggregate_deterministic_metrics,
+    score_deterministic_case,
+)
 from arena.scoring.scorer import score_case
 
 
@@ -133,3 +136,52 @@ def test_tampering_overrides_case_status():
         case, review, det, execution_validated=False, integrity_violated=True
     )
     assert status == "tampering"
+
+
+def _attributed(case, review, *, validated):
+    det = _deterministic(case, review, tests_passed=validated)
+    bug_repairs, findings, status = _attribute_evidence(
+        case, review, det, execution_validated=validated, integrity_violated=False
+    )
+    return review.model_copy(
+        update={
+            "deterministic_case_score": det,
+            "case_status": status,
+            "bug_repairs": bug_repairs,
+            "scored_findings": findings,
+        }
+    )
+
+
+def test_aggregate_reports_evidence_dimensions():
+    case = _case()
+    repaired = _attributed(case, score_case(case, _response([BUG0, BUG1])), validated=True)
+    metrics = aggregate_deterministic_metrics(
+        [repaired], beta=1.0, total_cost=0.0, total_latency_ms=0
+    )
+    assert metrics.complete_repair_rate == 1.0
+    assert metrics.bug_completeness_rate == 1.0
+    assert metrics.supported_claim_rate == 1.0
+
+
+def test_aggregate_separates_detection_from_repair():
+    case = _case()
+    detected_only = _attributed(case, score_case(case, _response([BUG0, BUG1])), validated=False)
+    metrics = aggregate_deterministic_metrics(
+        [detected_only], beta=1.0, total_cost=0.0, total_latency_ms=0
+    )
+    # Both bugs were detected but the repair did not validate.
+    assert metrics.bug_completeness_rate == 1.0
+    assert metrics.complete_repair_rate == 0.0
+
+
+def test_supported_claim_rate_counts_only_judged_findings():
+    case = _case()
+    noise = _finding("unrelated/x.py", 1, 1, "style nit", "rename")
+    review = score_case(case, _response([BUG0, BUG1, noise]))
+    attributed = _attributed(case, review, validated=True)
+    metrics = aggregate_deterministic_metrics(
+        [attributed], beta=1.0, total_cost=0.0, total_latency_ms=0
+    )
+    # Two supported claims out of three judged findings.
+    assert metrics.supported_claim_rate == round(2 / 3, 6)

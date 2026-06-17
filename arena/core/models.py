@@ -323,6 +323,14 @@ class DeterministicMetrics(BaseModel):
     # eligible cases (numerically equal to deterministic_pass_rate, which stays
     # as a legacy alias). This is the default leaderboard sort.
     validated_case_rate: float = 0.0
+    # Evidence-derived dimensions (see docs/v2-architecture.md sec 4.3):
+    # Repair Success -- cases the patch fully repaired (case unit).
+    complete_repair_rate: float = 0.0
+    # Review Accuracy -- cases where every seeded bug was detected (case unit).
+    bug_completeness_rate: float = 0.0
+    # Review Trustworthiness -- of the findings that count (excluding neutral
+    # acceptable findings), the fraction that matched a real bug (finding unit).
+    supported_claim_rate: float | None = None
     localization_rate: float | None = None
     patch_apply_rate: float | None = None
     test_pass_rate: float | None = None

@@ -91,7 +91,8 @@ def aggregate_deterministic_metrics(
     total_cost: float,
     total_latency_ms: int,
 ) -> DeterministicMetrics:
-    scores = [case.deterministic_case_score for case in cases if case.deterministic_case_score]
+    eligible = [case for case in cases if case.deterministic_case_score]
+    scores = [case.deterministic_case_score for case in eligible if case.deterministic_case_score]
     detection_tp = sum(score.true_positive_count for score in scores)
     detection_fn = sum(score.false_negative_count for score in scores)
     fp = sum(score.false_positive_count for score in scores)
@@ -110,6 +111,19 @@ def aggregate_deterministic_metrics(
     tests_passed = sum(score.tests_passed is True for score in scores)
     validation_ran = sum(score.structural_validation_ran for score in scores)
     validation_passed = sum(score.structural_validation_passed is True for score in scores)
+    # Evidence-derived dimensions, read from the per-case attribution.
+    complete_repairs = sum(case.case_status == "complete_repair" for case in eligible)
+    bug_complete = sum(
+        bool(case.bug_repairs) and all(repair.detected for repair in case.bug_repairs)
+        for case in eligible
+    )
+    judged_findings = [
+        finding
+        for case in eligible
+        for finding in case.scored_findings
+        if not finding.is_neutral
+    ]
+    supported = sum(finding.is_true_positive for finding in judged_findings)
     return DeterministicMetrics(
         detection_precision=round(detection_precision, 6),
         detection_recall=round(detection_recall, 6),
@@ -124,6 +138,11 @@ def aggregate_deterministic_metrics(
         # Unit-coherent case-level repair rate (see DeterministicMetrics). Equal
         # to deterministic_pass_rate; named for the leaderboard/product surface.
         validated_case_rate=round(validated_tp / case_count, 6) if case_count else 0.0,
+        complete_repair_rate=round(complete_repairs / case_count, 6) if case_count else 0.0,
+        bug_completeness_rate=round(bug_complete / case_count, 6) if case_count else 0.0,
+        supported_claim_rate=(
+            round(supported / len(judged_findings), 6) if judged_findings else None
+        ),
         localization_rate=rate(localized_cases, detected_cases),
         patch_apply_rate=rate(patch_applied, patch_provided),
         test_pass_rate=rate(tests_passed, tests_ran),
