@@ -2,8 +2,9 @@
 
 from datetime import datetime
 from pathlib import Path
+from time import monotonic
 
-from arena.benchmark.benchmark_runner import _run_status, run_benchmark
+from arena.benchmark.benchmark_runner import _effective_timeout, _run_status, run_benchmark
 from arena.core.models import RUN_SCHEMA_VERSION, RunMetadata, RunResult
 from arena.reports.leaderboard import leaderboard_eligible, leaderboard_rows
 from arena.reviewers.controls import ControlReviewer
@@ -31,6 +32,16 @@ def _minimal_run(**overrides) -> RunResult:
     )
     base.update(overrides)
     return RunResult(**base)
+
+
+def test_effective_timeout_clamps_to_the_run_deadline():
+    # No deadline: the case timeout is used as-is.
+    assert _effective_timeout(30, None) == 30
+    # A near deadline shortens the per-case timeout.
+    soon = _effective_timeout(30, monotonic() + 5)
+    assert 1 <= soon <= 5
+    # Past the deadline, it floors at 1s rather than going negative.
+    assert _effective_timeout(30, monotonic() - 10) == 1
 
 
 def test_run_status_classifies_each_trust_level():

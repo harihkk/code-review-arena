@@ -8,6 +8,7 @@ import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
+from time import monotonic
 from typing import Literal
 
 from arena import __version__
@@ -113,6 +114,18 @@ def _select_case_patch(parsed: ReviewResult | None) -> tuple[str | None, str]:
     return None, "none"
 
 
+def _effective_timeout(base_seconds: int, deadline: float | None) -> int:
+    """Clamp a per-stage timeout to the remaining run budget (floor of 1s).
+
+    Without this a single case could run for its full timeout past the run's
+    wall-clock budget; the deadline makes the budget hard rather than advisory.
+    """
+    if deadline is None:
+        return base_seconds
+    remaining = deadline - monotonic()
+    return max(1, min(base_seconds, int(remaining)))
+
+
 def _evaluate_case(
     case: BenchmarkCase,
     reviewer: BaseReviewer,
@@ -123,6 +136,7 @@ def _evaluate_case(
     mode: Literal["review", "patch", "full"],
     selected_beta: float,
     allow_local_execution: bool,
+    deadline: float | None = None,
 ) -> CaseResult:
     test_output = ""
     static_output = ""
@@ -133,7 +147,7 @@ def _evaluate_case(
                     case_id=case.id,
                     workspace_path=materialized,
                     test_command=case.execution.test_command,
-                    timeout_seconds=case.execution.timeout_seconds,
+                    timeout_seconds=_effective_timeout(case.execution.timeout_seconds, deadline),
                     docker_image=case.execution.docker_image,
                     allow_local_execution=allow_local_execution,
                 )
@@ -146,7 +160,7 @@ def _evaluate_case(
             static_output = run_static_analysis(
                 materialized,
                 case.execution.static_analysis_command,
-                case.execution.timeout_seconds,
+                _effective_timeout(case.execution.timeout_seconds, deadline),
             )
     context = build_context(case, test_output=test_output, static_analysis_output=static_output)
     response = reviewer.review(context)
@@ -199,7 +213,7 @@ def _evaluate_case(
                 case_id=case.id,
                 workspace_path=Path(patch.workspace_path),
                 test_command=case.execution.test_command,
-                timeout_seconds=case.execution.timeout_seconds,
+                timeout_seconds=_effective_timeout(case.execution.timeout_seconds, deadline),
                 docker_image=case.execution.docker_image,
                 allow_local_execution=allow_local_execution,
             )
@@ -334,6 +348,9 @@ def run_benchmark(
     checksum = pack_checksum(benchmark_dir)
     pinned = stored_checksum(benchmark_dir)
     started = datetime.now()
+    # Monotonic deadline makes max_wall_seconds a hard budget: each case's
+    # execution timeout is clamped to the time left, not just checked between cases.
+    run_deadline = monotonic() + max_wall_seconds if max_wall_seconds is not None else None
     case_results = []
     skipped_case_ids: list[str] = []
     budget_stopped_reason: str | None = None
@@ -367,6 +384,7 @@ def run_benchmark(
                     mode=mode,
                     selected_beta=selected_beta,
                     allow_local_execution=allow_local_execution,
+                    deadline=run_deadline,
                 )
             )
         except Exception as exc:  # noqa: BLE001 - one failing case must not abort the batch.
