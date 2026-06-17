@@ -55,6 +55,24 @@ def test_run_status_classifies_each_trust_level():
     assert _run_status(results=10, skipped=True, checksum_verified=False) == "invalid"
 
 
+def test_execution_backend_reflects_actual_execution(tmp_path):
+    full = run_benchmark(
+        V1,
+        ControlReviewer("perfect_patch"),
+        output_dir=tmp_path / "runs",
+        persist=False,
+        mode="full",
+        allow_local_execution=True,
+    )
+    assert full.execution_backend == "trusted-local"
+    assert any(case.execution_backend == "trusted-local" for case in full.case_results)
+
+    review = run_benchmark(
+        V1, ControlReviewer("perfect"), output_dir=tmp_path / "review-runs", persist=False
+    )
+    assert review.execution_backend == "none"
+
+
 def test_complete_run_records_full_coverage(tmp_path):
     run = run_benchmark(V1, ControlReviewer("perfect"), output_dir=tmp_path / "runs", persist=False)
     assert run.schema_version == RUN_SCHEMA_VERSION

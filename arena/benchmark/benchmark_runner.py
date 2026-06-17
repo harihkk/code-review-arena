@@ -312,6 +312,14 @@ def _evaluate_case(
     execution_validated = deterministic.patch_applied and not (
         blocking & set(deterministic.failure_reasons)
     )
+    if executed_tests is None:
+        case_backend: ExecutionBackend = "none"
+    elif executed_tests.execution_mode == "docker":
+        case_backend = "docker"
+    elif executed_tests.execution_mode == "local":
+        case_backend = "trusted-local"
+    else:
+        case_backend = "none"
     review_result = apply_execution_fix_quality(case, review_result, validated=execution_validated)
     bug_repairs, scored_findings, case_status = _attribute_evidence(
         case,
@@ -325,6 +333,7 @@ def _evaluate_case(
             "scored_findings": scored_findings,
             "bug_repairs": bug_repairs,
             "case_status": case_status,
+            "execution_backend": case_backend,
             "deterministic_case_score": deterministic,
             "patch_provided": deterministic.patch_provided,
             "patch_applied": deterministic.patch_applied,
@@ -470,12 +479,16 @@ def run_benchmark(
     produced = len(case_results)
     eligible = produced + len(skipped_case_ids)
     checksum_verified = None if pinned is None else pinned == checksum
-    if mode == "review":
-        execution_backend: ExecutionBackend = "none"
+    # Derive the run backend from what actually executed, weakest link first: a
+    # single trusted-local case makes the whole run unverified, regardless of the
+    # --allow-local-execution flag or any per-case docker_image.
+    case_backends = {case.execution_backend for case in case_results}
+    if "trusted-local" in case_backends:
+        execution_backend: ExecutionBackend = "trusted-local"
+    elif "docker" in case_backends:
+        execution_backend = "docker"
     else:
-        # Docker is not wired yet; until then the only real execution path is the
-        # opt-in trusted-local one. Phase 2 makes this "docker" for normal runs.
-        execution_backend = "trusted-local" if allow_local_execution else "none"
+        execution_backend = "none"
     run = RunResult(
         run_id=run_id,
         benchmark_set=manifest.version,

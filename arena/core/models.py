@@ -397,6 +397,8 @@ class CaseResult(BaseModel):
     # Evidence attribution (populated in patch/full mode).
     case_status: CaseStatus | None = None
     bug_repairs: list[BugRepair] = Field(default_factory=list)
+    # How this case actually executed (docker / trusted-local / none).
+    execution_backend: ExecutionBackend = "none"
 
 
 class RunMetadata(BaseModel):
