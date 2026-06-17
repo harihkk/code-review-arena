@@ -21,6 +21,9 @@ def test_schema_command_emits_versioned_review_schema():
     assert schema["version"]
     assert "findings" in schema["properties"]
     assert "overall_risk" in schema["properties"]
+    # The case-level repair is part of the contract but optional, so it never
+    # widens the required set (legacy reviewers stay valid).
+    assert "proposed_patch" in schema["properties"]
     assert set(schema["required"]) == {"findings", "overall_risk", "review_summary"}
 
 

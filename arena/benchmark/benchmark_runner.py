@@ -19,6 +19,7 @@ from arena.core.models import (
     CaseResult,
     DeterministicCaseScore,
     ReviewerResponse,
+    ReviewResult,
     RunMetadata,
     RunResult,
     ScoreBreakdown,
@@ -68,6 +69,31 @@ def _reserve_run_dir(root: Path) -> tuple[str, Path]:
             suffix += 1
 
 
+def _select_case_patch(parsed: ReviewResult | None) -> tuple[str | None, str]:
+    """Pick the single repair to apply, returning (patch_text, source).
+
+    The case-level ``proposed_patch`` is authoritative. For legacy reviewers that
+    only attach a patch to a finding, that patch is adopted only when exactly one
+    finding carries one (unambiguous). Two or more competing finding patches are
+    never silently concatenated -- order, overlap, and conflicts make that
+    meaningless -- so the result is reported as ``ambiguous`` with no patch.
+    """
+    if parsed is None:
+        return None, "none"
+    if parsed.proposed_patch and parsed.proposed_patch.strip():
+        return parsed.proposed_patch, "proposed_patch"
+    finding_patches = [
+        finding.suggested_patch
+        for finding in parsed.findings
+        if finding.suggested_patch and finding.suggested_patch.strip()
+    ]
+    if len(finding_patches) == 1:
+        return finding_patches[0], "single_finding"
+    if len(finding_patches) > 1:
+        return None, "ambiguous"
+    return None, "none"
+
+
 def _evaluate_case(
     case: BenchmarkCase,
     reviewer: BaseReviewer,
@@ -111,13 +137,18 @@ def _evaluate_case(
     if mode == "review":
         return review_result
     assert case.case_dir is not None
+    # The representative finding only supplies structural-validator context; the
+    # patch that is actually applied is the single case-level repair (see
+    # _select_case_patch). They are deliberately decoupled so multi-bug cases are
+    # repaired by one complete diff rather than one bug's finding patch.
     matching_finding = next(
         (item.finding for item in review_result.scored_findings if item.matched_bug_index == 0),
         None,
     ) or next(
         (item.finding for item in review_result.scored_findings if item.is_true_positive), None
     )
-    patch_text = matching_finding.suggested_patch if matching_finding else None
+    patch_text, patch_source = _select_case_patch(review_result.response.parsed_response)
+    extra_reasons = ["ambiguous_patch_source"] if patch_source == "ambiguous" else []
     protected_paths = list(case.validation.protected_paths)
     if case.input.tests_dir:
         protected_paths.append(case.input.tests_dir)
@@ -191,7 +222,7 @@ def _evaluate_case(
             "validators_passed": deterministic.structural_validation_passed,
             "validator_results": [item.model_dump() for item in validators],
             "deterministic_pass": deterministic.deterministic_pass,
-            "failure_reasons": deterministic.failure_reasons,
+            "failure_reasons": deterministic.failure_reasons + extra_reasons,
             "raw_suggested_patch": patch_text,
         }
     )

@@ -215,6 +215,7 @@ class ReferencePatchReviewer(BaseReviewer):
                 f"Reference-patch baseline for {context.case.id} "
                 f"({'patch present' if patch_text.strip() else 'patch missing'})."
             ),
+            proposed_patch=patch_text if patch_text.strip() else None,
         )
         raw = json.dumps(result.model_dump())
         parsed, attempts = parse_review_response(raw)

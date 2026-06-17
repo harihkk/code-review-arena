@@ -172,6 +172,10 @@ class Finding(BaseModel):
 
 class ReviewResult(BaseModel):
     findings: list[Finding]
+    # The reviewer's single complete repair for the whole case. This is the only
+    # patch Arena applies; per-finding ``suggested_patch`` is advisory and never
+    # applied (combining finding patches has ambiguous order/overlap semantics).
+    proposed_patch: str | None = None
     overall_risk: Risk
     review_summary: str
 

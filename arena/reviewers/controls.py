@@ -665,6 +665,9 @@ def build_prompt(
             findings=findings,
             overall_risk=context.case.severity,
             review_summary=f"Mock {self.mode} review for {context.case.id}.",
+            # The case-level repair is the primary finding's patch (None for the
+            # review-only and false-positive modes that propose no fix).
+            proposed_patch=findings[0].suggested_patch if findings else None,
         )
         raw = json.dumps(result.model_dump())
         parsed, attempts = parse_review_response(raw)
