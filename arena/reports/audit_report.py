@@ -24,6 +24,7 @@ FAILURE_REASON_LABELS = (
     "localization_failed",
     "detection_failed",
     "incomplete_bug_detection",
+    "test_integrity_violation",
     "false_positive",
 )
 

@@ -27,6 +27,7 @@ from arena.core.models import (
     RunStatus,
     ScoreBreakdown,
 )
+from arena.execution.integrity import file_manifest, manifest_changes
 from arena.execution.sandbox import materialized_case
 from arena.execution.test_executor import TestExecutionRequest, TestExecutionResult, TestExecutor
 from arena.patching.patch_applier import PatchApplier
@@ -180,14 +181,19 @@ def _evaluate_case(
         )
     )
     executed_tests: TestExecutionResult | None = None
+    integrity_changes: list[str] = []
     if patch.applied and case.execution.run_tests and case.execution.test_command:
         tests_dir = case.input.tests_dir
+        tests_root = Path(patch.workspace_path) / tests_dir if tests_dir else None
         if tests_dir and (case.case_dir / tests_dir).is_dir():
             shutil.copytree(
                 case.case_dir / tests_dir,
                 Path(patch.workspace_path) / tests_dir,
                 dirs_exist_ok=True,
             )
+        # Snapshot the hidden tests so candidate code that rewrites them mid-run
+        # is caught even though the patch itself could not declare those paths.
+        before_tests = file_manifest(tests_root) if tests_root else {}
         executed_tests = test_executor.execute(
             TestExecutionRequest(
                 case_id=case.id,
@@ -198,6 +204,8 @@ def _evaluate_case(
                 allow_local_execution=allow_local_execution,
             )
         )
+        if tests_root:
+            integrity_changes = manifest_changes(before_tests, file_manifest(tests_root))
     validators = []
     if patch.applied and case.validation.structural_validators:
         validators = run_validators(
@@ -213,14 +221,19 @@ def _evaluate_case(
     deterministic = score_deterministic_case(
         case, review_result, patch, executed_tests, validators, selected_beta
     )
+    if integrity_changes:
+        extra_reasons.append("test_integrity_violation")
     blocking = {
         "patch_required_but_missing",
         "patch_apply_failed",
         "tests_failed",
         "structural_validation_failed",
     }
-    execution_validated = deterministic.patch_applied and not (
-        blocking & set(deterministic.failure_reasons)
+    integrity_violated = bool(integrity_changes)
+    execution_validated = (
+        deterministic.patch_applied
+        and not (blocking & set(deterministic.failure_reasons))
+        and not integrity_violated
     )
     review_result = apply_execution_fix_quality(case, review_result, validated=execution_validated)
     return review_result.model_copy(
@@ -239,7 +252,7 @@ def _evaluate_case(
             "validators_run": [item.name for item in validators],
             "validators_passed": deterministic.structural_validation_passed,
             "validator_results": [item.model_dump() for item in validators],
-            "deterministic_pass": deterministic.deterministic_pass,
+            "deterministic_pass": deterministic.deterministic_pass and not integrity_violated,
             "failure_reasons": deterministic.failure_reasons + extra_reasons,
             "raw_suggested_patch": patch_text,
         }
