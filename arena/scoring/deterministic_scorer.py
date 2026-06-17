@@ -118,10 +118,7 @@ def aggregate_deterministic_metrics(
         for case in eligible
     )
     judged_findings = [
-        finding
-        for case in eligible
-        for finding in case.scored_findings
-        if not finding.is_neutral
+        finding for case in eligible for finding in case.scored_findings if not finding.is_neutral
     ]
     supported = sum(finding.is_true_positive for finding in judged_findings)
     return DeterministicMetrics(

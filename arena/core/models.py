@@ -353,9 +353,7 @@ class DeterministicMetrics(BaseModel):
         converted.setdefault("validated_recall", converted.get("recall", 0.0))
         converted.setdefault("validated_f1", converted.get("f1", 0.0))
         converted.setdefault("validated_f_beta", converted.get("f_beta", 0.0))
-        converted.setdefault(
-            "validated_case_rate", converted.get("deterministic_pass_rate", 0.0)
-        )
+        converted.setdefault("validated_case_rate", converted.get("deterministic_pass_rate", 0.0))
         converted.setdefault("latency_per_case_ms", converted.get("latency_per_case", 0.0))
         converted.setdefault("cost_per_validated_fix", converted.get("cost_per_true_positive"))
         return converted
