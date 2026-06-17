@@ -18,15 +18,19 @@ from arena.core.config import PROMPT_VERSION, database_path, runs_path
 from arena.core.models import (
     RUN_SCHEMA_VERSION,
     BenchmarkCase,
+    BugRepair,
     CaseResult,
+    CaseStatus,
     DeterministicCaseScore,
     ExecutionBackend,
+    FindingEvidence,
     ReviewerResponse,
     ReviewResult,
     RunMetadata,
     RunResult,
     RunStatus,
     ScoreBreakdown,
+    ScoredFinding,
 )
 from arena.execution.integrity import file_manifest, manifest_changes
 from arena.execution.sandbox import materialized_case
@@ -124,6 +128,58 @@ def _effective_timeout(base_seconds: int, deadline: float | None) -> int:
         return base_seconds
     remaining = deadline - monotonic()
     return max(1, min(base_seconds, int(remaining)))
+
+
+def _attribute_evidence(
+    case: BenchmarkCase,
+    review_result: CaseResult,
+    deterministic: DeterministicCaseScore,
+    *,
+    execution_validated: bool,
+    integrity_violated: bool,
+) -> tuple[list[BugRepair], list[ScoredFinding], CaseStatus]:
+    """Attribute the repair to bugs and stamp each finding with its evidence status.
+
+    Repair is judged at the suite level (execution_validated): per-bug oracle
+    mapping for multi-bug cases is a later refinement, so every seeded bug shares
+    the suite's repair verdict while detection stays per-bug.
+    """
+    matched = {
+        item.matched_bug_index for item in review_result.scored_findings if item.is_true_positive
+    }
+    bug_repairs = [
+        BugRepair(bug_id=bug.id, detected=index in matched, repaired=execution_validated)
+        for index, bug in enumerate(case.ground_truth.bugs)
+    ]
+
+    findings: list[ScoredFinding] = []
+    for item in review_result.scored_findings:
+        if item.is_neutral:
+            status: FindingEvidence = "neutral"
+        elif not item.is_true_positive:
+            status = "unsupported"
+        elif execution_validated:
+            status = "repair_validated"
+        else:
+            status = "detected_but_unrepaired"
+        findings.append(item.model_copy(update={"evidence_status": status}))
+
+    total = len(bug_repairs)
+    detected_count = sum(bug.detected for bug in bug_repairs)
+    ran_anything = deterministic.tests_ran or deterministic.structural_validation_ran
+    if integrity_violated:
+        case_status: CaseStatus = "tampering"
+    elif not ran_anything:
+        case_status = "inconclusive"
+    elif execution_validated and detected_count == total:
+        case_status = "complete_repair"
+    elif execution_validated:
+        case_status = "partial_repair"
+    elif detected_count > 0:
+        case_status = "detected_but_unrepaired"
+    else:
+        case_status = "no_detection"
+    return bug_repairs, findings, case_status
 
 
 def _evaluate_case(
@@ -250,8 +306,18 @@ def _evaluate_case(
         and not integrity_violated
     )
     review_result = apply_execution_fix_quality(case, review_result, validated=execution_validated)
+    bug_repairs, scored_findings, case_status = _attribute_evidence(
+        case,
+        review_result,
+        deterministic,
+        execution_validated=execution_validated,
+        integrity_violated=integrity_violated,
+    )
     return review_result.model_copy(
         update={
+            "scored_findings": scored_findings,
+            "bug_repairs": bug_repairs,
+            "case_status": case_status,
             "deterministic_case_score": deterministic,
             "patch_provided": deterministic.patch_provided,
             "patch_applied": deterministic.patch_applied,

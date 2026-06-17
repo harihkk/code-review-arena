@@ -37,6 +37,9 @@ class GroundTruthFile(BaseModel):
 
 
 class GroundTruthBug(BaseModel):
+    # Stable identifier used to attribute repairs to specific bugs. Auto-assigned
+    # as bug-1, bug-2, ... by GroundTruth when a case does not declare one.
+    id: str = ""
     summary: str
     files: list[GroundTruthFile]
     concepts: list[str]
@@ -72,6 +75,13 @@ class GroundTruth(BaseModel):
         elif bugs[0] != legacy:
             raise ValueError("primary_bug and bugs[0] disagree; declare the bug once in bugs")
         return converted
+
+    @model_validator(mode="after")
+    def _assign_bug_ids(self) -> GroundTruth:
+        for index, bug in enumerate(self.bugs):
+            if not bug.id:
+                bug.id = f"bug-{index + 1}"
+        return self
 
     # Serialized for dashboards and tooling built on the single-bug shape.
     @computed_field  # type: ignore[prop-decorator]
@@ -234,12 +244,38 @@ class ScoreBreakdown(BaseModel):
     total: float = 0
 
 
+# A finding's status once execution evidence is in. "detected" is the pre-execution
+# value; the runner upgrades it to repair_validated / detected_but_unrepaired.
+FindingEvidence = Literal[
+    "repair_validated", "detected_but_unrepaired", "unsupported", "neutral", "detected"
+]
+# A case's overall outcome after execution.
+CaseStatus = Literal[
+    "complete_repair",
+    "partial_repair",
+    "detected_but_unrepaired",
+    "no_detection",
+    "tampering",
+    "inconclusive",
+    "review_only",
+]
+
+
 class ScoredFinding(BaseModel):
     finding: Finding
     is_true_positive: bool
     matched_bug_index: int | None = None
     is_neutral: bool = False
     false_positive_reason: str | None = None
+    evidence_status: FindingEvidence | None = None
+
+
+class BugRepair(BaseModel):
+    """Per-bug attribution: was it found by the reviewer, and did the patch fix it?"""
+
+    bug_id: str
+    detected: bool
+    repaired: bool
 
 
 class DeterministicCaseScore(BaseModel):
@@ -352,6 +388,9 @@ class CaseResult(BaseModel):
     deterministic_pass: bool | None = None
     failure_reasons: list[str] = Field(default_factory=list)
     raw_suggested_patch: str | None = None
+    # Evidence attribution (populated in patch/full mode).
+    case_status: CaseStatus | None = None
+    bug_repairs: list[BugRepair] = Field(default_factory=list)
 
 
 class RunMetadata(BaseModel):
