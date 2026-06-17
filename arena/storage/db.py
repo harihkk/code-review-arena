@@ -8,7 +8,7 @@ from pathlib import Path
 
 from arena.core.errors import StorageError
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def connect(path: Path) -> sqlite3.Connection:
@@ -69,8 +69,34 @@ def _migrate_v1(connection: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_v2(connection: sqlite3.Connection) -> None:
+    """Run-validity and coverage columns, plus a coherent case-level metric.
+
+    Every row that already exists when this runs predates run validity, so it is
+    marked legacy: it stays queryable but is excluded from v2 comparisons.
+    """
+    _add_columns(
+        connection,
+        "runs",
+        {
+            "schema_version": "INTEGER",
+            "run_status": "TEXT",
+            "execution_backend": "TEXT",
+            "eligible_case_count": "INTEGER",
+            "completed_case_count": "INTEGER",
+            "failed_case_count": "INTEGER",
+            "skipped_case_count": "INTEGER",
+            "coverage_rate": "REAL",
+            "validated_case_rate": "REAL",
+        },
+    )
+    connection.execute(
+        "UPDATE runs SET run_status = 'legacy', schema_version = 1 WHERE run_status IS NULL"
+    )
+
+
 # Ordered migration steps; entry N migrates a version-(N-1) database to N.
-_MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_migrate_v1]
+_MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_migrate_v1, _migrate_v2]
 
 
 def _migrate(connection: sqlite3.Connection) -> None:

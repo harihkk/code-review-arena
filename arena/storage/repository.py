@@ -28,9 +28,15 @@ class RunRepository:
                     deterministic_pass_rate,
                     patch_apply_rate, test_pass_rate, structural_pass_rate,
                     false_positives_per_case, cost_per_true_positive, cost_per_validated_fix,
-                    latency_per_case_ms, run_json)
+                    latency_per_case_ms,
+                    schema_version, run_status, execution_backend, eligible_case_count,
+                    completed_case_count, failed_case_count, skipped_case_count, coverage_rate,
+                    validated_case_rate,
+                    run_json)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                           ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                           ?)""",
                 (
                     run.run_id,
                     run.reviewer,
@@ -62,6 +68,15 @@ class RunRepository:
                     metrics.cost_per_validated_fix if metrics else None,
                     metrics.cost_per_validated_fix if metrics else None,
                     metrics.latency_per_case_ms if metrics else None,
+                    run.schema_version,
+                    run.run_status,
+                    run.execution_backend,
+                    run.eligible_case_count,
+                    run.completed_case_count,
+                    run.failed_case_count,
+                    run.skipped_case_count,
+                    run.coverage_rate,
+                    metrics.validated_case_rate if metrics else None,
                     json.dumps(run.model_dump(mode="json")),
                 ),
             )
@@ -172,6 +187,11 @@ class RunRepository:
         history: dict[tuple[str, str | None, str], int] = {}
         for row in rows:
             data: dict[str, Any] = json.loads(row["run_json"])
+            # Only complete v2 runs are comparable; legacy and non-complete runs
+            # are preserved in storage but never ranked (mirrors leaderboard_rows).
+            is_v2 = data.get("schema_version", 1) >= 2
+            if not is_v2 or data.get("run_status", "complete") != "complete":
+                continue
             key = (data["reviewer"], data.get("model"), data.get("mode", "review"))
             history[key] = history.get(key, 0) + 1
             latest.setdefault(key, data)
@@ -204,7 +224,7 @@ class RunRepository:
 
         def _validated(summary: dict[str, object]) -> float:
             metrics = summary["deterministic_metrics"]
-            value = metrics.get("validated_f_beta") if isinstance(metrics, dict) else None
+            value = metrics.get("validated_case_rate") if isinstance(metrics, dict) else None
             return value if isinstance(value, (int, float)) else -1.0
 
         summaries.sort(key=_validated, reverse=True)
