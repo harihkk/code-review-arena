@@ -37,8 +37,13 @@ def score_deterministic_case(
     patch_provided = bool(patch.patch_text.strip())
     reasons: list[str] = []
 
+    all_bugs_detected = review.bugs_total > 0 and review.bugs_matched >= review.bugs_total
     if not review.bug_found:
         reasons.append("detection_failed")
+    elif case.validation.detection_requirement == "all_bugs" and not all_bugs_detected:
+        # Some, but not all, seeded bugs were found; a partial review is not a
+        # complete one for a case that requires every bug.
+        reasons.append("incomplete_bug_detection")
     if patch.unsafe_paths:
         reasons.append("patch_unsafe_paths")
     if patch.touched_protected:

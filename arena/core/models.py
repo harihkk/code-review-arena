@@ -122,6 +122,10 @@ class ValidationConfig(BaseModel):
     structural_validators: list[str] = Field(default_factory=list)
     max_false_positives: int = Field(default=0, ge=0)
     protected_paths: list[str] = Field(default_factory=list)
+    # Detection completeness required for a deterministic pass. Defaults to
+    # all_bugs: for single-bug cases this is identical to at_least_one, and for
+    # multi-bug cases it correctly requires every seeded bug to be found.
+    detection_requirement: Literal["all_bugs", "at_least_one"] = "all_bugs"
 
 
 class MetricsConfig(BaseModel):

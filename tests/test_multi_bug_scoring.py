@@ -176,6 +176,35 @@ def test_detection_no_longer_requires_line_precision():
     assert deterministic.deterministic_pass is True
 
 
+def test_all_bugs_completeness_policy():
+    case = _case()  # two seeded bugs; detection_requirement defaults to all_bugs
+    patch = PatchApplyResult(
+        case_id=case.id, applied=True, workspace_path="unused", patch_text="x", duration_ms=1
+    )
+
+    partial = score_case(case, _response([BUG0_FINDING]))
+    det_partial = score_deterministic_case(case, partial, patch, None, [], beta=1.0)
+    assert "incomplete_bug_detection" in det_partial.failure_reasons
+    assert det_partial.deterministic_pass is False
+
+    both = score_case(case, _response([BUG0_FINDING, BUG1_FINDING]))
+    det_both = score_deterministic_case(case, both, patch, None, [], beta=1.0)
+    assert "incomplete_bug_detection" not in det_both.failure_reasons
+    assert det_both.deterministic_pass is True
+
+    # at_least_one tolerates a partial review.
+    case.validation.detection_requirement = "at_least_one"
+    det_lenient = score_deterministic_case(case, partial, patch, None, [], beta=1.0)
+    assert "incomplete_bug_detection" not in det_lenient.failure_reasons
+    assert det_lenient.deterministic_pass is True
+
+    # Finding nothing is a detection failure, not an incomplete detection.
+    none_found = score_case(case, _response([]))
+    det_none = score_deterministic_case(case, none_found, patch, None, [], beta=1.0)
+    assert "detection_failed" in det_none.failure_reasons
+    assert "incomplete_bug_detection" not in det_none.failure_reasons
+
+
 def test_execution_overrides_keyword_fix_quality():
     single = _case()
     single.ground_truth.bugs = single.ground_truth.bugs[:1]

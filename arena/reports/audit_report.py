@@ -23,6 +23,7 @@ FAILURE_REASON_LABELS = (
     "tests_failed",
     "localization_failed",
     "detection_failed",
+    "incomplete_bug_detection",
     "false_positive",
 )
 
