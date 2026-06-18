@@ -146,20 +146,33 @@ def certify_pack(
     benchmark_set: Path = typer.Argument(DEFAULT_BENCHMARK_SET),
     allow_local_execution: bool = typer.Option(False, "--allow-local-execution"),
     limit: int = typer.Option(20, "--limit", min=1, help="Max mutants per case."),
-    strict: bool = typer.Option(
-        False, "--strict", help="Exit nonzero unless the pack reaches 'certified'."
+    determinism_runs: int = typer.Option(
+        1,
+        "--determinism-runs",
+        min=1,
+        help="Re-run gates this many times to earn 'verified'; 1 disables the check.",
+    ),
+    strict: str = typer.Option(
+        "",
+        "--strict",
+        help="Exit nonzero unless the pack reaches this level (certified or verified).",
     ),
 ) -> None:
-    """Check each case's baseline-fails, reference-passes, and mutant-kill gates."""
+    """Grade each case on the draft/development/certified/verified ladder."""
     from rich.console import Console
 
+    from arena.benchmark.certify import LEVELS
     from arena.benchmark.certify import certify_pack as run_certify
+
+    if strict and strict not in LEVELS:
+        raise typer.BadParameter(f"--strict must be one of {', '.join(LEVELS)}")
 
     console = Console()
     report = run_certify(
         resolve_benchmark_path(benchmark_set),
         allow_local_execution=allow_local_execution,
         mutation_limit=limit,
+        determinism_runs=determinism_runs,
     )
 
     def mark(value: bool | None) -> str:
@@ -167,18 +180,22 @@ def certify_pack(
 
     for case in report.cases:
         if not case.executable:
-            console.print(f"{case.case_id}: development-only (no executable tests)")
+            console.print(f"{case.case_id}: draft (no executable tests)")
             continue
         kill = "n/a" if case.mutant_kill_rate is None else f"{case.mutant_kill_rate:.0%}"
+        determinism = (
+            "" if case.deterministic is None else f" deterministic={mark(case.deterministic)}"
+        )
         # No square brackets: rich would parse them as markup and hide them.
         console.print(
-            f"{case.case_id}: {'CERTIFIED' if case.certified else 'not certified'}  "
+            f"{case.case_id}: {case.level.upper()}  "
             f"baseline_fails={mark(case.baseline_fails)} "
             f"reference_passes={mark(case.reference_passes)} "
             f"mutant_kill_rate={kill} ({case.mutant_total} mutants)"
+            f"{determinism}"
         )
     console.print(f"\nPack '{report.pack}' level: {report.level}")
-    if strict and report.level != "certified":
+    if strict and LEVELS.index(report.level) < LEVELS.index(strict):
         raise typer.Exit(code=1)
 
 

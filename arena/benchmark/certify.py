@@ -1,14 +1,20 @@
 """Pack certification: is a benchmark case a real test of repair?
 
-A trustworthy executable case must satisfy three gates:
+Each executable case is graded on a four-rung ladder:
 
-- the buggy baseline (before/) FAILS the tests -- the bug is actually exercised;
-- the reference solution (after/) PASSES the tests -- the intended fix works;
-- mutants of the solution are killed -- the tests catch wrong code, not just the
-  one reference fix (see arena.benchmark.mutation).
+- ``draft``: no executable tests. Useful for detection scoring only; it cannot
+  be backed by execution, so it can never rise above this rung.
+- ``development``: has tests but fails a gate below.
+- ``certified``: the buggy baseline (after/) FAILS the tests, the reference
+  solution (after/ + reference.patch) PASSES them, and mutants of the solution
+  are killed at or above ``CERTIFIED_KILL_RATE`` (see arena.benchmark.mutation).
+- ``verified``: certified, and the baseline-fails / reference-passes verdicts
+  held across repeated runs (the determinism gate). A flaky case whose verdict
+  wobbles between runs cannot be trusted to score a repair, so it stays at
+  ``certified`` no matter how good its single-run gates look.
 
-Cases without executable tests are reported as development-only: useful for
-detection scoring, but not certifiable as execution-backed.
+The determinism gate is opt-in (``determinism_runs >= 2``) because it re-runs
+the suite; without it a case tops out at ``certified``.
 """
 
 from __future__ import annotations
@@ -24,6 +30,13 @@ from arena.benchmark.solution import fixed_solution
 from arena.core.models import BenchmarkCase
 from arena.execution.test_executor import TestExecutionRequest, TestExecutionResult, TestExecutor
 
+# A certified case's tests must kill at least this fraction of viable mutants:
+# evidence the suite distinguishes the real fix from plausible-but-wrong code.
+CERTIFIED_KILL_RATE = 0.5
+
+# Weakest-to-strongest ordering for the certification ladder.
+LEVELS = ("draft", "development", "certified", "verified")
+
 
 @dataclass
 class CaseCertification:
@@ -33,10 +46,39 @@ class CaseCertification:
     reference_passes: bool | None = None
     mutant_total: int = 0
     mutant_kill_rate: float | None = None
+    determinism_runs: int = 0
+    deterministic: bool | None = None  # None: not checked.
+
+    @property
+    def mutation_adequate(self) -> bool:
+        """Whether the mutation gate is satisfied.
+
+        A case with no viable mutants (nothing the operators can flip) has no
+        mutation evidence either way; the baseline-fails and reference-passes
+        gates still bound it, so it is not held back on this gate alone.
+        """
+        if self.mutant_total == 0:
+            return True
+        return self.mutant_kill_rate is not None and self.mutant_kill_rate >= CERTIFIED_KILL_RATE
 
     @property
     def certified(self) -> bool:
-        return self.executable and self.baseline_fails is True and self.reference_passes is True
+        return (
+            self.executable
+            and self.baseline_fails is True
+            and self.reference_passes is True
+            and self.mutation_adequate
+        )
+
+    @property
+    def level(self) -> str:
+        if not self.executable:
+            return "draft"
+        if not self.certified:
+            return "development"
+        if self.deterministic is True:
+            return "verified"
+        return "certified"
 
 
 @dataclass
@@ -46,10 +88,11 @@ class PackCertification:
 
     @property
     def level(self) -> str:
+        """The weakest rung among executable cases (draft if there are none)."""
         executable = [case for case in self.cases if case.executable]
-        if executable and all(case.certified for case in executable):
-            return "certified"
-        return "development"
+        if not executable:
+            return "draft"
+        return min((case.level for case in executable), key=LEVELS.index)
 
 
 def _run_tests_in(
@@ -81,12 +124,53 @@ def _run_tests_in(
         )
 
 
+def _baseline_fails(result: TestExecutionResult | None) -> bool:
+    return bool(result and result.ran and not result.passed)
+
+
+def _reference_passes(result: TestExecutionResult | None) -> bool:
+    return bool(result and result.ran and result.passed)
+
+
+def _check_determinism(
+    case: BenchmarkCase,
+    *,
+    executor: TestExecutor,
+    allow_local_execution: bool,
+    runs: int,
+) -> bool:
+    """Re-run the baseline and reference ``runs`` times; verdicts must hold.
+
+    A case is deterministic when the baseline fails on every run and the
+    reference passes on every run. Any wobble (a baseline that sometimes passes,
+    a reference that sometimes fails) means the case cannot reliably grade a
+    repair, so it does not earn the ``verified`` rung.
+    """
+    assert case.case_dir is not None
+    after_dir = case.case_dir / case.input.after_dir
+    for _ in range(runs):
+        baseline = _run_tests_in(
+            case, after_dir, executor=executor, allow_local_execution=allow_local_execution
+        )
+        if not _baseline_fails(baseline):
+            return False
+    with fixed_solution(case) as fixed:
+        for _ in range(runs):
+            reference = _run_tests_in(
+                case, fixed, executor=executor, allow_local_execution=allow_local_execution
+            )
+            if not _reference_passes(reference):
+                return False
+    return True
+
+
 def certify_case(
     case: BenchmarkCase,
     *,
     executor: TestExecutor | None = None,
     allow_local_execution: bool = False,
     mutation_limit: int = 20,
+    determinism_runs: int = 1,
 ) -> CaseCertification:
     executor = executor or TestExecutor()
     if not case.execution.run_tests or not case.execution.test_command:
@@ -108,14 +192,25 @@ def certify_case(
     mutation = run_mutation_test(
         case, executor=executor, allow_local_execution=allow_local_execution, limit=mutation_limit
     )
-    return CaseCertification(
+    certification = CaseCertification(
         case_id=case.id,
         executable=True,
-        baseline_fails=(baseline.ran and not baseline.passed) if baseline else None,
-        reference_passes=(reference.ran and reference.passed) if reference else None,
+        baseline_fails=_baseline_fails(baseline),
+        reference_passes=_reference_passes(reference),
         mutant_total=mutation.total,
         mutant_kill_rate=mutation.kill_rate,
     )
+    # The determinism gate only matters for a case that already certified, and
+    # re-running is expensive, so it is opt-in and skipped otherwise.
+    if certification.certified and determinism_runs >= 2:
+        certification.determinism_runs = determinism_runs
+        certification.deterministic = _check_determinism(
+            case,
+            executor=executor,
+            allow_local_execution=allow_local_execution,
+            runs=determinism_runs,
+        )
+    return certification
 
 
 def certify_pack(
@@ -123,6 +218,7 @@ def certify_pack(
     *,
     allow_local_execution: bool = False,
     mutation_limit: int = 20,
+    determinism_runs: int = 1,
 ) -> PackCertification:
     executor = TestExecutor()
     result = PackCertification(pack=benchmark_dir.name)
@@ -133,6 +229,7 @@ def certify_pack(
                 executor=executor,
                 allow_local_execution=allow_local_execution,
                 mutation_limit=mutation_limit,
+                determinism_runs=determinism_runs,
             )
         )
     return result
