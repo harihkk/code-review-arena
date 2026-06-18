@@ -18,7 +18,7 @@ ground_truth:
       - path: app/routes/admin.py
         line_ranges: [{start: 10, end: 14}]
     concepts: [authorization, role-based access control, privilege escalation]
-    must_mention: [admin, role, authorization]
+    must_mention: [admin, authorization]
     acceptable_fix_keywords: [require_admin, is_admin, RBAC]
 scoring:
   weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}

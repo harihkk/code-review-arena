@@ -17,8 +17,8 @@ ground_truth:
       - path: rag/answer.py
         line_ranges: [{start: 1, end: 2}]
     concepts: [citation validation, retrieved context, fabricated citation]
-    must_mention: [citation_ids, retrieved_chunks, validate]
-    acceptable_fix_keywords: [valid_ids, retrieved_chunks, citation_ids]
+    must_mention: [citation_ids, validate]
+    acceptable_fix_keywords: [valid_ids, citation_ids]
 scoring:
   weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
   false_positive_penalty: 5

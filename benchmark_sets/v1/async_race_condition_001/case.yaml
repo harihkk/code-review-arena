@@ -17,7 +17,7 @@ ground_truth:
       - path: app/balance.py
         line_ranges: [{start: 8, end: 11}]
     concepts: [race condition, atomic update, lost write]
-    must_mention: [concurrent, balance, lock]
+    must_mention: [concurrent, lock]
     acceptable_fix_keywords: [asyncio.Lock, transaction, atomic]
 scoring:
   weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}

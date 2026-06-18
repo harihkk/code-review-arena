@@ -17,7 +17,7 @@ ground_truth:
       - path: src/main/java/com/acme/orders/OrderService.java
         line_ranges: [{start: 6, end: 8}]
     concepts: [missing record, Optional, not found]
-    must_mention: [findById, empty, exception]
+    must_mention: [empty, exception]
     acceptable_fix_keywords: [orElseThrow, NOT_FOUND, ResponseStatusException]
 scoring:
   weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}

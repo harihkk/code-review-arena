@@ -7,6 +7,6 @@ class User:
     avatar_url = None
 
 
-def test_existing_client_receives_snake_case_contract():
+def test_existing_consumer_keeps_snake_case_contract():
     assert "user_id" in serialize_profile(User())
 
