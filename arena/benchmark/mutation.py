@@ -17,6 +17,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from arena.benchmark.solution import fixed_solution
 from arena.core.models import BenchmarkCase
 from arena.execution.test_executor import TestExecutionRequest, TestExecutor
 
@@ -129,42 +130,44 @@ def run_mutation_test(
     allow_local_execution: bool = False,
     limit: int = 20,
 ) -> MutationResult:
-    """Mutate the case's primary bug file and count how many mutants the tests kill.
+    """Mutate the corrected solution's bug file and count how many mutants die.
 
-    A mutant is "killed" when the tests run and fail on it. A mutant that still
-    passes is a survivor: the tests did not catch that wrong code.
+    Mutants come from the *fixed* solution (after/ + reference.patch), which the
+    tests pass. A mutant is "killed" when the tests then fail on it; one that
+    still passes is a survivor the tests did not catch.
     """
     assert case.case_dir is not None
     executor = executor or TestExecutor()
-    after_dir = case.case_dir / case.input.after_dir
     bug_path = case.ground_truth.primary_bug.files[0].path
-    source = (after_dir / bug_path).read_text(encoding="utf-8")
     tests_dir = case.input.tests_dir
 
     killed = 0
     survivors: list[str] = []
-    mutants = generate_mutants(source, limit=limit)
-    for mutant in mutants:
-        with tempfile.TemporaryDirectory(prefix=f"arena-mut-{case.id}-") as directory:
-            workspace = Path(directory)
-            shutil.copytree(after_dir, workspace, dirs_exist_ok=True)
-            (workspace / bug_path).write_text(mutant.source, encoding="utf-8")
-            if tests_dir and (case.case_dir / tests_dir).is_dir():
-                shutil.copytree(
-                    case.case_dir / tests_dir, workspace / tests_dir, dirs_exist_ok=True
+    with fixed_solution(case) as fixed:
+        if fixed is None or not (fixed / bug_path).is_file():
+            return MutationResult(total=0, killed=0)
+        mutants = generate_mutants((fixed / bug_path).read_text(encoding="utf-8"), limit=limit)
+        for mutant in mutants:
+            with tempfile.TemporaryDirectory(prefix=f"arena-mut-{case.id}-") as directory:
+                workspace = Path(directory)
+                shutil.copytree(fixed, workspace, dirs_exist_ok=True)
+                (workspace / bug_path).write_text(mutant.source, encoding="utf-8")
+                if tests_dir and (case.case_dir / tests_dir).is_dir():
+                    shutil.copytree(
+                        case.case_dir / tests_dir, workspace / tests_dir, dirs_exist_ok=True
+                    )
+                result = executor.execute(
+                    TestExecutionRequest(
+                        case_id=case.id,
+                        workspace_path=workspace,
+                        test_command=case.execution.test_command or "pytest -q",
+                        timeout_seconds=case.execution.timeout_seconds,
+                        docker_image=case.execution.docker_image,
+                        allow_local_execution=allow_local_execution,
+                    )
                 )
-            result = executor.execute(
-                TestExecutionRequest(
-                    case_id=case.id,
-                    workspace_path=workspace,
-                    test_command=case.execution.test_command or "pytest -q",
-                    timeout_seconds=case.execution.timeout_seconds,
-                    docker_image=case.execution.docker_image,
-                    allow_local_execution=allow_local_execution,
-                )
-            )
-        if result.ran and not result.passed:
-            killed += 1
-        else:
-            survivors.append(mutant.description)
+            if result.ran and not result.passed:
+                killed += 1
+            else:
+                survivors.append(mutant.description)
     return MutationResult(total=len(mutants), killed=killed, survivors=survivors)
