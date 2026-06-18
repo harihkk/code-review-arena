@@ -42,6 +42,10 @@ LEVELS = ("draft", "development", "certified", "verified")
 class CaseCertification:
     case_id: str
     executable: bool
+    # False when the case has runnable tests but no backend ran them (no
+    # --allow-local-execution and no present docker image): the gates below are
+    # then meaningless, so this is reported instead of as gate failures.
+    executed: bool = True
     baseline_fails: bool | None = None
     reference_passes: bool | None = None
     mutant_total: int = 0
@@ -184,6 +188,11 @@ def certify_case(
         executor=executor,
         allow_local_execution=allow_local_execution,
     )
+    if baseline is None or not baseline.ran:
+        # No backend ran the tests. Report that plainly instead of as gate
+        # failures, and skip the reference and mutation runs, which would also
+        # be skipped. The case is executable but unexecuted, so it cannot certify.
+        return CaseCertification(case_id=case.id, executable=True, executed=False)
     # The corrected solution (after/ + reference.patch) must PASS the tests.
     with fixed_solution(case) as fixed:
         reference = _run_tests_in(

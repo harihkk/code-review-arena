@@ -178,9 +178,14 @@ def certify_pack(
     def mark(value: bool | None) -> str:
         return "n/a" if value is None else ("pass" if value else "FAIL")
 
+    unexecuted = 0
     for case in report.cases:
         if not case.executable:
             console.print(f"{case.case_id}: draft (no executable tests)")
+            continue
+        if not case.executed:
+            unexecuted += 1
+            console.print(f"{case.case_id}: not executed (no available backend)")
             continue
         kill = "n/a" if case.mutant_kill_rate is None else f"{case.mutant_kill_rate:.0%}"
         determinism = (
@@ -193,6 +198,12 @@ def certify_pack(
             f"reference_passes={mark(case.reference_passes)} "
             f"mutant_kill_rate={kill} ({case.mutant_total} mutants)"
             f"{determinism}"
+        )
+    if unexecuted:
+        console.print(
+            f"[yellow]{unexecuted} case(s) had no backend to run their tests.[/yellow] "
+            "Pass --allow-local-execution, or build the pack's docker image "
+            "(scripts/build_bench_image.sh) and set default_docker_image."
         )
     console.print(f"\nPack '{report.pack}' level: {report.level}")
     if strict and LEVELS.index(report.level) < LEVELS.index(strict):

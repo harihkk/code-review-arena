@@ -143,6 +143,23 @@ def test_weak_tests_fail_the_mutation_gate(tmp_path):
     assert case.level == "development"
 
 
+def test_executable_case_with_no_backend_is_reported_unexecuted(tmp_path):
+    # Tests exist but neither local execution nor a docker image is available:
+    # report it as unexecuted, not as failed gates that look like a broken pack.
+    pack = _build_pack(
+        tmp_path,
+        after="def is_adult(age):\n    return age > 18\n",
+        reference_patch=REFERENCE_PATCH,
+    )
+    report = certify_pack(pack, allow_local_execution=False)  # no backend
+    case = report.cases[0]
+    assert case.executable
+    assert case.executed is False
+    assert not case.certified
+    assert case.level == "development"
+    assert report.level == "development"
+
+
 def test_case_without_executable_tests_is_draft(tmp_path):
     pack = _build_pack(
         tmp_path,
