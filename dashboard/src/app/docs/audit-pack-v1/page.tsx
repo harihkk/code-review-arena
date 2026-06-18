@@ -39,8 +39,8 @@ export default function AuditPackV1Page() {
         <h2>Commands</h2>
         <pre className="code-block">{`arena validate benchmark_sets/audit_v1
 arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
-arena run benchmark_sets/audit_v1 --reviewer mock:perfect_patch --mode full --allow-local-execution
-arena leaderboard runs/ --metric validated_case_rate --beta 1.0
+arena run benchmark_sets/audit_v1 --reviewer control:perfect_patch --mode full --allow-local-execution
+arena leaderboard runs/ --metric validated_case_rate --beta 1.0 --include-unverified
 arena audit-report runs/ --output docs/reports/audit-v1-results.md`}</pre>
         <h2>Primary metric</h2>
         <p>
