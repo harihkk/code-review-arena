@@ -67,31 +67,27 @@ export type AuditReportResult = {
   error: string | null;
 };
 
-const AUDIT_REPORT_FILE = path.join(
-  process.cwd(),
-  "public",
-  "reports",
-  "audit-v1.json",
-);
 const REGENERATE_HINT = "Regenerate it with `arena audit-report runs/`.";
 
 /**
- * Read the audit report, distinguishing "not generated yet" (report and error both
- * null) from a real failure (error set). Callers that must not show stale or fake
- * data render the error; fallback callers can ignore it and treat null as empty.
+ * Read an audit report JSON (default audit-v1.json), distinguishing "not generated
+ * yet" (report and error both null) from a real failure (error set). Callers that
+ * must not show stale or fake data render the error; fallback callers can ignore it
+ * and treat null as empty.
  */
-export function readAuditReport(): AuditReportResult {
-  if (!fs.existsSync(AUDIT_REPORT_FILE)) {
+export function readAuditReport(fileName = "audit-v1.json"): AuditReportResult {
+  const reportFile = path.join(process.cwd(), "public", "reports", fileName);
+  if (!fs.existsSync(reportFile)) {
     return { report: null, error: null };
   }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(fs.readFileSync(AUDIT_REPORT_FILE, "utf-8"));
+    parsed = JSON.parse(fs.readFileSync(reportFile, "utf-8"));
   } catch (cause) {
     const detail = cause instanceof Error ? cause.message : String(cause);
     return {
       report: null,
-      error: `audit-v1.json is not valid JSON (${detail}). ${REGENERATE_HINT}`,
+      error: `${fileName} is not valid JSON (${detail}). ${REGENERATE_HINT}`,
     };
   }
   const version = (parsed as { schema_version?: unknown }).schema_version;
@@ -99,7 +95,7 @@ export function readAuditReport(): AuditReportResult {
     return {
       report: null,
       error:
-        `audit-v1.json schema_version ${JSON.stringify(version)} does not match the ` +
+        `${fileName} schema_version ${JSON.stringify(version)} does not match the ` +
         `expected ${JSON.stringify(EXPECTED_REPORT_SCHEMA_VERSION)}. ${REGENERATE_HINT}`,
     };
   }

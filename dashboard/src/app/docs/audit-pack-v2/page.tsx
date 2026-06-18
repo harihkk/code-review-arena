@@ -45,6 +45,12 @@ arena lint-cases benchmark_sets/audit_v2 --strict
 arena certify-pack benchmark_sets/audit_v2 --allow-local-execution --strict certified
 arena run benchmark_sets/audit_v2 --reviewer reference-patch --mode full --allow-local-execution
 arena run benchmark_sets/audit_v2 --reviewer shallow-patch --mode full --allow-local-execution`}</pre>
+        <h2>Results</h2>
+        <p>
+          The rendered report for this pack lives at{" "}
+          <a href="/reports/audit-v2">/reports/audit-v2</a>: the verified reference patch against
+          the generic adversarial baseline.
+        </p>
         <h2>Primary metric</h2>
         <p>
           Use <code>validated_case_rate</code> in full mode. Detection metrics alone do not prove a
