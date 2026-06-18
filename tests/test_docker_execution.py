@@ -53,6 +53,20 @@ def test_docker_command_routes_pytest_through_python_m():
     assert args[-6:] == ["arena-bench:1", "python", "-m", "pytest", "-q", "tests"]
 
 
+def test_docker_args_mount_hidden_tests_read_only(tmp_path):
+    (tmp_path / "tests").mkdir()
+    request = TestExecutionRequest(
+        case_id="c",
+        workspace_path=tmp_path,
+        test_command="pytest -q tests",
+        timeout_seconds=30,
+        docker_image="arena-bench:1",
+        readonly_paths=["tests"],
+    )
+    args = TestExecutor._docker_args(request, ["pytest", "-q", "tests"], container_name="arena-x")
+    assert f"{(tmp_path / 'tests').resolve()}:/workspace/tests:ro" in args
+
+
 def test_missing_image_is_skipped_not_pulled(monkeypatch, tmp_path):
     # Docker is up but the (untrusted) image is absent: skip rather than let
     # `docker run` reach the network to pull and run unvetted code.
@@ -131,3 +145,34 @@ def test_real_docker_pytest_collects_a_workspace_module(tmp_path):
     )
     assert result.execution_mode == "docker"
     assert result.passed is True, result.stdout + result.stderr
+
+
+@docker_tests
+def test_real_docker_read_only_tests_cannot_be_rewritten(tmp_path):
+    # A patch that rewrites the hidden tests to force a pass must fail: the tests
+    # are mounted read-only, so the write raises and the host copy is untouched.
+    image = os.getenv("ARENA_BENCH_IMAGE", "arena-bench:1")
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    victim = tests / "test_victim.py"
+    victim.write_text("def test_v():\n    assert False\n")
+    (tests / "test_attacker.py").write_text(
+        "from pathlib import Path\n"
+        "def test_rewrite():\n"
+        "    Path(__file__).parent.joinpath('test_victim.py').write_text("
+        "'def test_v():\\n    assert True\\n')\n"
+    )
+    original = victim.read_text()
+    result = TestExecutor().execute(
+        TestExecutionRequest(
+            case_id="dockro",
+            workspace_path=tmp_path,
+            test_command="pytest -q tests",
+            timeout_seconds=120,
+            docker_image=image,
+            readonly_paths=["tests"],
+        )
+    )
+    assert result.execution_mode == "docker"
+    assert result.passed is False  # the rewrite hit a read-only filesystem
+    assert victim.read_text() == original  # the hidden test was never modified

@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import sys
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import ClassVar, Literal
 from uuid import uuid4
 
@@ -36,6 +36,10 @@ class TestExecutionRequest(BaseModel):
     timeout_seconds: int = Field(ge=1)
     docker_image: str | None = None
     allow_local_execution: bool = False
+    # Workspace-relative paths (the hidden tests/oracle) to bind read-only inside
+    # the container, so candidate code cannot rewrite them mid-run. Docker only;
+    # local execution still relies on tamper detection.
+    readonly_paths: list[str] = Field(default_factory=list)
 
 
 class TestExecutionResult(BaseModel):
@@ -136,13 +140,16 @@ class TestExecutor:
 
     @staticmethod
     def _image_present(image: str) -> bool:
+        # `docker image ls -q <ref>` lists the id when the image is present and
+        # nothing when it is not. Unlike `docker image inspect`, it is reliable
+        # under both the classic and the containerd image stores.
         result = subprocess.run(
-            ["docker", "image", "inspect", image],
+            ["docker", "image", "ls", "-q", image],
             capture_output=True,
             text=True,
             check=False,
         )
-        return result.returncode == 0
+        return result.returncode == 0 and bool(result.stdout.strip())
 
     @staticmethod
     def _container_name(case_id: str) -> str:
@@ -193,6 +200,15 @@ class TestExecutor:
             "-w",
             "/workspace",
         ]
+        # Re-mount the hidden tests/oracle read-only on top of the writable
+        # workspace so patched code cannot rewrite them to force a pass. The
+        # paths are populated on the host before the container starts.
+        workspace_root = request.workspace_path.resolve()
+        for relative in request.readonly_paths:
+            target = PurePosixPath("/workspace") / PurePosixPath(relative)
+            source = (workspace_root / relative).resolve()
+            if source.exists():
+                command += ["-v", f"{source}:{target}:ro"]
         if sys.platform != "win32":
             # Run as the host user so the bind-mounted workspace stays writable
             # while the container process is non-root.

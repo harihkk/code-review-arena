@@ -305,6 +305,9 @@ def _evaluate_case(
                 timeout_seconds=_effective_timeout(case.execution.timeout_seconds, deadline),
                 docker_image=case.execution.docker_image,
                 allow_local_execution=allow_local_execution,
+                # Pin the hidden tests read-only in Docker so a patch cannot
+                # rewrite them to pass (local execution relies on detection).
+                readonly_paths=[tests_dir] if tests_dir else [],
             )
         )
         if tests_root:
