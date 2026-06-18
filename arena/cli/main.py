@@ -85,6 +85,28 @@ def run(
     )
 
 
+@app.command("mutation-test")
+def mutation_test(
+    benchmark_set: Path = typer.Argument(DEFAULT_BENCHMARK_SET),
+    allow_local_execution: bool = typer.Option(False, "--allow-local-execution"),
+    limit: int = typer.Option(20, "--limit", min=1, help="Max mutants per case."),
+) -> None:
+    """Mutate each case's solution and report how many mutants its tests kill."""
+    from rich.console import Console
+
+    from arena.benchmark.case_loader import load_cases
+    from arena.benchmark.mutation import run_mutation_test
+
+    console = Console()
+    for case in load_cases(resolve_benchmark_path(benchmark_set)):
+        if not case.execution.run_tests or not case.execution.test_command:
+            console.print(f"{case.id}: skipped (no executable tests)")
+            continue
+        result = run_mutation_test(case, allow_local_execution=allow_local_execution, limit=limit)
+        rate = f"{result.kill_rate:.0%}" if result.kill_rate is not None else "n/a"
+        console.print(f"{case.id}: mutant_kill_rate={rate} ({result.killed}/{result.total})")
+
+
 @app.command("lint-cases")
 def lint_cases(
     benchmark_set: Path = typer.Argument(DEFAULT_BENCHMARK_SET),
