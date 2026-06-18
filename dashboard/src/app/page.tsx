@@ -249,16 +249,16 @@ function LeaderboardPreview({ rows }: { rows: LeaderboardRow[] }) {
       <table className="data-table preview-table">
         <thead>
           <tr>
-            <th>Rank</th>
+            <th className="numeric">Rank</th>
             <th>Reviewer</th>
             <th>Benchmark</th>
-            <th>
+            <th className="numeric">
               Detection <span className="nowrap">F-beta</span>
             </th>
-            <th>
+            <th className="numeric">
               Validated <span className="nowrap">F-beta</span>
             </th>
-            <th>Passes</th>
+            <th className="numeric">Passes</th>
             <th>Status</th>
           </tr>
         </thead>
