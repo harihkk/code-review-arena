@@ -14,6 +14,9 @@ fails, the reference fix passes, and the tests kill every viable mutant).
 | `money_discount_rounding_001` | Per-unit reduction floors and loses money on multi-unit orders |
 | `ratelimit_window_boundary_001` | Fixed-window limiter admits one request past the cap |
 | `permission_precedence_001` | Boolean precedence drops grouping and bypasses a guard |
+| `overdraft_min_balance_001` | Lowest-balance tracker compares the wrong direction |
+| `progress_zero_division_001` | Completion percentage drops its empty-workload guard |
+| `page_count_ceil_001` | Page count floors instead of ceilings and drops the last page |
 
 ## Reference patches
 
@@ -38,6 +41,18 @@ behavior is caught by the tests.
 ```bash
 arena certify-pack benchmark_sets/audit_v2 --allow-local-execution --strict certified
 arena lint-cases benchmark_sets/audit_v2 --strict
+```
+
+## Adversarial baseline
+
+`shallow-patch` is a generic adversarial reviewer that works on any pack: it reads
+the reference patch only to localize the bug, then proposes a no-op change that
+applies cleanly but repairs nothing. On this pack it scores `detection_f_beta`
+near 1.0 with `validated_case_rate` 0.0, the detection-versus-validation gap that
+is the whole point of the harness.
+
+```bash
+arena run benchmark_sets/audit_v2 --reviewer shallow-patch --mode full --allow-local-execution
 ```
 
 ## Metrics

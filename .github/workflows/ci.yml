@@ -59,6 +59,9 @@ jobs:
       # and validate nothing.
       - name: Keyword-gamer control run (audit_v1)
         run: arena run benchmark_sets/audit_v1 --reviewer control:keyword_gamer --mode full --allow-local-execution
+      # The generic adversarial baseline reproduces the gap on the second pack.
+      - name: Shallow-patch adversarial run (audit_v2)
+        run: arena run benchmark_sets/audit_v2 --reviewer shallow-patch --mode full --allow-local-execution
       - name: Leaderboard
         run: arena leaderboard runs/ --metric validated_case_rate --beta 1.0 --include-unverified
       - uses: actions/upload-artifact@v4
