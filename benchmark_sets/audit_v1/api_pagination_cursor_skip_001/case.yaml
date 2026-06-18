@@ -17,9 +17,9 @@ ground_truth:
     files:
       - path: app/pagination.py
         line_ranges: [{start: 8, end: 20}]
-    concepts: [pagination, cursor, duplicate timestamp, api correctness]
-    must_mention: [cursor, created_at, id]
-    acceptable_fix_keywords: [id, tiebreaker, composite, created_at]
+    concepts: [pagination, stable ordering, duplicate timestamp, api correctness]
+    must_mention: [tiebreaker, ordering, id]
+    acceptable_fix_keywords: [id, tiebreaker, composite]
 scoring:
   weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
   false_positive_penalty: 5

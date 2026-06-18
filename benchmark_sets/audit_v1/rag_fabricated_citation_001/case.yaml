@@ -19,7 +19,7 @@ ground_truth:
         line_ranges: [{start: 1, end: 2}]
     concepts: [citation, grounding, hallucination, retrieved context]
     must_mention: [citation, retrieved, valid]
-    acceptable_fix_keywords: [valid_ids, retrieved_chunks, citation_ids, reject, not in]
+    acceptable_fix_keywords: [valid_ids, citation_ids, reject, not in]
 scoring:
   weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
   false_positive_penalty: 5

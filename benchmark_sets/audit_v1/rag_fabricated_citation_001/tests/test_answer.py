@@ -3,7 +3,7 @@ import pytest
 from rag.answer import build_answer
 
 
-def test_rejects_fabricated_citation_ids():
+def test_rejects_unsupported_source_ids():
     retrieved = [{"id": "chunk-1", "text": "policy text"}]
 
     def generator(_chunks):

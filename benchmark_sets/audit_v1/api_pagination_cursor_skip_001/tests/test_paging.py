@@ -2,7 +2,7 @@ from app.models import Record
 from app.pagination import fetch_page
 
 
-def test_all_records_returned_once_with_duplicate_timestamps():
+def test_all_records_returned_once():
     records = [
         Record("r1", 100, "a"),
         Record("r2", 100, "b"),

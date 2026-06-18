@@ -174,8 +174,7 @@ def test_contamination_scan_flags_seeded_leaks(tmp_path):
     assert surfaces == {"diff_added_line", "after_comment", "test_name"}
 
 
-def test_contamination_scan_runs_on_shipped_packs():
-    warnings = scan_benchmark(AUDIT_DIR)
-    # The shipped packs knowingly leak concept words through test names; the
-    # scan must surface that rather than pretend the packs are clean.
-    assert any(warning.surface == "test_name" for warning in warnings)
+def test_audit_pack_is_contamination_free():
+    # audit_v1 is authored leak-free; this guards against a regression that lets
+    # ground-truth vocabulary back into the diff, comments, or test names.
+    assert scan_benchmark(AUDIT_DIR) == []
