@@ -15,7 +15,7 @@ arena validate benchmark_sets/audit_v1`}</CodeBlock>
         <CodeBlock compact>{`arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
 arena run benchmark_sets/audit_v1 --reviewer mock:keyword_gamer --mode full --allow-local-execution`}</CodeBlock>
         <h2>Rank runs</h2>
-        <CodeBlock compact>arena leaderboard runs/ --metric validated_f_beta --beta 1.0</CodeBlock>
+        <CodeBlock compact>arena leaderboard runs/ --metric validated_case_rate --beta 1.0</CodeBlock>
         <h2>Generate the audit report</h2>
         <CodeBlock compact>arena audit-report runs/ --output docs/reports/audit-v1-results.md</CodeBlock>
         <h2>Serve the API</h2>

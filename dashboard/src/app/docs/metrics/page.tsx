@@ -5,10 +5,12 @@ const metrics = [
   ["detection_precision", "Localized seeded detections divided by localized detections plus unmatched findings."],
   ["detection_recall", "Seeded cases correctly detected and localized divided by all cases."],
   ["detection_f_beta", "The weighted harmonic mean for detection only. It does not indicate a working repair."],
-  ["validated_precision", "Deterministically passing cases divided by passing cases plus unmatched findings."],
-  ["validated_recall", "Deterministically passing cases divided by all seeded cases."],
-  ["validated_f_beta", "The primary full-mode metric: found, localized, and passed required patch validation."],
-  ["deterministic_pass_rate", "Fraction of cases with a complete deterministic pass."],
+  ["validated_case_rate", "The primary full-mode metric: cases the repair fully fixed (applied, passed tests, satisfied validators) divided by eligible cases."],
+  ["complete_repair_rate", "Repair-success dimension: cases where every seeded bug was repaired."],
+  ["bug_completeness_rate", "Review-accuracy dimension: cases where every seeded bug was detected."],
+  ["supported_claim_rate", "Trustworthiness dimension: findings that matched a real bug divided by judged findings."],
+  ["validated_f_beta", "Deprecated: mixed-unit (case-level passes vs finding-level false positives); superseded by validated_case_rate."],
+  ["deterministic_pass_rate", "Fraction of cases with a complete deterministic pass (equal to validated_case_rate)."],
   ["patch_apply_rate", "Cleanly applied patches divided by provided patches."],
   ["structural_pass_rate", "Passed validators divided by validators run."],
   ["test_pass_rate", "Passed required test executions divided by tests run."],
@@ -24,7 +26,7 @@ export default function MetricsPage() {
         <h1>Detection is not validation</h1>
         <div className="definition-callout">
           <p><code>detection_f_beta</code> = found and localized the seeded bug.</p>
-          <p><code>validated_f_beta</code> = found and localized the bug and passed deterministic validation.</p>
+          <p><code>validated_case_rate</code> = found and localized the bug and passed deterministic validation.</p>
         </div>
         <dl className="metric-definitions">
           {metrics.map(([name, definition]) => (

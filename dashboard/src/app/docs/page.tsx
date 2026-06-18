@@ -4,7 +4,7 @@ import { PageHeader } from "../../components/PageHeader";
 
 const pages = [
   ["Getting Started", "/docs/getting-started", "Install, validate, run a deterministic benchmark, and start the API."],
-  ["Metrics", "/docs/metrics", "Understand detection_f_beta versus validated_f_beta."],
+  ["Metrics", "/docs/metrics", "Understand detection_f_beta versus validated_case_rate."],
   ["Audit Pack v1", "/docs/audit-pack-v1", "Harder patch-backed benchmark cases for validation-focused audits."],
   ["Reference Patches", "/docs/reference-patches", "Understand canonical fixes and deterministic controls."],
   ["Custom Command Reviewer", "/docs/custom-command-reviewer", "Benchmark external agents via subprocess JSON output."],

@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "project_name": "CodeReview Arena",
-  "generated_at": "2026-06-18T14:24:40.096934+00:00",
+  "generated_at": "2026-06-18T15:38:58.854745+00:00",
   "benchmark_sets": {
     "v1": {
       "status": "unknown",
@@ -26,6 +26,7 @@
       "metrics": {
         "detection_f_beta": 1.0,
         "validated_f_beta": 1.0,
+        "validated_case_rate": 1.0,
         "deterministic_passes": 10,
         "case_count": 10
       }
@@ -39,6 +40,7 @@
       "metrics": {
         "detection_f_beta": 1.0,
         "validated_f_beta": 1.0,
+        "validated_case_rate": 1.0,
         "deterministic_passes": 10,
         "case_count": 10
       }
@@ -52,6 +54,7 @@
       "metrics": {
         "detection_f_beta": 1.0,
         "validated_f_beta": 0.0,
+        "validated_case_rate": 0.0,
         "deterministic_passes": 0,
         "case_count": 10
       }
@@ -65,6 +68,7 @@
       "metrics": {
         "detection_f_beta": 1.0,
         "validated_f_beta": 0.0,
+        "validated_case_rate": 0.0,
         "deterministic_passes": 0,
         "case_count": 10
       }
@@ -78,6 +82,7 @@
       "metrics": {
         "detection_f_beta": 1.0,
         "validated_f_beta": 0.0,
+        "validated_case_rate": 0.0,
         "deterministic_passes": 0,
         "case_count": 10
       }

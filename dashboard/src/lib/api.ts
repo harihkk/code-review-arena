@@ -176,6 +176,7 @@ export type RunSummary = {
   beta: number | null;
   detection_f_beta: number | null;
   validated_f_beta: number | null;
+  validated_case_rate: number | null;
   deterministic_pass_rate: number | null;
   patch_apply_rate: number | null;
   structural_pass_rate: number | null;

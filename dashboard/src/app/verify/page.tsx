@@ -23,6 +23,7 @@ type Baseline = {
   metrics: null | {
     detection_f_beta: number | null;
     validated_f_beta: number | null;
+    validated_case_rate: number | null;
     deterministic_passes: number;
     case_count: number;
   };
@@ -43,7 +44,7 @@ python -m pip install -e ".[dev]"
 arena validate benchmark_sets/audit_v1
 arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
 arena run benchmark_sets/audit_v1 --reviewer mock:keyword_gamer --mode full --allow-local-execution
-arena leaderboard runs/ --metric validated_f_beta --beta 1.0`;
+arena leaderboard runs/ --metric validated_case_rate --beta 1.0`;
 
 function loadSnapshot(): { snapshot: Snapshot | null; error: string | null } {
   const file = path.join(process.cwd(), "public", "verification.json");
@@ -164,7 +165,7 @@ export default function VerifyPage() {
                     <th>Reviewer</th>
                     <th>Type</th>
                     <th>Detection F-beta</th>
-                    <th>Validated F-beta</th>
+                    <th>Validated rate</th>
                     <th>Deterministic Passes</th>
                     <th>Meaning</th>
                   </tr>
@@ -182,7 +183,7 @@ export default function VerifyPage() {
                         </td>
                         <td>{metric(row.metrics?.detection_f_beta)}</td>
                         <td className="strong-metric">
-                          {metric(row.metrics?.validated_f_beta)}
+                          {metric(row.metrics?.validated_case_rate)}
                         </td>
                         <td>
                           {row.metrics
@@ -250,7 +251,7 @@ function BaselineHealth({
         checked_at: baseline.checked_at,
         command: baseline.command,
         explanation: baseline.metrics
-          ? `${baseline.metrics.deterministic_passes}/${baseline.metrics.case_count} deterministic passes; validated F-beta ${metric(baseline.metrics.validated_f_beta)}.`
+          ? `${baseline.metrics.deterministic_passes}/${baseline.metrics.case_count} deterministic passes; validated case rate ${metric(baseline.metrics.validated_case_rate)}.`
           : "No saved audit_v1 control run found.",
       }}
     />

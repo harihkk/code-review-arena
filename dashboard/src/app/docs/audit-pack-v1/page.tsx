@@ -40,11 +40,11 @@ export default function AuditPackV1Page() {
         <pre className="code-block">{`arena validate benchmark_sets/audit_v1
 arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
 arena run benchmark_sets/audit_v1 --reviewer mock:perfect_patch --mode full --allow-local-execution
-arena leaderboard runs/ --metric validated_f_beta --beta 1.0
+arena leaderboard runs/ --metric validated_case_rate --beta 1.0
 arena audit-report runs/ --output docs/reports/audit-v1-results.md`}</pre>
         <h2>Primary metric</h2>
         <p>
-          Use <code>validated_f_beta</code> in full mode. Detection metrics alone do not prove a
+          Use <code>validated_case_rate</code> in full mode. Detection metrics alone do not prove a
           working repair.
         </p>
       </DocsLayout>

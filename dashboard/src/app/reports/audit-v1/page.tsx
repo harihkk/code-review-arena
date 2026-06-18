@@ -71,7 +71,7 @@ arena audit-report runs/ --output docs/reports/audit-v1-results.md`}</CodeBlock>
         <h2>Summary</h2>
         <dl className="report-summary">
           <ReportFact term="Cases" value={String(report.summary.case_count)} />
-          <ReportFact term="Primary metric" value="validated_f_beta" code />
+          <ReportFact term="Primary metric" value="validated_case_rate" code />
           <ReportFact
             term="Validation"
             value="patch apply + tests + validators"
@@ -109,7 +109,7 @@ arena audit-report runs/ --output docs/reports/audit-v1-results.md`}</CodeBlock>
               <MetricBar label="Detection" value={row.detection_f_beta} />
               <MetricBar
                 label="Validation"
-                value={row.validated_f_beta}
+                value={row.validated_case_rate}
                 accent
               />
               <p className="section-caption">
@@ -249,7 +249,7 @@ function ReviewerTable({ rows }: { rows: AuditReviewerRow[] }) {
               Detection <span className="nowrap">F-beta</span>
             </th>
             <th>
-              Validated <span className="nowrap">F-beta</span>
+              Validated <span className="nowrap">rate</span>
             </th>
             <th>Deterministic Pass Rate</th>
             <th>Patch Apply Rate</th>
@@ -268,7 +268,7 @@ function ReviewerTable({ rows }: { rows: AuditReviewerRow[] }) {
               </td>
               <td>{row.model || "-"}</td>
               <td>{metric(row.detection_f_beta)}</td>
-              <td className="strong-metric">{metric(row.validated_f_beta)}</td>
+              <td className="strong-metric">{metric(row.validated_case_rate)}</td>
               <td>{rate(row.deterministic_pass_rate)}</td>
               <td>{rate(row.patch_apply_rate)}</td>
               <td>{rate(row.test_pass_rate)}</td>
@@ -312,6 +312,6 @@ function metric(value: number | null) {
 }
 
 function gap(row: AuditReviewerRow) {
-  if (row.detection_f_beta == null || row.validated_f_beta == null) return "-";
-  return (row.detection_f_beta - row.validated_f_beta).toFixed(3);
+  if (row.detection_f_beta == null || row.validated_case_rate == null) return "-";
+  return (row.detection_f_beta - row.validated_case_rate).toFixed(3);
 }

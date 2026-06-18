@@ -29,7 +29,7 @@ export default async function Runs() {
               <th>Run ID</th>
               <th>Reviewer / Model</th>
               <th>Status</th>
-              <th className="numeric">Validated F-beta</th>
+              <th className="numeric">Validated rate</th>
               <th className="numeric">Detection F-beta</th>
               <th className="numeric">Pass Rate</th>
               <th className="numeric">Quality</th>
@@ -43,7 +43,7 @@ export default async function Runs() {
                 <td><Link href={`/runs/${run.id}`}>{run.id}</Link></td>
                 <td>{run.reviewer}:{run.model || "default"}</td>
                 <td>{runStatus(run)}</td>
-                <td className="numeric strong-metric">{number(run.validated_f_beta)}</td>
+                <td className="numeric strong-metric">{number(run.validated_case_rate)}</td>
                 <td className="numeric">{number(run.detection_f_beta)}</td>
                 <td className="numeric">{rate(run.deterministic_pass_rate)}</td>
                 <td className="numeric">{run.total_score.toFixed(1)}</td>
@@ -60,9 +60,9 @@ export default async function Runs() {
 }
 
 function runStatus(run: RunSummary) {
-  if (run.validated_f_beta == null) return <StatusBadge tone="neutral">Review only</StatusBadge>;
-  if (run.validated_f_beta === 1) return <StatusBadge tone="success">Validated</StatusBadge>;
-  if ((run.detection_f_beta ?? 0) > run.validated_f_beta) {
+  if (run.validated_case_rate == null) return <StatusBadge tone="neutral">Review only</StatusBadge>;
+  if (run.validated_case_rate === 1) return <StatusBadge tone="success">Validated</StatusBadge>;
+  if ((run.detection_f_beta ?? 0) > run.validated_case_rate) {
     return <StatusBadge tone="warning">Detected only - fix not validated</StatusBadge>;
   }
   return <StatusBadge tone="danger">Validation failed</StatusBadge>;

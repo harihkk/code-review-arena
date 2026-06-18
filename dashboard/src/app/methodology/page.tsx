@@ -43,7 +43,7 @@ const sections = [
   ],
   [
     "8. Metrics",
-    "The primary full-mode ranking metric is validated_f_beta. Supporting metrics expose detection, patch apply, test pass, validator pass, false positives, cost, and latency.",
+    "The primary full-mode ranking metric is validated_case_rate. Supporting metrics expose the review-accuracy, repair-success, and trustworthiness dimensions, plus detection, patch apply, test pass, validator pass, false positives, cost, and latency.",
   ],
   [
     "9. Baselines",
