@@ -18,7 +18,7 @@ ground_truth:
       - path: app/rag/prompt_builder.py
         line_ranges: [{start: 4, end: 8}]
     concepts: [prompt injection, rag, untrusted context, policy override]
-    must_mention: [untrusted, retrieved, system]
+    must_mention: [untrusted, isolation, system]
     acceptable_fix_keywords: [untrusted, retrieved_context, wrap, separate]
 scoring:
   weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}

@@ -15,9 +15,9 @@ def test_valid_token_passes():
     assert verify_token(_token()) is True
 
 
-def test_wrong_audience_fails():
+def test_mismatched_claim_is_rejected():
     assert verify_token(_token(aud="other-service")) is False
 
 
-def test_wrong_issuer_fails():
+def test_wrong_signer_is_rejected():
     assert verify_token(_token(iss="https://evil.example")) is False

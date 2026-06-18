@@ -19,7 +19,7 @@ ground_truth:
         line_ranges: [{start: 9, end: 13}]
     concepts: [authorization, multi-tenant, privilege escalation, tenant admin]
     must_mention: [tenant, admin, authorization]
-    acceptable_fix_keywords: [require_tenant_admin, tenant_admin, is_admin, "HTTPException", "403"]
+    acceptable_fix_keywords: [require_tenant_admin, tenant_admin, is_admin, "403"]
 scoring:
   weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
   false_positive_penalty: 5

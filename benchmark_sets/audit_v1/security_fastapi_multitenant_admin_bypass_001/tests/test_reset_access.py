@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from app.routes.tenant_admin import reset_tenant
 
 
-def test_member_cannot_reset_tenant_without_tenant_admin_role():
+def test_member_cannot_reset_other_workspace():
     member = {"id": 7, "tenant_id": "tenant-a", "role": "member"}
     with pytest.raises(HTTPException) as exc:
         reset_tenant("tenant-a", member)
