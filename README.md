@@ -18,7 +18,7 @@ locally and the harness is model-agnostic.
 
 Each case is a seeded pull request with one or more known bugs, the files a fix should
 touch, and the checks a fix must pass. The reviewer payload is blind: case id, stack,
-the diff, and a bounded set of relevant files — no title, description, category,
+the diff, and a bounded set of relevant files, with no title, description, category,
 severity, or any ground truth (`--reveal-metadata` exists for debugging only). The
 reviewer returns its findings and an optional patch, and the harness takes it from
 there:
@@ -73,18 +73,34 @@ python -m pip install -e ".[dev]"
 
 arena validate benchmark_sets/audit_v1
 arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
-arena leaderboard runs/ --metric validated_f_beta --beta 1.0
+arena leaderboard runs/ --metric validated_case_rate --beta 1.0 --include-unverified
 ```
 
 `--allow-local-execution` opts into the fixture-owned test commands that run in copied
-workspaces. Use it only with fixtures you trust.
+workspaces. Use it only with fixtures you trust. Runs that execute this way are marked
+trusted-local and are excluded from the leaderboard unless you pass `--include-unverified`.
+
+### Docker backend (the verified path)
+
+Docker is the standard, isolation-backed way to run case tests. Build the sandbox image
+once (it holds only Python and the packs' pinned test dependencies, no arena source):
+
+```bash
+bash scripts/build_bench_image.sh        # builds the arena-bench:1 image
+```
+
+Point a pack at it with `default_docker_image: arena-bench:1` in its `manifest.yaml`, or
+set `docker_image` on a case. The executor never pulls a missing image (the name comes
+from the pack), so the image must be built first; otherwise execution-backed runs cleanly
+skip and report `invalid`. Docker-backed runs are leaderboard-eligible without
+`--include-unverified`.
 
 ## Benchmark your own model
 
 The built-in reviewers are the deterministic controls and `reference-patch`. To score a
 real model, wrap it in any local command that reads the case JSON and prints review JSON,
-then point `custom-command` at it. The payload is blind — no ground truth and no
-descriptive metadata — so a reviewer cannot pass on metadata alone.
+then point `custom-command` at it. The payload is blind (no ground truth and no
+descriptive metadata), so a reviewer cannot pass on metadata alone.
 
 ```bash
 arena schema                       # the JSON contract your wrapper must emit

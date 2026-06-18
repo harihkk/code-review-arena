@@ -7,6 +7,39 @@ Keep a Changelog conventions, and the project has not cut a tagged release yet.
 
 ### Added
 
+- v2 metric model: `validated_case_rate` (unit-coherent primary metric that
+  replaces the deprecated `validated_f_beta`) plus three evidence dimensions,
+  review accuracy (`bug_completeness_rate`), repair success
+  (`complete_repair_rate`), and trustworthiness (`supported_claim_rate`).
+  Findings carry a per-finding `evidence_status` and cases a `case_status`.
+- Per-case Repair Confidence (`basic` / `strong` / `unvalidated`) derived from
+  how deeply a repair was validated (tests alone vs tests plus structural
+  validators).
+- Mutation testing (`arena mutation-test`): generate single-edit mutants of the
+  corrected solution (`after/` + `reference.patch`) and measure the test
+  kill rate, evidence that a case's tests catch wrong repairs.
+- Pack certification ladder (`arena certify-pack`): cases are graded
+  draft / development / certified / verified. Certifying requires the buggy
+  baseline to fail, the reference solution to pass, and a mutation kill rate at
+  or above the threshold; the top rung adds an opt-in determinism gate
+  (`--determinism-runs`) that re-runs the verdicts to reject flaky cases.
+- Content-addressed evidence bundles sealed per run, with `arena verify-run` to
+  confirm a run's outputs were not altered after the fact.
+- Test and oracle tampering detection: a before/after content manifest catches
+  candidate code that rewrites hidden tests mid-run, and tampered cases are
+  excluded from aggregate metrics, not just flagged.
+- Run validity and coverage: a `run_status` of
+  complete / partial / invalid / failed / legacy. A run that needed test
+  execution but had no available backend is `invalid`; partial and legacy runs
+  stay off the leaderboard.
+- Per-case and per-run execution backend (`docker` / `trusted-local` / `none`),
+  derived weakest-link first; trusted-local runs are unverified and excluded
+  from the default leaderboard unless `--include-unverified` is passed.
+- Pack-level `default_docker_image` (inherited by cases that do not set their
+  own), plus `Dockerfile.bench` and `scripts/build_bench_image.sh` shipping the
+  `arena-bench` sandbox image the packs can run their tests in.
+- Local-first HTTP reviewer (OpenAI-compatible) for Ollama, vLLM, LM Studio, and
+  llama.cpp.
 - Multi-bug ground truth (`ground_truth.bugs` with one-to-one finding matching,
   `acceptable_findings` scored neutral); `primary_bug` remains as an alias.
 - Patch integrity guards: patches touching tests, pytest config files, or per-case
@@ -31,8 +64,36 @@ Keep a Changelog conventions, and the project has not cut a tagged release yet.
 - `arena lint-cases` contamination scan for ground-truth vocabulary leaking into
   diffs, comments, or test names.
 
+### Security
+
+- Packs are rejected at load time if they contain symlinks or special files
+  (sockets, devices, FIFOs): an untrusted pack must hold only regular files and
+  directories so copying it into a workspace cannot escape its own tree.
+- The Docker backend never pulls a missing image (the image name comes from the
+  untrusted pack); the image must already be present locally, and `--pull never`
+  backs that up.
+- Hardened Docker execution: no network, all capabilities dropped,
+  no-new-privileges, read-only root with a `noexec` tmpfs, a non-root user, and
+  pids / memory / cpu limits, with the resolved image digest recorded. An
+  image-declaring case never silently falls back to local execution.
+- Local fixture commands run with an allowlisted environment, an isolated empty
+  HOME and TMPDIR, POSIX resource limits, a process-tree kill on timeout,
+  capped output, and pytest plugin autoload disabled.
+
 ### Changed
 
+- Container test commands route through `python -m pytest` so a case whose tests
+  import a top-level workspace module collects correctly (the bare `pytest`
+  script does not put the workspace root on `sys.path`).
+- `max_wall_seconds` is a hard budget: each case's execution timeout is clamped
+  to the remaining run deadline rather than only checked between cases.
+- A single case-level `proposed_patch` is applied as the repair instead of an
+  arbitrary finding's patch; competing finding patches are reported as ambiguous.
+- Storage migrated to schema v2: run validity and coverage are persisted, pre-v2
+  rows are marked legacy, and the API leaderboard is gated to eligible runs.
+- The dashboard leads with `validated_case_rate` and the evidence dimensions
+  across the home, leaderboard, audit report, runs, and verify pages, and marks
+  `validated_f_beta` deprecated.
 - Scoring: per-case `scoring.weights` are now actually applied; detection is
   judged at file granularity with line precision reported separately
   (`localization_rate`); the false-positive penalty is capped
