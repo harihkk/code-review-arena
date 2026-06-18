@@ -147,7 +147,7 @@ def test_validated_metrics_distinguish_detection_from_a_valid_fix(benchmark_dir,
     assert malformed.deterministic_metrics.patch_apply_rate == 0
 
 
-def test_leaderboard_uses_validated_f_beta_as_the_primary_full_mode_metric(benchmark_dir, tmp_path):
+def test_leaderboard_supports_the_validated_f_beta_metric(benchmark_dir, tmp_path):
     for mode in ("bad_patch", "malformed_patch", "detects_no_patch", "perfect_patch"):
         _run_patch_mode(benchmark_dir, tmp_path, mode)
 
