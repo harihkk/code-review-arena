@@ -1,0 +1,36 @@
+id: preview_truncation_001
+title: Text preview truncates one character short of the limit
+category: correctness
+severity: low
+stack: [python]
+description: >
+  A pull request adjusts how a preview string is shortened. The slice now keeps one
+  fewer character than the limit allows, dropping a character from every long preview.
+input:
+  diff: pr.diff
+  before_dir: before
+  after_dir: after
+  tests_dir: tests
+ground_truth:
+  bugs:
+    - summary: >
+        The slice that builds the shortened preview stops one character early, so a long
+        preview is shorter than the limit permits.
+      files:
+        - path: app/text.py
+          line_ranges: [{start: 4, end: 4}]
+      concepts: [string truncation, off by one, slice length]
+      must_mention: [truncation, off-by-one]
+      acceptable_fix_keywords: [full limit, slice]
+scoring:
+  weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
+  false_positive_penalty: 5
+  invalid_json_penalty: 20
+execution:
+  run_tests: true
+  test_command: "pytest -q tests"
+  timeout_seconds: 30
+validation:
+  patch_required: true
+  tests_required: true
+metrics: {beta: 1.0}

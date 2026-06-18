@@ -1,0 +1,36 @@
+id: truthiness_default_001
+title: Timeout fallback uses truthiness and discards an explicit zero
+category: correctness
+severity: medium
+stack: [python, config]
+description: >
+  A pull request shortens a timeout resolver to a single boolean expression. A caller
+  that explicitly passes a value of zero now silently gets the fallback instead.
+input:
+  diff: pr.diff
+  before_dir: before
+  after_dir: after
+  tests_dir: tests
+ground_truth:
+  bugs:
+    - summary: >
+        The resolver falls back on any falsy value rather than only on a missing one,
+        so an explicit zero is replaced by the fallback.
+      files:
+        - path: app/config.py
+          line_ranges: [{start: 3, end: 3}]
+      concepts: [truthiness, falsy value, none handling]
+      must_mention: [falsy, truthiness]
+      acceptable_fix_keywords: [is not None, identity check]
+scoring:
+  weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
+  false_positive_penalty: 5
+  invalid_json_penalty: 20
+execution:
+  run_tests: true
+  test_command: "pytest -q tests"
+  timeout_seconds: 30
+validation:
+  patch_required: true
+  tests_required: true
+metrics: {beta: 1.0}

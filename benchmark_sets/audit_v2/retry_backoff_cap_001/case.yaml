@@ -1,0 +1,36 @@
+id: retry_backoff_cap_001
+title: Backoff delay drops its clamp and grows without bound
+category: reliability
+severity: high
+stack: [python, reliability]
+description: >
+  A pull request simplifies a backoff helper and removes the clamp, so the delay grows
+  without limit instead of being held at the ceiling the caller passes in.
+input:
+  diff: pr.diff
+  before_dir: before
+  after_dir: after
+  tests_dir: tests
+ground_truth:
+  bugs:
+    - summary: >
+        The helper returns the grown delay directly and no longer holds it at the
+        provided ceiling, so large attempt counts produce unbounded delays.
+      files:
+        - path: app/backoff.py
+          line_ranges: [{start: 3, end: 3}]
+      concepts: [maximum delay, backoff clamp, unbounded growth]
+      must_mention: [cap, unbounded]
+      acceptable_fix_keywords: [clamp, maximum, upper bound]
+scoring:
+  weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
+  false_positive_penalty: 5
+  invalid_json_penalty: 20
+execution:
+  run_tests: true
+  test_command: "pytest -q tests"
+  timeout_seconds: 30
+validation:
+  patch_required: true
+  tests_required: true
+metrics: {beta: 1.0}
