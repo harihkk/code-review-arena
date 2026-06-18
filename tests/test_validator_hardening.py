@@ -174,7 +174,9 @@ def test_contamination_scan_flags_seeded_leaks(tmp_path):
     assert surfaces == {"diff_added_line", "after_comment", "test_name"}
 
 
-def test_audit_pack_is_contamination_free():
-    # audit_v1 is authored leak-free; this guards against a regression that lets
-    # ground-truth vocabulary back into the diff, comments, or test names.
-    assert scan_benchmark(AUDIT_DIR) == []
+@pytest.mark.parametrize("pack", ["v1", "audit_v1", "audit_v2"])
+def test_shipped_packs_are_contamination_free(pack):
+    # Every shipped pack is authored leak-free; this guards against a regression
+    # that lets ground-truth vocabulary back into the diff, comments, or test names.
+    warnings = scan_benchmark(Path("benchmark_sets") / pack)
+    assert warnings == [], [warning.render() for warning in warnings]

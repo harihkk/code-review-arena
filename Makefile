@@ -22,8 +22,8 @@ validate:
 	arena validate benchmark_sets/audit_v2
 
 lint-cases:
-	arena lint-cases benchmark_sets/v1
-	arena lint-cases benchmark_sets/audit_v1
+	arena lint-cases benchmark_sets/v1 --strict
+	arena lint-cases benchmark_sets/audit_v1 --strict
 	arena lint-cases benchmark_sets/audit_v2 --strict
 
 certify:

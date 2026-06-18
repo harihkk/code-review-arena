@@ -189,10 +189,8 @@ Audit Pack v1 cases:
 ## Development
 
 ```bash
-make test
-make lint
-make typecheck
-cd dashboard && npm run build
+make check                      # full gate: lint, typecheck, tests, pack validation, contamination
+cd dashboard && npm run build   # dashboard build gate
 ```
 
 See [docs/](docs/README.md) for architecture, metrics, the reviewer interface, case
@@ -200,14 +198,11 @@ authoring, and the audit report.
 
 ## Limitations
 
-- `audit_v1` is curated and small.
+- The packs are curated and small (30 cases across `v1`, `audit_v1`, and `audit_v2`).
 - Concept matching is lexical (curated keywords), not semantic; well-paraphrased
   findings can be under-credited. Execution metrics do not have this problem.
 - Structural validators are comment-stripped heuristics: hand-authored, may reject
   alternate valid repairs, and string literals are not stripped. Tests are the gate.
-- `arena lint-cases` currently reports known vocabulary leaks in the shipped packs
-  (mostly test names visible in pre-patch test output); treat detection scores on
-  cases with `run_tests` pre-passes accordingly.
 - Passing tests is execution evidence, not proof of complete correctness.
 - This is a local audit harness, not a large-scale public ranking.
 
