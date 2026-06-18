@@ -39,9 +39,9 @@ jobs:
           arena pack-hash benchmark_sets/audit_v2
       - name: Contamination scan
         run: |
-          arena lint-cases benchmark_sets/v1
-          arena lint-cases benchmark_sets/audit_v1
-          # audit_v2 is authored leak-free; fail the build if that regresses.
+          # All shipped packs are authored leak-free; fail the build on any regression.
+          arena lint-cases benchmark_sets/v1 --strict
+          arena lint-cases benchmark_sets/audit_v1 --strict
           arena lint-cases benchmark_sets/audit_v2 --strict
       - name: Reviewer contract smoke test
         run: |
