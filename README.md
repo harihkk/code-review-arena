@@ -211,6 +211,12 @@ authoring, and the audit report.
 - Passing tests is execution evidence, not proof of complete correctness.
 - This is a local audit harness, not a large-scale public ranking.
 
+## Contributing and security
+
+[CONTRIBUTING.md](CONTRIBUTING.md) covers the local setup, the `make check` gate,
+and how to author a benchmark case correctly. To report a vulnerability, see
+[SECURITY.md](SECURITY.md).
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
