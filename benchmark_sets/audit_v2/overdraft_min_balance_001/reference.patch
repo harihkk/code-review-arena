@@ -1,0 +1,10 @@
+--- a/app/ledger.py
++++ b/app/ledger.py
+@@ -4,6 +4,6 @@
+     seen = start
+     for delta in deltas:
+         balance = balance + delta
+-        if balance > seen:
++        if balance < seen:
+             seen = balance
+     return seen

@@ -1,0 +1,37 @@
+id: overdraft_min_balance_001
+title: Lowest-balance tracker compares the wrong direction and reports the peak
+category: correctness
+severity: high
+stack: [python, billing]
+description: >
+  A pull request changes how the lowest balance reached is tracked while applying a
+  sequence of deltas. The comparison now keeps the peak balance instead of the trough,
+  so overdrafts are never reported.
+input:
+  diff: pr.diff
+  before_dir: before
+  after_dir: after
+  tests_dir: tests
+ground_truth:
+  bugs:
+    - summary: >
+        The tracker updates its result when the balance rises rather than when it falls,
+        so it returns the highest balance seen instead of the lowest.
+      files:
+        - path: app/ledger.py
+          line_ranges: [{start: 7, end: 7}]
+      concepts: [running minimum, comparison direction, overdraft]
+      must_mention: [minimum, smallest]
+      acceptable_fix_keywords: [less than, smaller]
+scoring:
+  weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
+  false_positive_penalty: 5
+  invalid_json_penalty: 20
+execution:
+  run_tests: true
+  test_command: "pytest -q tests"
+  timeout_seconds: 30
+validation:
+  patch_required: true
+  tests_required: true
+metrics: {beta: 1.0}

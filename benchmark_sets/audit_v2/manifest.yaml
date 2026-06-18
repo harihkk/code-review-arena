@@ -4,3 +4,6 @@ cases:
   - money_discount_rounding_001
   - ratelimit_window_boundary_001
   - permission_precedence_001
+  - overdraft_min_balance_001
+  - progress_zero_division_001
+  - page_count_ceil_001

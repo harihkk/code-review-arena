@@ -178,6 +178,27 @@ LOCALIZATION_HINTS: dict[str, tuple[str, str, str, tuple[int, int], str]] = {
         (3, 3),
         "Group the role test in parentheses so the frozen guard always applies.",
     ),
+    "overdraft_min_balance_001": (
+        "Lowest-balance tracker keeps the peak instead of the trough.",
+        "running minimum smallest comparison direction overdraft less than",
+        "app/ledger.py",
+        (7, 7),
+        "Update the result when the balance falls, not when it rises.",
+    ),
+    "progress_zero_division_001": (
+        "Completion percentage divides by zero when the workload is empty.",
+        "division by zero empty input missing guard denominator",
+        "app/progress.py",
+        (3, 3),
+        "Return a defined percentage for an empty workload before dividing.",
+    ),
+    "page_count_ceil_001": (
+        "Page count uses floor division and drops the final partial page.",
+        "ceiling division integer division round up remainder off by one",
+        "app/paging.py",
+        (3, 3),
+        "Round the division up so a partial final page is counted.",
+    ),
 }
 
 
