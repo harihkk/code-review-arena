@@ -31,14 +31,18 @@ jobs:
         run: |
           arena validate benchmark_sets/v1
           arena validate benchmark_sets/audit_v1
+          arena validate benchmark_sets/audit_v2
       - name: Pack checksums
         run: |
           arena pack-hash benchmark_sets/v1
           arena pack-hash benchmark_sets/audit_v1
-      - name: Contamination scan (informational)
+          arena pack-hash benchmark_sets/audit_v2
+      - name: Contamination scan
         run: |
           arena lint-cases benchmark_sets/v1
           arena lint-cases benchmark_sets/audit_v1
+          # audit_v2 is authored leak-free; fail the build if that regresses.
+          arena lint-cases benchmark_sets/audit_v2 --strict
       - name: Reviewer contract smoke test
         run: |
           arena schema > /tmp/review-schema.json
@@ -46,6 +50,11 @@ jobs:
       # Deterministic, execution-backed proof that the full pipeline works.
       - name: Reference-patch full run (audit_v1)
         run: arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
+      - name: Reference-patch full run (audit_v2)
+        run: arena run benchmark_sets/audit_v2 --reviewer reference-patch --mode full --allow-local-execution
+      # audit_v2 is authored to be fully certified; fail the build if a case regresses.
+      - name: Certify audit_v2
+        run: arena certify-pack benchmark_sets/audit_v2 --allow-local-execution --strict certified
       # Cheat-resistance: the keyword-stuffing control must detect everything
       # and validate nothing.
       - name: Keyword-gamer control run (audit_v1)

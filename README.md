@@ -76,6 +76,10 @@ arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow
 arena leaderboard runs/ --metric validated_case_rate --beta 1.0 --include-unverified
 ```
 
+Two patch-backed packs ship today: `benchmark_sets/audit_v1` (domain-shaped review
+failures) and `benchmark_sets/audit_v2` (a second batch of certified logic-defect cases).
+Swap either path into the commands above.
+
 `--allow-local-execution` opts into the fixture-owned test commands that run in copied
 workspaces. Use it only with fixtures you trust. Runs that execute this way are marked
 trusted-local and are excluded from the leaderboard unless you pass `--include-unverified`.

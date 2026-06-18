@@ -7,6 +7,11 @@ Keep a Changelog conventions, and the project has not cut a tagged release yet.
 
 ### Added
 
+- Audit Pack v2 (`benchmark_sets/audit_v2`): a second batch of patch-backed cases
+  targeting high-impact logic defects (per-unit rounding that loses money, a
+  fixed-window rate limiter off-by-one, a boolean-precedence authorization
+  bypass). Every case is authored leak-free and fully certified (baseline fails,
+  reference fix passes, 100% mutant-kill rate), verified in CI.
 - v2 metric model: `validated_case_rate` (unit-coherent primary metric that
   replaces the deprecated `validated_f_beta`) plus three evidence dimensions,
   review accuracy (`bug_completeness_rate`), repair success

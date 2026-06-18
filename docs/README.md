@@ -22,6 +22,7 @@ Start here, then read by topic.
 - [custom-command-reviewer.md](custom-command-reviewer.md) - benchmark your own reviewer
 - [reference-patches.md](reference-patches.md) - gold patch artifacts
 - [audit-pack-v1.md](audit-pack-v1.md) - the patch-required pack
+- [audit-pack-v2.md](audit-pack-v2.md) - the second batch of certified logic-defect cases
 - [audit-report.md](audit-report.md) - generating the report and dashboard JSON
 - [adding-new-cases.md](adding-new-cases.md) - case layout and validation
 - [github-action.md](github-action.md) - continuous integration
