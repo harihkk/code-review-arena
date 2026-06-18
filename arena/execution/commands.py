@@ -3,7 +3,7 @@
 Fixture commands always run without a shell. A case may declare
 ``test_command`` as a single command string, one argv list, or a list of argv
 lists (each executed in order, all must pass). Shell operators have no meaning
-without a shell, so commands relying on them are rejected up front — at
+without a shell, so commands relying on them are rejected up front, at
 ``arena validate`` time rather than mid-run.
 """
 
@@ -59,7 +59,7 @@ def _validate_argv(argv: list[str], original: object) -> list[str]:
         if token in _SHELL_OPERATORS:
             raise ValidationError(
                 f"test_command uses shell operator {token!r}; commands run without a "
-                f"shell — declare a list of argv commands instead: {original!r}"
+                f"shell; declare a list of argv commands instead: {original!r}"
             )
     head = argv[0]
     if any(operator in head for operator in (";", "|", "&")):

@@ -1,7 +1,7 @@
 """Contamination scan: does the presented case reveal its own answer?
 
-A case leaks when the surfaces a reviewer sees — added diff lines, comments in
-the after tree, or test names that show up in pre-patch test output — contain
+A case leaks when the surfaces a reviewer sees (added diff lines, comments in
+the after tree, or test names that show up in pre-patch test output) contain
 the curated ground-truth vocabulary (must_mention, concepts,
 acceptable_fix_keywords). Leaks make detection scores measure reading
 comprehension instead of code review.

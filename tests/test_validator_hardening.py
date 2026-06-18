@@ -53,7 +53,7 @@ BUGGY_BALANCE = """import asyncio
 class BalanceService:
     def __init__(self):
         self.balance = 0
-        # asyncio.lock async with guard transaction atomic — pretend fix
+        # asyncio.lock async with guard transaction atomic (pretend fix)
     async def add(self, amount: int) -> None:
         current = self.balance
         await asyncio.sleep(0)
