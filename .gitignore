@@ -9,8 +9,8 @@ __pycache__/
 .ruff_cache/
 .coverage
 htmlcov/
-dist/
-build/
+/dist/
+/build/
 *.egg-info/
 
 # Node / dashboard
@@ -23,15 +23,16 @@ dashboard/next-env.d.ts
 dashboard/.env*
 !dashboard/.env.example
 
-# Local runtime
+# Local runtime (anchored to the repo root so they cannot shadow same-named
+# source directories, e.g. the dashboard's app/runs route).
 .env
 .env.*
 !.env.example
-data/
-runs/
-logs/
-tmp/
-.tmp/
+/data/
+/runs/
+/logs/
+/tmp/
+/.tmp/
 *.db
 *.db-shm
 *.db-wal
