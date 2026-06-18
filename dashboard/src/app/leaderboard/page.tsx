@@ -12,7 +12,7 @@ export default async function LeaderboardPage() {
       <PageHeader
         eyebrow="Results"
         title="Leaderboard"
-        description="Runs ranked by validated_f_beta. Detection metrics are shown separately because a review can identify a bug without producing a valid fix."
+        description="Runs ranked by validated_case_rate. Detection metrics are shown separately because a review can identify a bug without producing a valid fix."
       />
       <LeaderboardTable rows={rows} />
     </>

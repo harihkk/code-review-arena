@@ -12,8 +12,11 @@ import { EmptyState } from "./EmptyState";
 import { StatusBadge } from "./StatusBadge";
 
 type Metric =
-  | "validated_f_beta"
+  | "validated_case_rate"
   | "detection_f_beta"
+  | "complete_repair_rate"
+  | "bug_completeness_rate"
+  | "supported_claim_rate"
   | "deterministic_pass_rate"
   | "patch_apply_rate"
   | "test_pass_rate"
@@ -22,8 +25,11 @@ type Metric =
   | "latency_per_case_ms";
 
 const metricOptions: Metric[] = [
-  "validated_f_beta",
+  "validated_case_rate",
   "detection_f_beta",
+  "complete_repair_rate",
+  "bug_completeness_rate",
+  "supported_claim_rate",
   "deterministic_pass_rate",
   "patch_apply_rate",
   "test_pass_rate",
@@ -32,10 +38,10 @@ const metricOptions: Metric[] = [
   "latency_per_case_ms",
 ];
 const emptyCommand = `arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
-arena leaderboard runs/ --metric validated_f_beta --beta 1.0`;
+arena leaderboard runs/ --metric validated_case_rate --beta 1.0`;
 
 export function LeaderboardTable({ rows }: { rows: LeaderboardRow[] }) {
-  const [metric, setMetric] = useState<Metric>("validated_f_beta");
+  const [metric, setMetric] = useState<Metric>("validated_case_rate");
   const [beta, setBeta] = useState(1);
   const [benchmark, setBenchmark] = useState(
     rows.some((row) => row.benchmark_set === "audit_v1")
@@ -171,10 +177,10 @@ export function LeaderboardTable({ rows }: { rows: LeaderboardRow[] }) {
                 <th>#</th>
                 <th>Reviewer</th>
                 <th
-                  className={`numeric ${metric === "validated_f_beta" ? "selected-metric" : ""}`}
-                  title="validated_f_beta"
+                  className={`numeric ${metric === "validated_case_rate" ? "selected-metric" : ""}`}
+                  title="validated_case_rate"
                 >
-                  Validated
+                  Validated rate
                 </th>
                 <th
                   className={`numeric ${metric === "detection_f_beta" ? "selected-metric" : ""}`}
@@ -220,7 +226,7 @@ export function LeaderboardTable({ rows }: { rows: LeaderboardRow[] }) {
             <tbody>
               {sorted.map((row, index) => {
                 const metrics = row.deterministic_metrics;
-                const validated = dynamicF(metrics, "validated", beta);
+                const validated = metrics?.validated_case_rate ?? null;
                 return (
                   <tr key={`${row.run_id}:${row.mode}`}>
                     <td className="numeric">{index + 1}</td>
@@ -280,7 +286,7 @@ export function LeaderboardTable({ rows }: { rows: LeaderboardRow[] }) {
         </div>
       )}
       <p className="table-footnote">
-        <code>validated_f_beta</code> counts only cases that reached
+        <code>validated_case_rate</code> counts only cases that reached
         deterministic validation.
         <code>detection_f_beta</code> only measures whether the seeded bug was
         found and localized.
@@ -317,8 +323,6 @@ function value(
   if (!metrics) return null;
   if (metric === "detection_f_beta")
     return dynamicF(metrics, "detection", beta) ?? 0;
-  if (metric === "validated_f_beta")
-    return dynamicF(metrics, "validated", beta) ?? 0;
   if (metric === "latency_per_case_ms") return metrics.latency_per_case_ms;
   return metrics[metric];
 }
@@ -328,9 +332,9 @@ function validationBadge(row: LeaderboardRow) {
   if (!metrics) return <StatusBadge tone="neutral">review only</StatusBadge>;
   if ((metrics.patch_apply_rate ?? 1) === 0)
     return <StatusBadge tone="danger">patch failed</StatusBadge>;
-  if (metrics.detection_f_beta >= 0.8 && metrics.validated_f_beta <= 0.3)
+  if (metrics.detection_f_beta >= 0.8 && metrics.validated_case_rate <= 0.3)
     return <StatusBadge tone="warning">detected only</StatusBadge>;
-  if (metrics.validated_f_beta >= 0.8)
+  if (metrics.validated_case_rate >= 0.8)
     return <StatusBadge tone="success">validated</StatusBadge>;
   return <StatusBadge tone="danger">not validated</StatusBadge>;
 }
