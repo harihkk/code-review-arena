@@ -360,7 +360,7 @@ code {
 }
 .numeric {
   font-variant-numeric: tabular-nums;
-  text-align: right !important;
+  text-align: left;
 }
 .strong-metric {
   color: var(--brand);

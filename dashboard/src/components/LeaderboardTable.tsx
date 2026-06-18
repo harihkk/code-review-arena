@@ -168,7 +168,7 @@ export function LeaderboardTable({ rows }: { rows: LeaderboardRow[] }) {
           <table className="data-table leaderboard-table">
             <thead>
               <tr>
-                <th className="numeric">#</th>
+                <th>#</th>
                 <th>Reviewer</th>
                 <th
                   className={`numeric ${metric === "validated_f_beta" ? "selected-metric" : ""}`}
