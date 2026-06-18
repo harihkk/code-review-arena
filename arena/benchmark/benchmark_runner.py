@@ -358,6 +358,7 @@ def _evaluate_case(
     # test command, a missing workspace) are the case's problem, not the harness'.
     execution_unavailable = executed_tests is not None and executed_tests.error in {
         "docker_required_but_unavailable",
+        "docker_image_not_present",
         "local_execution_disabled",
     }
     review_result = apply_execution_fix_quality(case, review_result, validated=execution_validated)

@@ -15,7 +15,11 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from arena.core.errors import ValidationError
-from arena.execution.commands import parse_test_commands, pin_interpreter
+from arena.execution.commands import (
+    parse_test_commands,
+    pin_container_interpreter,
+    pin_interpreter,
+)
 from arena.execution.hardening import resource_limiter, sandboxed_home_env
 from arena.execution.process import run_supervised
 
@@ -68,6 +72,11 @@ class TestExecutor:
         if request.docker_image:
             if not self._docker_available():
                 return self._skipped(request.case_id, "docker_required_but_unavailable")
+            # Never let `docker run` reach the network to pull a missing image:
+            # the image name comes from the (untrusted) pack, and an implicit pull
+            # would run unvetted code. The image must already be present locally.
+            if not self._image_present(request.docker_image):
+                return self._skipped(request.case_id, "docker_image_not_present")
             mode: Literal["docker", "local"] = "docker"
         elif request.allow_local_execution:
             mode = "local"
@@ -126,6 +135,16 @@ class TestExecutor:
         return result.returncode == 0
 
     @staticmethod
+    def _image_present(image: str) -> bool:
+        result = subprocess.run(
+            ["docker", "image", "inspect", image],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return result.returncode == 0
+
+    @staticmethod
     def _container_name(case_id: str) -> str:
         slug = re.sub(r"[^a-zA-Z0-9_.-]", "-", case_id)[:40]
         return f"arena-{slug}-{uuid4().hex[:8]}"
@@ -143,6 +162,9 @@ class TestExecutor:
             "docker",
             "run",
             "--rm",
+            # Presence is checked before we get here; refuse any implicit pull.
+            "--pull",
+            "never",
             "--name",
             container_name,
             "--network",
@@ -175,7 +197,7 @@ class TestExecutor:
             # Run as the host user so the bind-mounted workspace stays writable
             # while the container process is non-root.
             command += ["--user", f"{os.getuid()}:{os.getgid()}"]
-        command += [request.docker_image, *args]
+        command += [request.docker_image, *pin_container_interpreter(args)]
         return command
 
     @staticmethod

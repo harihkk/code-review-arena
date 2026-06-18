@@ -22,13 +22,31 @@ def pin_interpreter(argv: list[str]) -> list[str]:
     """Pin python/pytest invocations to the harness interpreter.
 
     Only valid for local execution; inside a container the image's own
-    interpreter must be used, so docker commands stay untouched.
+    interpreter must be used, so use pin_container_interpreter there instead.
     """
     program = PurePosixPath(argv[0]).name
     if program == "pytest":
         return [sys.executable, "-m", "pytest", *argv[1:]]
     if program in {"python", "python3"}:
         return [sys.executable, *argv[1:]]
+    return argv
+
+
+def pin_container_interpreter(argv: list[str]) -> list[str]:
+    """Route python/pytest through the container's own ``python -m``.
+
+    The ``pytest`` console script does not put the working directory on
+    ``sys.path``, so a case whose tests import a top-level module from the
+    workspace root fails to collect inside the container. ``python -m pytest``
+    does add the workspace root, and every benchmark image ships python, so we
+    normalize to it. Unlike pin_interpreter this keeps the bare ``python`` name
+    (the image's interpreter), never the harness's sys.executable.
+    """
+    program = PurePosixPath(argv[0]).name
+    if program == "pytest":
+        return ["python", "-m", "pytest", *argv[1:]]
+    if program in {"python", "python3"}:
+        return ["python", *argv[1:]]
     return argv
 
 

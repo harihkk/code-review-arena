@@ -8,7 +8,11 @@ import pytest
 from arena.benchmark.benchmark_runner import run_benchmark
 from arena.core.errors import ValidationError
 from arena.core.models import CaseContext, ReviewerResponse, ReviewResult
-from arena.execution.commands import parse_test_commands, pin_interpreter
+from arena.execution.commands import (
+    parse_test_commands,
+    pin_container_interpreter,
+    pin_interpreter,
+)
 from arena.execution.test_executor import TestExecutionRequest, TestExecutor
 from arena.reviewers.base import BaseReviewer
 
@@ -43,6 +47,21 @@ def test_pin_interpreter_normalizes_python_and_pytest():
     assert pin_interpreter(["pytest", "-q"]) == [sys.executable, "-m", "pytest", "-q"]
     assert pin_interpreter(["python", "-m", "pytest"]) == [sys.executable, "-m", "pytest"]
     assert pin_interpreter(["npm", "test"]) == ["npm", "test"]
+
+
+def test_pin_container_interpreter_routes_pytest_through_python_m():
+    # `python -m pytest` puts the workspace root on sys.path so a case that
+    # imports a top-level module collects; the bare `pytest` script does not.
+    assert pin_container_interpreter(["pytest", "-q", "tests"]) == [
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests",
+    ]
+    # The container's own python is used, never the harness sys.executable.
+    assert pin_container_interpreter(["python3", "-m", "pytest"]) == ["python", "-m", "pytest"]
+    assert pin_container_interpreter(["npm", "test"]) == ["npm", "test"]
 
 
 def test_executor_runs_command_sequences_and_stops_on_failure(tmp_path):

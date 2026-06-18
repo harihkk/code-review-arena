@@ -21,6 +21,7 @@ def test_docker_args_are_hardened():
     joined = " ".join(args)
     for flag in (
         "--rm",
+        "--pull never",
         "--name arena-x",
         "--network none",
         "--cap-drop ALL",
@@ -37,6 +38,36 @@ def test_docker_args_are_hardened():
     assert args[-4:] == ["python:3.12-slim", "python", "-c", "pass"]
     if sys.platform != "win32":
         assert "--user" in joined
+
+
+def test_docker_command_routes_pytest_through_python_m():
+    # A pytest case is rewritten to `python -m pytest` so workspace imports work.
+    request = TestExecutionRequest(
+        case_id="c",
+        workspace_path=Path("/tmp"),
+        test_command="pytest -q tests",
+        timeout_seconds=30,
+        docker_image="arena-bench:1",
+    )
+    args = TestExecutor._docker_args(request, ["pytest", "-q", "tests"], container_name="arena-x")
+    assert args[-6:] == ["arena-bench:1", "python", "-m", "pytest", "-q", "tests"]
+
+
+def test_missing_image_is_skipped_not_pulled(monkeypatch, tmp_path):
+    # Docker is up but the (untrusted) image is absent: skip rather than let
+    # `docker run` reach the network to pull and run unvetted code.
+    monkeypatch.setattr(TestExecutor, "_docker_available", staticmethod(lambda: True))
+    monkeypatch.setattr(TestExecutor, "_image_present", staticmethod(lambda image: False))
+    request = TestExecutionRequest(
+        case_id="c",
+        workspace_path=tmp_path,
+        test_command="pytest -q",
+        timeout_seconds=10,
+        docker_image="arena-bench:1",
+    )
+    result = TestExecutor().execute(request)
+    assert result.execution_mode == "skipped"
+    assert result.error == "docker_image_not_present"
 
 
 def test_docker_required_case_never_falls_back_to_local(monkeypatch, tmp_path):
@@ -76,3 +107,27 @@ def test_real_docker_run_passes_and_records_digest(tmp_path):
     assert result.passed is True
     assert result.image_digest is not None
     assert "sha256:" in result.image_digest
+
+
+@docker_tests
+def test_real_docker_pytest_collects_a_workspace_module(tmp_path):
+    # Regression: the bare `pytest` script does not put the workspace root on
+    # sys.path, so a test importing a top-level module failed to collect in the
+    # container. The command must be routed through `python -m pytest`.
+    image = os.getenv("ARENA_BENCH_IMAGE", "arena-bench:1")
+    (tmp_path / "calc.py").write_text("def is_adult(age):\n    return age >= 18\n")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_calc.py").write_text(
+        "from calc import is_adult\ndef test_adult():\n    assert is_adult(18) is True\n"
+    )
+    result = TestExecutor().execute(
+        TestExecutionRequest(
+            case_id="dockmod",
+            workspace_path=tmp_path,
+            test_command="pytest -q tests",
+            timeout_seconds=120,
+            docker_image=image,
+        )
+    )
+    assert result.execution_mode == "docker"
+    assert result.passed is True, result.stdout + result.stderr
