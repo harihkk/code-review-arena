@@ -93,6 +93,7 @@ def read_baselines(runs_dir: Path) -> dict[str, dict[str, Any]]:
             "metrics": {
                 "detection_f_beta": metrics.get("detection_f_beta"),
                 "validated_f_beta": metrics.get("validated_f_beta"),
+                "validated_case_rate": metrics.get("validated_case_rate"),
                 "deterministic_passes": passes,
                 "case_count": len(case_results),
             },

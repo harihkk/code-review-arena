@@ -61,7 +61,8 @@ def render_html(run: RunResult) -> str:
         metrics = run.deterministic_metrics
         deterministic_cards = f"""<h2>Deterministic Validation Summary</h2>
 <section class="cards">
-<div class="card"><span class="value">{metrics.validated_f_beta:.3f}</span>Validated F-beta</div>
+<div class="card"><span class="value">{metrics.validated_case_rate:.3f}</span>
+Validated case rate</div>
 <div class="card"><span class="value">{metrics.detection_f_beta:.3f}</span>Detection F-beta</div>
 <div class="card"><span class="value">{_rate(metrics.deterministic_pass_rate)}</span>
 Validated passes</div>

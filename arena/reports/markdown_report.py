@@ -39,7 +39,7 @@ def render_markdown(run: RunResult) -> str:
                 f"| Detection F-beta (beta={metrics.beta:g}) | {metrics.detection_f_beta:.3f} |",
                 f"| Validated Precision | {metrics.validated_precision:.3f} |",
                 f"| Validated Recall | {metrics.validated_recall:.3f} |",
-                f"| Validated F-beta (beta={metrics.beta:g}) | {metrics.validated_f_beta:.3f} |",
+                f"| Validated Case Rate | {_rate(metrics.validated_case_rate)} |",
                 f"| Deterministic Pass Rate | {_rate(metrics.deterministic_pass_rate)} |",
                 f"| Patch Apply Rate | {_rate(metrics.patch_apply_rate)} |",
                 f"| Test Pass Rate | {_rate(metrics.test_pass_rate)} |",

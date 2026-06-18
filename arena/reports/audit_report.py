@@ -147,7 +147,7 @@ def build_audit_report_data(runs: list[RunResult]) -> dict[str, Any]:
         )
 
     def _validated_sort_key(row: dict[str, Any]) -> float:
-        value = row.get("validated_f_beta")
+        value = row.get("validated_case_rate")
         return float(value) if isinstance(value, (int, float)) else -1.0
 
     reviewer_rows.sort(key=_validated_sort_key, reverse=True)
@@ -237,7 +237,7 @@ def _reproducibility_commands() -> list[str]:
         "arena validate benchmark_sets/audit_v1",
         "arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution",
         "arena run benchmark_sets/audit_v1 --reviewer control:keyword_gamer --mode full --allow-local-execution",
-        "arena leaderboard runs/ --metric validated_f_beta --beta 1.0",
+        "arena leaderboard runs/ --metric validated_case_rate --beta 1.0",
         "arena audit-report runs/ --output docs/reports/audit-v1-results.md",
     ]
 

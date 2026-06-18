@@ -167,7 +167,8 @@ class RunRepository:
                 "test_pass_rate, structural_pass_rate, false_positives_per_case, "
                 "cost_per_true_positive, detection_precision, detection_recall, detection_f1, "
                 "detection_f_beta, validated_precision, validated_recall, validated_f1, "
-                "validated_f_beta, deterministic_pass_rate, cost_per_validated_fix, "
+                "validated_f_beta, validated_case_rate, deterministic_pass_rate, "
+                "cost_per_validated_fix, "
                 "latency_per_case_ms FROM runs ORDER BY completed_at DESC"
             ).fetchall()
         return [dict(row) for row in rows]
