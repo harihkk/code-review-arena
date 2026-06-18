@@ -1,0 +1,132 @@
+{
+  "schema_version": "1.0",
+  "title": "Detection Is Not Validation: Audit Pack v2 Results",
+  "generated_at": "2026-06-18T22:40:56.085855+00:00",
+  "empty": false,
+  "summary": {
+    "benchmark_pack": "audit_v2",
+    "run_count": 2,
+    "case_count": 10,
+    "reviewers_tested": [
+      "reference-patch",
+      "shallow-patch"
+    ],
+    "biggest_detection_validation_gap": {
+      "reviewer": "shallow-patch",
+      "gap": 1.0
+    }
+  },
+  "reviewers": [
+    {
+      "reviewer": "reference-patch",
+      "model": "",
+      "mode": "full",
+      "detection_precision": 1.0,
+      "detection_recall": 1.0,
+      "detection_f_beta": 1.0,
+      "validated_precision": 1.0,
+      "validated_recall": 1.0,
+      "validated_f_beta": 1.0,
+      "validated_case_rate": 1.0,
+      "complete_repair_rate": 1.0,
+      "bug_completeness_rate": 1.0,
+      "supported_claim_rate": 1.0,
+      "deterministic_pass_rate": 1.0,
+      "patch_apply_rate": 1.0,
+      "test_pass_rate": 1.0,
+      "structural_pass_rate": null,
+      "false_positives_per_case": 0.0,
+      "cost_per_validated_fix": 0.0,
+      "latency_per_case_ms": 0.0,
+      "run_id": "2026-06-18_18-35-35",
+      "primary_failure_mode": null
+    },
+    {
+      "reviewer": "shallow-patch",
+      "model": "",
+      "mode": "full",
+      "detection_precision": 1.0,
+      "detection_recall": 1.0,
+      "detection_f_beta": 1.0,
+      "validated_precision": 0.0,
+      "validated_recall": 0.0,
+      "validated_f_beta": 0.0,
+      "validated_case_rate": 0.0,
+      "complete_repair_rate": 0.0,
+      "bug_completeness_rate": 1.0,
+      "supported_claim_rate": 1.0,
+      "deterministic_pass_rate": 0.0,
+      "patch_apply_rate": 1.0,
+      "test_pass_rate": 0.0,
+      "structural_pass_rate": null,
+      "false_positives_per_case": 0.0,
+      "cost_per_validated_fix": null,
+      "latency_per_case_ms": 0.0,
+      "run_id": "2026-06-18_18-35-38",
+      "primary_failure_mode": "tests_failed"
+    }
+  ],
+  "gaps": [
+    {
+      "reviewer": "shallow-patch",
+      "model": "",
+      "mode": "full",
+      "detection_f_beta": 1.0,
+      "validated_f_beta": 0.0,
+      "gap": 1.0,
+      "run_id": "2026-06-18_18-35-38"
+    }
+  ],
+  "failure_modes": {
+    "tests_failed": 10
+  },
+  "case_studies": [
+    {
+      "case_id": "money_discount_rounding_001",
+      "reviewer": "shallow-patch",
+      "model": "",
+      "finding_summary": "The pull request changes behavior in app/pricing.py; this path looks defective and was hardened.",
+      "failure_reasons": [
+        "tests_failed"
+      ],
+      "validator_evidence": [],
+      "test_stderr_tail": ""
+    },
+    {
+      "case_id": "ratelimit_window_boundary_001",
+      "reviewer": "shallow-patch",
+      "model": "",
+      "finding_summary": "The pull request changes behavior in app/limiter.py; this path looks defective and was hardened.",
+      "failure_reasons": [
+        "tests_failed"
+      ],
+      "validator_evidence": [],
+      "test_stderr_tail": ""
+    },
+    {
+      "case_id": "permission_precedence_001",
+      "reviewer": "shallow-patch",
+      "model": "",
+      "finding_summary": "The pull request changes behavior in app/permissions.py; this path looks defective and was hardened.",
+      "failure_reasons": [
+        "tests_failed"
+      ],
+      "validator_evidence": [],
+      "test_stderr_tail": ""
+    }
+  ],
+  "reproducibility_commands": [
+    "arena validate benchmark_sets/audit_v2",
+    "arena run benchmark_sets/audit_v2 --reviewer reference-patch --mode full --allow-local-execution",
+    "arena run benchmark_sets/audit_v2 --reviewer shallow-patch --mode full --allow-local-execution",
+    "arena leaderboard runs/ --metric validated_case_rate --beta 1.0 --include-unverified",
+    "arena audit-report runs/ --output docs/reports/audit_v2-results.md"
+  ],
+  "limitations": [
+    "audit_v2 is curated and small; it measures a narrow set of patch-backed failures.",
+    "Structural validators are hand-authored and may reject alternate but valid repairs.",
+    "Regression tests cannot prove full production correctness.",
+    "Some credible fixes may fail when validators are intentionally narrow.",
+    "This pack is not designed to compete with large public leaderboard scale benchmarks."
+  ]
+}
