@@ -43,7 +43,7 @@ source .venv/bin/activate
 python -m pip install -e ".[dev]"
 arena validate benchmark_sets/audit_v1
 arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
-arena run benchmark_sets/audit_v1 --reviewer mock:keyword_gamer --mode full --allow-local-execution
+arena run benchmark_sets/audit_v1 --reviewer control:keyword_gamer --mode full --allow-local-execution
 arena leaderboard runs/ --metric validated_case_rate --beta 1.0`;
 
 function loadSnapshot(): { snapshot: Snapshot | null; error: string | null } {
@@ -141,7 +141,7 @@ export default function VerifyPage() {
             />
             <BaselineHealth
               label="Control: Keyword Gamer (adversarial) baseline"
-              baseline={snapshot.baselines["mock:keyword_gamer"]}
+              baseline={snapshot.baselines["control:keyword_gamer"]}
             />
             <HealthCard
               label="Audit report generation"
@@ -241,8 +241,21 @@ function BaselineHealth({
   baseline,
 }: {
   label: string;
-  baseline: Baseline;
+  baseline: Baseline | undefined;
 }) {
+  if (!baseline) {
+    return (
+      <HealthCard
+        label={label}
+        check={{
+          status: "unknown",
+          checked_at: null,
+          command: "",
+          explanation: "No saved audit_v1 control run found.",
+        }}
+      />
+    );
+  }
   return (
     <HealthCard
       label={label}
