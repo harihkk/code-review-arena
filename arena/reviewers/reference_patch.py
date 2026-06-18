@@ -156,6 +156,28 @@ LOCALIZATION_HINTS: dict[str, tuple[str, str, str, tuple[int, int], str]] = {
         (2, 6),
         "Retain the original field names or add aliases.",
     ),
+    # benchmark_sets/audit_v2
+    "money_discount_rounding_001": (
+        "Percentage reduction is applied per unit and floored before multiplying.",
+        "rounding discount per unit reduction currency precision aggregate gross",
+        "app/pricing.py",
+        (3, 4),
+        "Reduce the full amount once instead of flooring each unit, so no money is lost.",
+    ),
+    "ratelimit_window_boundary_001": (
+        "Fixed-window admission uses a non-strict comparison and admits one over the cap.",
+        "rate limit boundary off-by-one strict comparison fewer than window cap",
+        "app/limiter.py",
+        (4, 4),
+        "Admit only when the active count is strictly fewer than the cap.",
+    ),
+    "permission_precedence_001": (
+        "Publish check drops grouping so operator precedence bypasses the frozen guard.",
+        "operator precedence grouping parentheses boolean logic authorization bypass",
+        "app/permissions.py",
+        (3, 3),
+        "Group the role test in parentheses so the frozen guard always applies.",
+    ),
 }
 
 

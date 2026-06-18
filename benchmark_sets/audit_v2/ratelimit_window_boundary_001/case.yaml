@@ -1,0 +1,36 @@
+id: ratelimit_window_boundary_001
+title: Fixed-window rate limiter admits one request beyond the cap
+category: correctness
+severity: high
+stack: [python, reliability]
+description: >
+  A pull request adjusts the admission check of a fixed-window rate limiter. At the
+  cap, one additional request is admitted instead of being refused.
+input:
+  diff: pr.diff
+  before_dir: before
+  after_dir: after
+  tests_dir: tests
+ground_truth:
+  bugs:
+    - summary: >
+        The admission check compares the active request count with the cap using a
+        non-strict comparison, so exactly one request over the cap is admitted.
+      files:
+        - path: app/limiter.py
+          line_ranges: [{start: 4, end: 4}]
+      concepts: [fixed window rate limiting, off by one, boundary comparison]
+      must_mention: [boundary, off-by-one]
+      acceptable_fix_keywords: [strict comparison, fewer than, less than]
+scoring:
+  weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
+  false_positive_penalty: 5
+  invalid_json_penalty: 20
+execution:
+  run_tests: true
+  test_command: "pytest -q tests"
+  timeout_seconds: 30
+validation:
+  patch_required: true
+  tests_required: true
+metrics: {beta: 1.0}

@@ -1,0 +1,6 @@
+version: audit_v2
+name: CodeReview Arena Audit Pack v2
+cases:
+  - money_discount_rounding_001
+  - ratelimit_window_boundary_001
+  - permission_precedence_001

@@ -1,0 +1,36 @@
+id: money_discount_rounding_001
+title: Percentage reduction applied per unit loses money on multi-unit orders
+category: correctness
+severity: high
+stack: [python, billing]
+description: >
+  A pull request changes how a multi-unit charge is reduced. The new code reduces the
+  price of a single unit and then multiplies, instead of reducing the full amount.
+input:
+  diff: pr.diff
+  before_dir: before
+  after_dir: after
+  tests_dir: tests
+ground_truth:
+  bugs:
+    - summary: >
+        The reduction is applied to one unit and floored before multiplying by the
+        quantity, so multi-unit charges differ from reducing the full amount.
+      files:
+        - path: app/pricing.py
+          line_ranges: [{start: 3, end: 4}]
+      concepts: [integer rounding, per unit reduction, currency precision]
+      must_mention: [rounding, discount]
+      acceptable_fix_keywords: [aggregate, gross, full amount]
+scoring:
+  weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
+  false_positive_penalty: 5
+  invalid_json_penalty: 20
+execution:
+  run_tests: true
+  test_command: "pytest -q tests"
+  timeout_seconds: 30
+validation:
+  patch_required: true
+  tests_required: true
+metrics: {beta: 1.0}

@@ -1,0 +1,9 @@
+diff -ruN a/app/limiter.py b/app/limiter.py
+--- a/app/limiter.py
++++ b/app/limiter.py
+@@ -1,4 +1,4 @@
+ def allow(history: list[int], *, now: int, limit: int, window: int) -> bool:
+     """Whether a request at ``now`` fits within ``limit`` requests per ``window`` seconds."""
+     recent = [stamp for stamp in history if stamp > now - window]
+-    return len(recent) < limit
++    return len(recent) <= limit

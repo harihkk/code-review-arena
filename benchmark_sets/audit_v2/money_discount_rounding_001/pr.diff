@@ -1,0 +1,11 @@
+diff -ruN a/app/pricing.py b/app/pricing.py
+--- a/app/pricing.py
++++ b/app/pricing.py
+@@ -1,5 +1,4 @@
+ def net_charge(unit_price: int, count: int, pct_off: int) -> int:
+     """Amount owed for ``count`` units at ``unit_price`` each after a percent reduction."""
+-    gross = unit_price * count
+-    reduction = gross * pct_off // 100
+-    return gross - reduction
++    unit_net = unit_price * (100 - pct_off) // 100
++    return unit_net * count
