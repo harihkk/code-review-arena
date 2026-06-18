@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 from arena.benchmark.case_loader import build_context, load_cases
 
 router = APIRouter(prefix="/cases", tags=["cases"])
-BenchmarkSet = Literal["v1", "audit_v1"]
+BenchmarkSet = Literal["v1", "audit_v1", "audit_v2"]
 
 
 def _benchmark_path(benchmark_set: BenchmarkSet) -> Path:

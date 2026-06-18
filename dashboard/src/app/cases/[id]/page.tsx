@@ -11,7 +11,7 @@ type CaseDetail = {
   category: string;
   severity: string;
   stack: string[];
-  benchmark_set: "v1" | "audit_v1";
+  benchmark_set: "v1" | "audit_v1" | "audit_v2";
   diff: string;
   reference_patch: string | null;
   validation: {
@@ -45,7 +45,9 @@ export default async function CasePage({
 }) {
   const { id } = await params;
   const query = await searchParams;
-  const benchmarkSet = query.benchmark_set === "audit_v1" ? "audit_v1" : "v1";
+  const requested = query.benchmark_set;
+  const benchmarkSet =
+    requested === "audit_v1" || requested === "audit_v2" ? requested : "v1";
   const item = await fetchJson<CaseDetail>(`/cases/${id}?benchmark_set=${benchmarkSet}`);
   const bug = item.ground_truth.primary_bug;
   return (

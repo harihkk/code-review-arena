@@ -4,11 +4,12 @@ import { PageHeader } from "../../components/PageHeader";
 import { CaseSummary, fetchJson } from "../../lib/api";
 
 export default async function Cases() {
-  const [v1, auditV1] = await Promise.all([
+  const [v1, auditV1, auditV2] = await Promise.all([
     fetchJson<CaseSummary[]>("/cases?benchmark_set=v1").catch(() => []),
     fetchJson<CaseSummary[]>("/cases?benchmark_set=audit_v1").catch(() => []),
+    fetchJson<CaseSummary[]>("/cases?benchmark_set=audit_v2").catch(() => []),
   ]);
-  const cases = [...auditV1, ...v1];
+  const cases = [...auditV2, ...auditV1, ...v1];
   return (
     <>
       <PageHeader

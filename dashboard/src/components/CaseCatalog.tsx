@@ -6,7 +6,7 @@ import type { CaseSummary } from "../lib/api";
 import { StatusBadge } from "./StatusBadge";
 
 export function CaseCatalog({ cases }: { cases: CaseSummary[] }) {
-  const [pack, setPack] = useState<"v1" | "audit_v1">("audit_v1");
+  const [pack, setPack] = useState<"v1" | "audit_v1" | "audit_v2">("audit_v2");
   const [category, setCategory] = useState("");
   const [severity, setSeverity] = useState("");
   const [stack, setStack] = useState("");
@@ -45,13 +45,14 @@ export function CaseCatalog({ cases }: { cases: CaseSummary[] }) {
           <select
             value={pack}
             onChange={(event) => {
-              setPack(event.target.value as "v1" | "audit_v1");
+              setPack(event.target.value as "v1" | "audit_v1" | "audit_v2");
               setCategory("");
               setStack("");
               setValidator("");
               setPatchRequired("");
             }}
           >
+            <option value="audit_v2">audit_v2</option>
             <option value="audit_v1">audit_v1</option>
             <option value="v1">v1</option>
           </select>

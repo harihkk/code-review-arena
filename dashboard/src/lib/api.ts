@@ -50,7 +50,7 @@ export type DeterministicMetrics = {
 
 export type CaseSummary = {
   id: string;
-  benchmark_set: "v1" | "audit_v1";
+  benchmark_set: "v1" | "audit_v1" | "audit_v2";
   title: string;
   category: string;
   severity: string;
