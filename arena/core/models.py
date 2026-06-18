@@ -249,6 +249,10 @@ class ScoreBreakdown(BaseModel):
 FindingEvidence = Literal[
     "repair_validated", "detected_but_unrepaired", "unsupported", "neutral", "detected"
 ]
+# How deeply a validated repair was challenged. basic = required tests passed;
+# strong = tests plus structural validators passed. (adversarial/high, backed by
+# per-case mutation and differential checks, are measured by certify-pack today.)
+RepairConfidence = Literal["unvalidated", "basic", "strong"]
 # A case's overall outcome after execution.
 CaseStatus = Literal[
     "complete_repair",
@@ -397,6 +401,7 @@ class CaseResult(BaseModel):
     # Evidence attribution (populated in patch/full mode).
     case_status: CaseStatus | None = None
     bug_repairs: list[BugRepair] = Field(default_factory=list)
+    repair_confidence: RepairConfidence | None = None
     # How this case actually executed (docker / trusted-local / none).
     execution_backend: ExecutionBackend = "none"
 

@@ -1,6 +1,6 @@
 """Evidence attribution: per-finding status, per-bug repair, and case status."""
 
-from arena.benchmark.benchmark_runner import _attribute_evidence
+from arena.benchmark.benchmark_runner import _attribute_evidence, _repair_confidence
 from arena.core.models import BenchmarkCase, Finding, ReviewerResponse, ReviewResult
 from arena.execution.test_executor import TestExecutionResult
 from arena.patching.patch_models import PatchApplyResult
@@ -9,6 +9,7 @@ from arena.scoring.deterministic_scorer import (
     score_deterministic_case,
 )
 from arena.scoring.scorer import score_case
+from arena.validators.base import ValidatorResult
 
 
 def _case() -> BenchmarkCase:
@@ -185,3 +186,24 @@ def test_supported_claim_rate_counts_only_judged_findings():
     )
     # Two supported claims out of three judged findings.
     assert metrics.supported_claim_rate == round(2 / 3, 6)
+
+
+def test_repair_confidence_levels():
+    case = _case()
+    review = score_case(case, _response([BUG0, BUG1]))
+    patch = PatchApplyResult(
+        case_id=case.id, applied=True, workspace_path="ws", patch_text="x", duration_ms=1
+    )
+    tests = TestExecutionResult(case_id=case.id, ran=True, passed=True, execution_mode="local")
+
+    # Tests passed but no structural validators ran -> basic.
+    det_basic = score_deterministic_case(case, review, patch, tests, [], beta=1.0)
+    assert _repair_confidence(execution_validated=True, deterministic=det_basic) == "basic"
+
+    # Tests plus a passing structural validator -> strong.
+    validator = ValidatorResult(name="v", passed=True, confidence=1.0, message="ok")
+    det_strong = score_deterministic_case(case, review, patch, tests, [validator], beta=1.0)
+    assert _repair_confidence(execution_validated=True, deterministic=det_strong) == "strong"
+
+    # A repair that did not validate -> unvalidated, regardless of validators.
+    assert _repair_confidence(execution_validated=False, deterministic=det_strong) == "unvalidated"

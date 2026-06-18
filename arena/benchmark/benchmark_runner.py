@@ -24,6 +24,7 @@ from arena.core.models import (
     DeterministicCaseScore,
     ExecutionBackend,
     FindingEvidence,
+    RepairConfidence,
     ReviewerResponse,
     ReviewResult,
     RunMetadata,
@@ -183,6 +184,21 @@ def _attribute_evidence(
     return bug_repairs, findings, case_status
 
 
+def _repair_confidence(
+    *, execution_validated: bool, deterministic: DeterministicCaseScore
+) -> RepairConfidence:
+    """Label how deeply a validated repair was challenged (see RepairConfidence).
+
+    basic = the repair passed required tests; strong = it also satisfied the
+    case's structural validators. unvalidated = the repair did not pass.
+    """
+    if not execution_validated:
+        return "unvalidated"
+    if deterministic.structural_validation_ran and deterministic.structural_validation_passed:
+        return "strong"
+    return "basic"
+
+
 def _evaluate_case(
     case: BenchmarkCase,
     reviewer: BaseReviewer,
@@ -329,11 +345,15 @@ def _evaluate_case(
         execution_validated=execution_validated,
         integrity_violated=integrity_violated,
     )
+    repair_confidence = _repair_confidence(
+        execution_validated=execution_validated, deterministic=deterministic
+    )
     return review_result.model_copy(
         update={
             "scored_findings": scored_findings,
             "bug_repairs": bug_repairs,
             "case_status": case_status,
+            "repair_confidence": repair_confidence,
             "execution_backend": case_backend,
             "deterministic_case_score": deterministic,
             "patch_provided": deterministic.patch_provided,
