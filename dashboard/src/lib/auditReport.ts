@@ -17,6 +17,10 @@ export type AuditReviewerRow = {
   validated_precision: number | null;
   validated_recall: number | null;
   validated_f_beta: number | null;
+  validated_case_rate: number | null;
+  complete_repair_rate: number | null;
+  bug_completeness_rate: number | null;
+  supported_claim_rate: number | null;
   deterministic_pass_rate: number | null;
   patch_apply_rate: number | null;
   test_pass_rate: number | null;
@@ -148,6 +152,11 @@ export function loadReportLeaderboardRows(): LeaderboardRow[] {
               validated_f_beta: row.validated_f_beta,
               beta: 1,
               deterministic_pass_rate: row.deterministic_pass_rate ?? 0,
+              validated_case_rate:
+                row.validated_case_rate ?? row.deterministic_pass_rate ?? 0,
+              complete_repair_rate: row.complete_repair_rate ?? 0,
+              bug_completeness_rate: row.bug_completeness_rate ?? 0,
+              supported_claim_rate: row.supported_claim_rate,
               patch_apply_rate: row.patch_apply_rate,
               test_pass_rate: row.test_pass_rate,
               structural_pass_rate: row.structural_pass_rate,

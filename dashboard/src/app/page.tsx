@@ -20,9 +20,9 @@ const pipeline = [
 const runCommands = `python -m pip install -e ".[dev]"
 arena validate benchmark_sets/audit_v1
 arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
-arena leaderboard runs/ --metric validated_f_beta --beta 1.0`;
+arena leaderboard runs/ --metric validated_case_rate --beta 1.0`;
 const emptyCommands = `arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
-arena leaderboard runs/ --metric validated_f_beta --beta 1.0`;
+arena leaderboard runs/ --metric validated_case_rate --beta 1.0`;
 
 export default async function Home() {
   const liveRows = await fetchJson<LeaderboardRow[]>("/leaderboard").catch(
@@ -36,8 +36,8 @@ export default async function Home() {
     .filter((row) => row.deterministic_metrics)
     .sort(
       (left, right) =>
-        (right.deterministic_metrics?.validated_f_beta ?? 0) -
-        (left.deterministic_metrics?.validated_f_beta ?? 0),
+        (right.deterministic_metrics?.validated_case_rate ?? 0) -
+        (left.deterministic_metrics?.validated_case_rate ?? 0),
     )
     .slice(0, 5);
 
@@ -95,7 +95,7 @@ export default async function Home() {
           <article className="metric-panel primary">
             <span>Validation</span>
             <h3>
-              <code>validated_f_beta</code>
+              <code>validated_case_rate</code>
             </h3>
             <p>
               Counts fixes that apply cleanly, pass required tests, and satisfy
@@ -207,8 +207,12 @@ function BenchmarkArtifactPanel({ rows }: { rows: LeaderboardRow[] }) {
         <div>
           <dt>Primary metric</dt>
           <dd>
-            <code>validated_f_beta</code>
+            <code>validated_case_rate</code>
           </dd>
+        </div>
+        <div>
+          <dt>Dimensions</dt>
+          <dd>review accuracy, repair success, trustworthiness</dd>
         </div>
         <div>
           <dt>Validation stages</dt>
@@ -228,7 +232,7 @@ function BenchmarkArtifactPanel({ rows }: { rows: LeaderboardRow[] }) {
                 {index + 1}. {reviewerDisplayName(row)}
               </span>
               <strong>
-                {row.deterministic_metrics?.validated_f_beta.toFixed(3)}
+                {row.deterministic_metrics?.validated_case_rate.toFixed(3)}
               </strong>
             </div>
           ))}
@@ -256,7 +260,7 @@ function LeaderboardPreview({ rows }: { rows: LeaderboardRow[] }) {
               Detection <span className="nowrap">F-beta</span>
             </th>
             <th>
-              Validated <span className="nowrap">F-beta</span>
+              Validated <span className="nowrap">rate</span>
             </th>
             <th>Passes</th>
             <th>Status</th>
@@ -267,7 +271,7 @@ function LeaderboardPreview({ rows }: { rows: LeaderboardRow[] }) {
             const metrics = row.deterministic_metrics!;
             const detectedOnly =
               metrics.detection_f_beta >= 0.8 &&
-              metrics.validated_f_beta <= 0.3;
+              metrics.validated_case_rate <= 0.3;
             return (
               <tr
                 key={row.run_id}
@@ -284,7 +288,7 @@ function LeaderboardPreview({ rows }: { rows: LeaderboardRow[] }) {
                   {metrics.detection_f_beta.toFixed(3)}
                 </td>
                 <td className="numeric strong-metric">
-                  {metrics.validated_f_beta.toFixed(3)}
+                  {metrics.validated_case_rate.toFixed(3)}
                 </td>
                 <td className="numeric">
                   {row.deterministic_passes}/{row.case_count}
@@ -294,14 +298,14 @@ function LeaderboardPreview({ rows }: { rows: LeaderboardRow[] }) {
                     tone={
                       detectedOnly
                         ? "warning"
-                        : metrics.validated_f_beta >= 0.8
+                        : metrics.validated_case_rate >= 0.8
                           ? "success"
                           : "danger"
                     }
                   >
                     {detectedOnly
                       ? "detected only"
-                      : metrics.validated_f_beta >= 0.8
+                      : metrics.validated_case_rate >= 0.8
                         ? "validated"
                         : "not validated"}
                   </StatusBadge>

@@ -41,6 +41,11 @@ class AuditReviewerRow(_Strict):
     validated_precision: float | None = None
     validated_recall: float | None = None
     validated_f_beta: float | None = None
+    # v2 evidence metrics (validated_case_rate is the current primary metric).
+    validated_case_rate: float | None = None
+    complete_repair_rate: float | None = None
+    bug_completeness_rate: float | None = None
+    supported_claim_rate: float | None = None
     deterministic_pass_rate: float | None = None
     patch_apply_rate: float | None = None
     test_pass_rate: float | None = None

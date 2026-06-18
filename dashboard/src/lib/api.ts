@@ -36,6 +36,10 @@ export type DeterministicMetrics = {
   validated_f_beta: number;
   beta: number;
   deterministic_pass_rate: number;
+  validated_case_rate: number;
+  complete_repair_rate: number;
+  bug_completeness_rate: number;
+  supported_claim_rate: number | null;
   patch_apply_rate: number | null;
   test_pass_rate: number | null;
   structural_pass_rate: number | null;
