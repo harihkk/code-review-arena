@@ -11,6 +11,7 @@ from arena.reviewers.controls import ControlReviewer
 from arena.reviewers.custom_command import CustomCommandReviewer
 from arena.reviewers.http import HttpReviewer
 from arena.reviewers.reference_patch import ReferencePatchReviewer
+from arena.reviewers.shallow_patch import ShallowPatchReviewer
 
 
 def create_reviewer(
@@ -24,6 +25,8 @@ def create_reviewer(
 ) -> BaseReviewer:
     if spec in {"reference-patch", "control:reference_patch"}:
         return ReferencePatchReviewer()
+    if spec in {"shallow-patch", "control:shallow_patch"}:
+        return ShallowPatchReviewer()
     if spec.startswith(("openai:", "http:")):
         style: Literal["openai", "json"] = "openai" if spec.startswith("openai:") else "json"
         url = spec.partition(":")[2]
@@ -60,6 +63,7 @@ def create_reviewer(
     raise ReviewerError(
         f"Unknown reviewer: {spec}. "
         "Available: control:<mode> (deprecated alias mock:<mode>), reference-patch, "
+        "shallow-patch (generic adversarial baseline), "
         "custom-command, openai:<base_url> (local OpenAI-compatible servers), "
         "http:<url> (plain JSON endpoint). Benchmark a real model via custom-command "
         "or a local openai:/http: endpoint."
