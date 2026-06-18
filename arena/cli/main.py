@@ -321,8 +321,11 @@ def audit_report(
         Path("dashboard/public/reports/audit-v1.json"),
         "--json-output",
     ),
+    benchmark_set: str = typer.Option(
+        "audit_v1", "--benchmark-set", help="Which pack's runs to aggregate."
+    ),
 ) -> None:
-    audit_report_command(runs_dir, output, json_output)
+    audit_report_command(runs_dir, output, json_output, benchmark_set)
 
 
 @app.command()

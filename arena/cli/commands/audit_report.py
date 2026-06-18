@@ -9,12 +9,13 @@ def audit_report(
     runs_dir: Path,
     output: Path,
     json_output: Path | None,
+    benchmark_set: str = "audit_v1",
 ) -> None:
-    data = write_audit_report(runs_dir, output, json_output)
+    data = write_audit_report(runs_dir, output, json_output, benchmark_set=benchmark_set)
     console = Console()
     if data.get("empty"):
         console.print(
-            f"[yellow]No audit_v1 runs found[/yellow]; wrote empty-state report to {output}"
+            f"[yellow]No {benchmark_set} runs found[/yellow]; wrote empty-state report to {output}"
         )
     else:
         console.print(
