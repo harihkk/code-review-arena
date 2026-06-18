@@ -44,15 +44,39 @@ def test_effective_timeout_clamps_to_the_run_deadline():
     assert _effective_timeout(30, monotonic() - 10) == 1
 
 
+def _status(**overrides) -> str:
+    base = dict(
+        results=10,
+        skipped=False,
+        checksum_verified=None,
+        execution_required=False,
+        executed=0,
+        unavailable=0,
+    )
+    base.update(overrides)
+    return _run_status(**base)
+
+
 def test_run_status_classifies_each_trust_level():
-    assert _run_status(results=10, skipped=False, checksum_verified=None) == "complete"
-    assert _run_status(results=10, skipped=False, checksum_verified=True) == "complete"
-    assert _run_status(results=3, skipped=True, checksum_verified=None) == "partial"
+    assert _status() == "complete"
+    assert _status(checksum_verified=True) == "complete"
+    assert _status(results=3, skipped=True) == "partial"
     # A budget that trips before any case runs is still a truncation, not a crash.
-    assert _run_status(results=0, skipped=True, checksum_verified=None) == "partial"
-    assert _run_status(results=0, skipped=False, checksum_verified=None) == "failed"
+    assert _status(results=0, skipped=True) == "partial"
+    assert _status(results=0) == "failed"
     # A tampered pack invalidates the whole run regardless of coverage.
-    assert _run_status(results=10, skipped=True, checksum_verified=False) == "invalid"
+    assert _status(skipped=True, checksum_verified=False) == "invalid"
+
+
+def test_run_status_invalid_when_execution_required_but_backend_unavailable():
+    # Execution was required, nothing ran, and cases tried: scores are not real.
+    assert _status(execution_required=True, executed=0, unavailable=5, results=5) == "invalid"
+    # A review-mode run never needs execution, so an unavailable backend is moot.
+    assert _status(execution_required=False, executed=0, unavailable=5) == "complete"
+    # Some cases ran and some could not: partial, not invalid.
+    assert _status(execution_required=True, executed=3, unavailable=2) == "partial"
+    # Execution required but every case ran: complete.
+    assert _status(execution_required=True, executed=10, unavailable=0) == "complete"
 
 
 def test_execution_backend_reflects_actual_execution(tmp_path):
@@ -71,6 +95,25 @@ def test_execution_backend_reflects_actual_execution(tmp_path):
         V1, ControlReviewer("perfect"), output_dir=tmp_path / "review-runs", persist=False
     )
     assert review.execution_backend == "none"
+
+
+def test_full_run_is_invalid_when_no_execution_backend_is_available(tmp_path):
+    # Full mode needs test execution, but local execution is off and the V1 cases
+    # ship no docker image: nothing can run, so no repair can be judged and the
+    # scores are not a fair measurement of the reviewer.
+    run = run_benchmark(
+        V1,
+        ControlReviewer("perfect_patch"),
+        output_dir=tmp_path / "runs",
+        persist=False,
+        mode="full",
+        allow_local_execution=False,
+    )
+    assert run.run_status == "invalid"
+    assert run.execution_backend == "none"
+    # Every case that applied a patch tried to run and hit the disabled backend.
+    assert any(case.execution_unavailable for case in run.case_results)
+    assert leaderboard_eligible(run) is False
 
 
 def test_complete_run_records_full_coverage(tmp_path):

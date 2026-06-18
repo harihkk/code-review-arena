@@ -66,18 +66,34 @@ def _git_commit() -> str | None:
         return None
 
 
-def _run_status(*, results: int, skipped: bool, checksum_verified: bool | None) -> RunStatus:
+def _run_status(
+    *,
+    results: int,
+    skipped: bool,
+    checksum_verified: bool | None,
+    execution_required: bool,
+    executed: int,
+    unavailable: int,
+) -> RunStatus:
     """Classify a finished run's trust level (see RunStatus).
 
     A tampered pack invalidates the whole run; a run that produced no results at
-    all failed; a budget-truncated run is partial; otherwise it is complete.
+    all failed; a run that needed test execution but whose backend was never
+    available (nothing executed, something tried) is invalid because no repair
+    could be judged; a budget-truncated run, or one where some cases ran and some
+    could not, is partial; otherwise it is complete.
     """
     if checksum_verified is False:
         return "invalid"
-    if skipped:
+    if skipped and results == 0:
+        # The budget tripped before any case ran: a truncation, not a crash.
         return "partial"
     if results == 0:
         return "failed"
+    if execution_required and unavailable > 0 and executed == 0:
+        return "invalid"
+    if skipped or (execution_required and unavailable > 0):
+        return "partial"
     return "complete"
 
 
@@ -337,6 +353,13 @@ def _evaluate_case(
         case_backend = "trusted-local"
     else:
         case_backend = "none"
+    # Execution was attempted (we built a request) but the backend itself was
+    # missing, so the repair never got a verdict. Content-level skips (a bad
+    # test command, a missing workspace) are the case's problem, not the harness'.
+    execution_unavailable = executed_tests is not None and executed_tests.error in {
+        "docker_required_but_unavailable",
+        "local_execution_disabled",
+    }
     review_result = apply_execution_fix_quality(case, review_result, validated=execution_validated)
     bug_repairs, scored_findings, case_status = _attribute_evidence(
         case,
@@ -355,6 +378,7 @@ def _evaluate_case(
             "case_status": case_status,
             "repair_confidence": repair_confidence,
             "execution_backend": case_backend,
+            "execution_unavailable": execution_unavailable,
             "deterministic_case_score": deterministic,
             "patch_provided": deterministic.patch_provided,
             "patch_applied": deterministic.patch_applied,
@@ -510,6 +534,10 @@ def run_benchmark(
         execution_backend = "docker"
     else:
         execution_backend = "none"
+    executed_cases = sum(
+        1 for case in case_results if case.execution_backend in {"docker", "trusted-local"}
+    )
+    unavailable_cases = sum(1 for case in case_results if case.execution_unavailable)
     run = RunResult(
         run_id=run_id,
         benchmark_set=manifest.version,
@@ -537,6 +565,9 @@ def run_benchmark(
             results=produced,
             skipped=bool(skipped_case_ids),
             checksum_verified=checksum_verified,
+            execution_required=mode != "review",
+            executed=executed_cases,
+            unavailable=unavailable_cases,
         ),
         execution_backend=execution_backend,
         eligible_case_count=eligible,

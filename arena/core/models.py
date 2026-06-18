@@ -404,6 +404,11 @@ class CaseResult(BaseModel):
     repair_confidence: RepairConfidence | None = None
     # How this case actually executed (docker / trusted-local / none).
     execution_backend: ExecutionBackend = "none"
+    # True when execution was attempted for this case but the backend was
+    # unavailable (e.g. Docker required but not running, or local execution
+    # disabled): the repair could not be judged, so the verdict is not the
+    # reviewer's fault. Used to flag runs whose scores are not a fair measurement.
+    execution_unavailable: bool = False
 
 
 class RunMetadata(BaseModel):

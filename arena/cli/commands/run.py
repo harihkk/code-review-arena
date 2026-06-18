@@ -58,6 +58,19 @@ def run(
             "[yellow]WARNING[/yellow] benchmark pack content does not match its stored "
             "pack.sha256; results may come from a tampered pack."
         )
+    unavailable = sum(1 for case in result.case_results if case.execution_unavailable)
+    if unavailable:
+        ran_backends = {"docker", "trusted-local"}
+        executed = sum(1 for case in result.case_results if case.execution_backend in ran_backends)
+        hint = (
+            "start Docker, or pass --allow-local-execution to run image-less cases locally"
+            if executed == 0
+            else "some cases ran and some could not"
+        )
+        Console(stderr=True).print(
+            f"[yellow]WARNING[/yellow] {unavailable} case(s) could not execute (no available "
+            f"backend); run_status={result.run_status}. Repair was not judged: {hint}."
+        )
     if as_json:
         typer.echo(result.model_dump_json(indent=2))
         return
