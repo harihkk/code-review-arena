@@ -37,6 +37,7 @@ from arena.execution.sandbox import materialized_case
 from arena.execution.test_executor import TestExecutionRequest, TestExecutionResult, TestExecutor
 from arena.patching.patch_applier import PatchApplier
 from arena.patching.patch_models import PatchApplyRequest
+from arena.reports.bundle import write_bundle_checksums
 from arena.reports.html_report import write_html_report
 from arena.reports.json_report import write_json_report
 from arena.reports.markdown_report import write_markdown_report
@@ -548,6 +549,8 @@ def run_benchmark(
         max_wall_seconds=max_wall_seconds,
         max_cost=max_cost,
     )
+    # Seal the run's artifacts into a content-addressed bundle (arena verify-run).
+    write_bundle_checksums(run_dir)
     shutil.copyfile(run_dir / "run.json", root / "latest.json")
     if persist:
         RunRepository(db_path or database_path()).save(run)

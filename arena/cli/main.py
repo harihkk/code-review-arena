@@ -107,6 +107,40 @@ def mutation_test(
         console.print(f"{case.id}: mutant_kill_rate={rate} ({result.killed}/{result.total})")
 
 
+@app.command("verify-run")
+def verify_run(
+    run_dir: Path = typer.Argument(..., help="Path to a run directory (contains checksums.json)."),
+    expected_id: str | None = typer.Option(
+        None, "--expected-id", help="Out-of-band bundle id to pin against a consistent rewrite."
+    ),
+) -> None:
+    """Verify a saved run's evidence bundle has not been edited since it was written."""
+    from rich.console import Console
+
+    from arena.reports.bundle import verify_bundle
+
+    console = Console()
+    result = verify_bundle(run_dir, expected_id=expected_id)
+    if result.error:
+        console.print(f"[red]ERROR[/red] {result.error}")
+        raise typer.Exit(code=1)
+    if result.ok:
+        console.print(f"[green]VERIFIED[/green] evidence bundle {result.bundle_id}")
+        return
+    console.print("[red]TAMPERED[/red] evidence bundle integrity check failed")
+    for name in result.modified:
+        console.print(f"  modified: {name}")
+    for name in result.missing:
+        console.print(f"  missing:  {name}")
+    for name in result.added:
+        console.print(f"  added:    {name}")
+    if not result.bundle_id_ok:
+        console.print("  checksums.json is internally inconsistent")
+    if not result.expected_id_ok:
+        console.print(f"  bundle id does not match expected {expected_id}")
+    raise typer.Exit(code=1)
+
+
 @app.command("certify-pack")
 def certify_pack(
     benchmark_set: Path = typer.Argument(DEFAULT_BENCHMARK_SET),
