@@ -291,12 +291,14 @@ def render_audit_report_markdown(data: dict[str, Any]) -> str:
             "- Ground truth stays hidden from reviewer prompts and custom-command JSON.",
             "- Reviewers receive the PR diff, relevant files, and optional test/static output.",
             "- Full mode applies `suggested_patch`, runs regression tests, and structural validators.",
-            "- `detection_f_beta` scores localization only.",
-            "- `validated_f_beta` is the primary full/patch metric and requires deterministic pass.",
+            "- `validated_case_rate` is the primary full/patch metric: validated cases over "
+            "eligible cases.",
+            "- `detection_f_beta` scores localization only; the gap below contrasts it with "
+            "the deprecated `validated_f_beta`.",
             "",
             "## 3. Reviewer Comparison",
             "",
-            "| Reviewer | Model | Mode | Detection F-beta | Validated F-beta | "
+            "| Reviewer | Model | Mode | Detection F-beta | Validated Case Rate | "
             "Deterministic Pass Rate | Patch Apply Rate | Test Pass Rate | "
             "Structural Pass Rate | False Positives / Case | Cost / Validated Fix | Latency / Case |",
             "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
@@ -305,7 +307,7 @@ def render_audit_report_markdown(data: dict[str, Any]) -> str:
     for row in data["reviewers"]:
         lines.append(
             f"| {row['reviewer']} | {row['model']} | {row['mode']} | "
-            f"{_metric_cell(row.get('detection_f_beta'))} | {_metric_cell(row.get('validated_f_beta'))} | "
+            f"{_metric_cell(row.get('detection_f_beta'))} | {_format_rate(row.get('validated_case_rate'))} | "
             f"{_format_rate(row.get('deterministic_pass_rate'))} | "
             f"{_format_rate(row.get('patch_apply_rate'))} | "
             f"{_format_rate(row.get('test_pass_rate'))} | "
