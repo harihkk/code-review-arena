@@ -34,7 +34,7 @@ the same outcome using normal, human-readable patch files stored in the benchmar
 arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
 ```
 
-Expect `validated_f_beta=1.000` and `deterministic_pass_rate=100%` when every
+Expect `validated_case_rate=1.000` and `deterministic_pass_rate=100%` when every
 `reference.patch` is present.
 
 ## Commands
@@ -43,13 +43,13 @@ Expect `validated_f_beta=1.000` and `deterministic_pass_rate=100%` when every
 arena validate benchmark_sets/audit_v1
 arena run benchmark_sets/audit_v1 --reviewer control:perfect_patch --mode full --allow-local-execution
 arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
-arena leaderboard runs/ --metric validated_f_beta --beta 1.0
+arena leaderboard runs/ --metric validated_case_rate --beta 1.0 --include-unverified
 arena audit-report runs/ --output docs/reports/audit-v1-results.md
 ```
 
 ## Metrics
 
 - `detection_f_beta` measures whether the reviewer localized the seeded bug.
-- `validated_f_beta` is the primary full-mode metric and requires patch apply, tests, and structural validators to pass.
+- `validated_case_rate` is the primary full-mode metric and requires patch apply, tests, and structural validators to pass.
 
 Detection is not validation.

@@ -13,7 +13,7 @@ behavior observable.
    patch is recorded as a failed application.
 4. Fixture-owned tests are copied into the same workspace only when required for execution.
 5. Enabled structural validators inspect the patched files and record evidence.
-6. The outcome contributes to `validated_f_beta` only when the case satisfies every
+6. The outcome contributes to `validated_case_rate` only when the case satisfies every
    required deterministic condition.
 
 Benchmark fixtures are never changed. Raw patches, touched files, application errors, test

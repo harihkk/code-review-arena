@@ -32,11 +32,11 @@ Every run produces two numbers:
 | Metric | What it measures |
 |---|---|
 | `detection_f_beta` | The reviewer found the seeded bugs (file granularity; line precision is reported separately as `localization_rate`) |
-| `validated_f_beta` | Its patch applied, passed the required tests, and satisfied the validators |
+| `validated_case_rate` | Its patch applied, passed the required tests, and satisfied the validators (the primary full-mode metric) |
 
 The gap between them is the whole point. On `audit_v1` the `control:keyword_gamer`
 control detects all ten bugs (`detection_f_beta=1.000`) yet validates none of its
-patches (`validated_f_beta=0.000`), while `reference-patch` validates all ten.
+patches (`validated_case_rate=0.000`), while `reference-patch` validates all ten.
 `arena audit-report` and the dashboard show that gap per reviewer.
 
 Signals are labeled by their strength: test execution and patch application are
@@ -146,7 +146,7 @@ Metrics:
 
 | Metric | Meaning |
 |---|---|
-| `validated_f_beta` | Primary full-mode score for deterministically validated fixes |
+| `validated_case_rate` | Primary full-mode score: validated cases over eligible cases |
 | `detection_f_beta` | Found and localized seeded bugs |
 | `patch_apply_rate` | Required patches that applied cleanly |
 | `test_pass_rate` | Required regression-test runs that passed |

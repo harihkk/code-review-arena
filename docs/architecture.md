@@ -23,7 +23,7 @@ and, in full mode, the deterministic patch-validation pipeline.
 ## Dashboard
 
 The Next.js app reads only API representations. The leaderboard ranks patch/full runs by
-`validated_f_beta` while exposing `detection_f_beta` separately. A run page summarizes
+`validated_case_rate` while exposing `detection_f_beta` separately. A run page summarizes
 the validation funnel and failure reasons, and the case trace page renders the diff
 alongside findings, raw patch, post-patch execution and validator results.
 

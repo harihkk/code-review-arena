@@ -33,15 +33,17 @@ arena run benchmark_sets/audit_v1 --reviewer control:bad_patch      --mode full 
 arena run benchmark_sets/audit_v1 --reviewer control:malformed_patch --mode full --allow-local-execution
 ```
 
-Rank them, and emit JSON for scripting:
+Rank them, and emit JSON for scripting. These runs used local execution, so they
+are trusted-local (unverified); `--include-unverified` shows them on the leaderboard
+(Docker-backed runs appear without it):
 
 ```bash
-arena leaderboard runs/ --metric validated_f_beta --beta 1.0
-arena leaderboard runs/ --metric validated_f_beta --json
+arena leaderboard runs/ --metric validated_case_rate --beta 1.0 --include-unverified
+arena leaderboard runs/ --metric validated_case_rate --include-unverified --json
 ```
 
-`reference-patch` and `control:perfect_patch` reach `validated_f_beta=1.000`;
-`control:keyword_gamer` shows `detection_f_beta=1.000` with `validated_f_beta=0.000`.
+`reference-patch` and `control:perfect_patch` reach `validated_case_rate=1.000`;
+`control:keyword_gamer` shows `detection_f_beta=1.000` with `validated_case_rate=0.000`.
 
 ## 4. Build the report snapshot the dashboard reads
 

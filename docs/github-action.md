@@ -13,7 +13,7 @@ The backend job:
 - run: pytest
 - run: arena validate benchmark_sets/v1 && arena validate benchmark_sets/audit_v1
 - run: arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
-- run: arena leaderboard runs/ --metric validated_f_beta --beta 1.0
+- run: arena leaderboard runs/ --metric validated_case_rate --beta 1.0 --include-unverified
 ```
 
 A second job builds the dashboard (`npm ci` then `npm run build`). To benchmark your own

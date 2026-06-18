@@ -15,7 +15,7 @@ The command never invents metrics. When no `audit_v1` runs exist, it writes a cl
 
 1. Summary
 2. Methodology
-3. Reviewer comparison (`detection_f_beta` vs `validated_f_beta`)
+3. Reviewer comparison (`detection_f_beta` vs `validated_case_rate`)
 4. Detection vs validation gap
 5. Failure mode breakdown
 6. Case studies (up to three failing examples)
