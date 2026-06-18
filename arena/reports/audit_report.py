@@ -29,7 +29,14 @@ FAILURE_REASON_LABELS = (
 )
 
 
-def load_audit_runs(runs_dir: Path) -> list[RunResult]:
+def _pack_label(benchmark_set: str) -> str:
+    """Human label for a pack id, e.g. audit_v1 -> 'Audit Pack v1'."""
+    if benchmark_set.startswith("audit_v"):
+        return f"Audit Pack v{benchmark_set.removeprefix('audit_v')}"
+    return benchmark_set
+
+
+def load_audit_runs(runs_dir: Path, benchmark_set: str = AUDIT_BENCHMARK_SET) -> list[RunResult]:
     runs: list[RunResult] = []
     for path in sorted(runs_dir.glob("*/run.json")):
         try:
@@ -37,7 +44,7 @@ def load_audit_runs(runs_dir: Path) -> list[RunResult]:
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             warnings.warn(f"Skipping malformed run file {path}: {exc}", stacklevel=2)
             continue
-        if run.benchmark_set == AUDIT_BENCHMARK_SET:
+        if run.benchmark_set == benchmark_set:
             runs.append(run)
     return runs
 
@@ -50,15 +57,22 @@ def _reviewer_label(run: RunResult) -> str:
     return f"{run.reviewer}:{run.model}" if run.model else run.reviewer
 
 
-def build_audit_report_data(runs: list[RunResult]) -> dict[str, Any]:
+def build_audit_report_data(
+    runs: list[RunResult],
+    *,
+    benchmark_set: str = AUDIT_BENCHMARK_SET,
+    pack_label: str | None = None,
+) -> dict[str, Any]:
+    pack_label = pack_label or _pack_label(benchmark_set)
+    title = f"Detection Is Not Validation: {pack_label} Results"
     if not runs:
         return {
             "schema_version": REPORT_SCHEMA_VERSION,
-            "title": "Detection Is Not Validation: Audit Pack v1 Results",
+            "title": title,
             "generated_at": datetime.now(UTC).isoformat(),
             "empty": True,
             "summary": {
-                "benchmark_pack": AUDIT_BENCHMARK_SET,
+                "benchmark_pack": benchmark_set,
                 "run_count": 0,
                 "case_count": 10,
                 "reviewers_tested": [],
@@ -68,8 +82,8 @@ def build_audit_report_data(runs: list[RunResult]) -> dict[str, Any]:
             "gaps": [],
             "failure_modes": {},
             "case_studies": [],
-            "reproducibility_commands": _reproducibility_commands(),
-            "limitations": _limitations(),
+            "reproducibility_commands": _reproducibility_commands(benchmark_set),
+            "limitations": _limitations(benchmark_set),
         }
 
     latest: dict[tuple[str, str | None, str], RunResult] = {}
@@ -156,11 +170,11 @@ def build_audit_report_data(runs: list[RunResult]) -> dict[str, Any]:
 
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
-        "title": "Detection Is Not Validation: Audit Pack v1 Results",
+        "title": title,
         "generated_at": datetime.now(UTC).isoformat(),
         "empty": False,
         "summary": {
-            "benchmark_pack": AUDIT_BENCHMARK_SET,
+            "benchmark_pack": benchmark_set,
             "run_count": len(runs),
             "case_count": max((run.case_count for run in latest.values()), default=10),
             "reviewers_tested": sorted({_reviewer_label(run) for run in latest.values()}),
@@ -174,8 +188,8 @@ def build_audit_report_data(runs: list[RunResult]) -> dict[str, Any]:
         "gaps": gaps,
         "failure_modes": dict(failure_counter),
         "case_studies": case_studies,
-        "reproducibility_commands": _reproducibility_commands(),
-        "limitations": _limitations(),
+        "reproducibility_commands": _reproducibility_commands(benchmark_set),
+        "limitations": _limitations(benchmark_set),
     }
 
 
@@ -232,19 +246,27 @@ def _select_case_studies(runs: list[RunResult]) -> list[dict[str, Any]]:
     return [item[1] for item in candidates[:3]]
 
 
-def _reproducibility_commands() -> list[str]:
+def _reproducibility_commands(benchmark_set: str = AUDIT_BENCHMARK_SET) -> list[str]:
+    pack = f"benchmark_sets/{benchmark_set}"
+    # audit_v1 carries the keyword_gamer control; other packs use the generic
+    # shallow-patch adversarial baseline, which needs no per-case configuration.
+    adversarial = (
+        f"arena run {pack} --reviewer control:keyword_gamer --mode full --allow-local-execution"
+        if benchmark_set == AUDIT_BENCHMARK_SET
+        else f"arena run {pack} --reviewer shallow-patch --mode full --allow-local-execution"
+    )
     return [
-        "arena validate benchmark_sets/audit_v1",
-        "arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution",
-        "arena run benchmark_sets/audit_v1 --reviewer control:keyword_gamer --mode full --allow-local-execution",
-        "arena leaderboard runs/ --metric validated_case_rate --beta 1.0",
-        "arena audit-report runs/ --output docs/reports/audit-v1-results.md",
+        f"arena validate {pack}",
+        f"arena run {pack} --reviewer reference-patch --mode full --allow-local-execution",
+        adversarial,
+        "arena leaderboard runs/ --metric validated_case_rate --beta 1.0 --include-unverified",
+        f"arena audit-report runs/ --output docs/reports/{benchmark_set}-results.md",
     ]
 
 
-def _limitations() -> list[str]:
+def _limitations(benchmark_set: str = AUDIT_BENCHMARK_SET) -> list[str]:
     return [
-        "audit_v1 is curated and small; it measures a narrow set of patch-backed failures.",
+        f"{benchmark_set} is curated and small; it measures a narrow set of patch-backed failures.",
         "Structural validators are hand-authored and may reject alternate but valid repairs.",
         "Regression tests cannot prove full production correctness.",
         "Some credible fixes may fail when validators are intentionally narrow.",
@@ -255,9 +277,10 @@ def _limitations() -> list[str]:
 def render_audit_report_markdown(data: dict[str, Any]) -> str:
     lines = [f"# {data['title']}", ""]
     if data.get("empty"):
+        pack = data["summary"]["benchmark_pack"]
         lines.extend(
             [
-                "_No audit_v1 runs were found under the requested runs directory._",
+                f"_No {pack} runs were found under the requested runs directory._",
                 "",
                 "## Reproducibility",
                 "",
@@ -363,8 +386,12 @@ def write_audit_report(
     runs_dir: Path,
     output_path: Path,
     json_output_path: Path | None = None,
+    *,
+    benchmark_set: str = AUDIT_BENCHMARK_SET,
 ) -> dict[str, Any]:
-    data = build_audit_report_data(load_audit_runs(runs_dir))
+    data = build_audit_report_data(
+        load_audit_runs(runs_dir, benchmark_set), benchmark_set=benchmark_set
+    )
     # Validate the contract before writing so a producer-side drift fails loudly here
     # rather than silently in the dashboard.
     AuditReport.model_validate(data)
