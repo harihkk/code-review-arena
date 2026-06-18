@@ -67,9 +67,15 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: python -m pip install -e ".[dev]"
+      # The executor never pulls a missing image, so every image a test uses
+      # must be present in the image store first. buildx keeps the base layer in
+      # its own cache, so pull python:3.12-slim explicitly (the digest test also
+      # needs a registry image: locally-built images carry no RepoDigests).
+      - name: Pull base image into the image store
+        run: docker pull python:3.12-slim
       # Build the sandbox image the packs run their tests in, then exercise the
       # real Docker path (locked-down container, workspace-module collection,
-      # recorded image digest). These tests skip without ARENA_DOCKER_TESTS.
+      # read-only test mount, recorded image digest). Skips without the env var.
       - name: Build benchmark sandbox image
         run: bash scripts/build_bench_image.sh
       - name: Real Docker execution tests
