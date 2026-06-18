@@ -58,7 +58,7 @@ def test_api_can_browse_audit_v2():
     # The second pack must be reachable through the API, not just the CLI.
     client = TestClient(server_app)
     cases = client.get("/cases", params={"benchmark_set": "audit_v2"}).json()
-    assert len(cases) == 6
+    assert len(cases) == 10
     assert all(case["benchmark_set"] == "audit_v2" for case in cases)
     detail = client.get("/cases/page_count_ceil_001", params={"benchmark_set": "audit_v2"}).json()
     assert detail["reference_patch"]

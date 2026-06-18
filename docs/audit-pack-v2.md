@@ -17,6 +17,10 @@ fails, the reference fix passes, and the tests kill every viable mutant).
 | `overdraft_min_balance_001` | Lowest-balance tracker compares the wrong direction |
 | `progress_zero_division_001` | Completion percentage drops its empty-workload guard |
 | `page_count_ceil_001` | Page count floors instead of ceilings and drops the last page |
+| `truthiness_default_001` | Fallback uses truthiness and discards an explicit zero |
+| `preview_truncation_001` | Text preview truncates one character short of the limit |
+| `retry_backoff_cap_001` | Backoff delay drops its clamp and grows without bound |
+| `eligibility_and_or_001` | Eligibility check uses `or` where both conditions are required |
 
 ## Reference patches
 
