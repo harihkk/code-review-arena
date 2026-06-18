@@ -1,0 +1,8 @@
+diff -ruN a/app/config.py b/app/config.py
+--- a/app/config.py
++++ b/app/config.py
+@@ -1,3 +1,3 @@
+ def effective_timeout(requested: int | None, fallback: int) -> int:
+     """The timeout to use: the requested value when given, otherwise the fallback."""
+-    return requested if requested is not None else fallback
++    return requested or fallback

@@ -1,0 +1,36 @@
+id: eligibility_and_or_001
+title: Eligibility check uses or where both conditions are required
+category: security
+severity: high
+stack: [python, authorization]
+description: >
+  A pull request rewrites an eligibility check and swaps the connective, so either an
+  old-enough user or a consenting user qualifies instead of requiring both.
+input:
+  diff: pr.diff
+  before_dir: before
+  after_dir: after
+  tests_dir: tests
+ground_truth:
+  bugs:
+    - summary: >
+        The check joins the age and consent conditions with a disjunction, so a user who
+        satisfies only one of them is wrongly treated as eligible.
+      files:
+        - path: app/eligibility.py
+          line_ranges: [{start: 3, end: 3}]
+      concepts: [boolean conjunction, access control, logical connective]
+      must_mention: [conjunction, logic]
+      acceptable_fix_keywords: [conjunction, require all]
+scoring:
+  weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
+  false_positive_penalty: 5
+  invalid_json_penalty: 20
+execution:
+  run_tests: true
+  test_command: "pytest -q tests"
+  timeout_seconds: 30
+validation:
+  patch_required: true
+  tests_required: true
+metrics: {beta: 1.0}

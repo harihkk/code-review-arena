@@ -7,3 +7,7 @@ cases:
   - overdraft_min_balance_001
   - progress_zero_division_001
   - page_count_ceil_001
+  - truthiness_default_001
+  - preview_truncation_001
+  - retry_backoff_cap_001
+  - eligibility_and_or_001

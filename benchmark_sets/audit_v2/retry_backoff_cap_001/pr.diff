@@ -1,0 +1,9 @@
+diff -ruN a/app/backoff.py b/app/backoff.py
+--- a/app/backoff.py
++++ b/app/backoff.py
+@@ -1,4 +1,3 @@
+ def delay(attempt: int, base: int, cap: int) -> int:
+     """Backoff delay for ``attempt``, growing with ``base`` but never above ``cap``."""
+-    grown = base * attempt
+-    return grown if grown < cap else cap
++    return base * attempt

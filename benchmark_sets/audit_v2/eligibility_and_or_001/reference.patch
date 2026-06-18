@@ -1,0 +1,7 @@
+--- a/app/eligibility.py
++++ b/app/eligibility.py
+@@ -1,3 +1,3 @@
+ def is_eligible(age: int, has_consent: bool) -> bool:
+     """Eligible only when the user is old enough and consent was given."""
+-    return age >= 18 or has_consent
++    return age >= 18 and has_consent

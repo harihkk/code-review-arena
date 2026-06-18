@@ -199,6 +199,34 @@ LOCALIZATION_HINTS: dict[str, tuple[str, str, str, tuple[int, int], str]] = {
         (3, 3),
         "Round the division up so a partial final page is counted.",
     ),
+    "truthiness_default_001": (
+        "Timeout fallback uses truthiness and discards an explicit zero.",
+        "truthiness falsy value none handling explicit zero identity check",
+        "app/config.py",
+        (3, 3),
+        "Fall back only when the value is None, not when it is falsy.",
+    ),
+    "preview_truncation_001": (
+        "Preview slice stops one character short of the limit.",
+        "string truncation off by one slice length full limit",
+        "app/text.py",
+        (4, 4),
+        "Slice up to the full limit so the preview is not a character short.",
+    ),
+    "retry_backoff_cap_001": (
+        "Backoff delay drops its clamp and grows without bound.",
+        "maximum delay backoff clamp unbounded growth cap upper bound",
+        "app/backoff.py",
+        (3, 3),
+        "Clamp the grown delay to the provided ceiling.",
+    ),
+    "eligibility_and_or_001": (
+        "Eligibility check uses or where both conditions are required.",
+        "boolean conjunction access control logical connective require all",
+        "app/eligibility.py",
+        (3, 3),
+        "Join the age and consent conditions with a conjunction.",
+    ),
 }
 
 
