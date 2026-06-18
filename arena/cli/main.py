@@ -107,6 +107,47 @@ def mutation_test(
         console.print(f"{case.id}: mutant_kill_rate={rate} ({result.killed}/{result.total})")
 
 
+@app.command("certify-pack")
+def certify_pack(
+    benchmark_set: Path = typer.Argument(DEFAULT_BENCHMARK_SET),
+    allow_local_execution: bool = typer.Option(False, "--allow-local-execution"),
+    limit: int = typer.Option(20, "--limit", min=1, help="Max mutants per case."),
+    strict: bool = typer.Option(
+        False, "--strict", help="Exit nonzero unless the pack reaches 'certified'."
+    ),
+) -> None:
+    """Check each case's baseline-fails, reference-passes, and mutant-kill gates."""
+    from rich.console import Console
+
+    from arena.benchmark.certify import certify_pack as run_certify
+
+    console = Console()
+    report = run_certify(
+        resolve_benchmark_path(benchmark_set),
+        allow_local_execution=allow_local_execution,
+        mutation_limit=limit,
+    )
+
+    def mark(value: bool | None) -> str:
+        return "n/a" if value is None else ("pass" if value else "FAIL")
+
+    for case in report.cases:
+        if not case.executable:
+            console.print(f"{case.case_id}: development-only (no executable tests)")
+            continue
+        kill = "n/a" if case.mutant_kill_rate is None else f"{case.mutant_kill_rate:.0%}"
+        # No square brackets: rich would parse them as markup and hide them.
+        console.print(
+            f"{case.case_id}: {'CERTIFIED' if case.certified else 'not certified'}  "
+            f"baseline_fails={mark(case.baseline_fails)} "
+            f"reference_passes={mark(case.reference_passes)} "
+            f"mutant_kill_rate={kill} ({case.mutant_total} mutants)"
+        )
+    console.print(f"\nPack '{report.pack}' level: {report.level}")
+    if strict and report.level != "certified":
+        raise typer.Exit(code=1)
+
+
 @app.command("lint-cases")
 def lint_cases(
     benchmark_set: Path = typer.Argument(DEFAULT_BENCHMARK_SET),
