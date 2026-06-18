@@ -8,8 +8,8 @@ const workflow = `- uses: actions/checkout@v4
     python-version: "3.12"
 - run: python -m pip install -e ".[dev]"
 - run: arena validate benchmark_sets/v1
-- run: arena run benchmark_sets/v1 --reviewer mock:perfect_patch --mode full --allow-local-execution
-- run: arena leaderboard runs/ --metric validated_case_rate --beta 1.0
+- run: arena run benchmark_sets/v1 --reviewer control:perfect_patch --mode full --allow-local-execution
+- run: arena leaderboard runs/ --metric validated_case_rate --beta 1.0 --include-unverified
 - uses: actions/upload-artifact@v4
   with:
     name: arena-runs

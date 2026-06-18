@@ -19,8 +19,8 @@ export default function ReferencePatchesPage() {
           verifies that readable fixture artifacts still pass the execution pipeline.
         </p>
         <p>
-          <code>mock:perfect_patch</code> is the deterministic happy path supplied by the
-          mock reviewer implementation. It tests reviewer plumbing separately from the
+          <code>control:perfect_patch</code> is the deterministic happy path supplied by the
+          control reviewer implementation. It tests reviewer plumbing separately from the
           stored reference artifacts.
         </p>
         <h2>Run the baseline</h2>
