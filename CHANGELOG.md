@@ -7,13 +7,15 @@ Keep a Changelog conventions, and the project has not cut a tagged release yet.
 
 ### Added
 
-- Audit Pack v2 (`benchmark_sets/audit_v2`): a second batch of six patch-backed
-  cases targeting high-impact logic defects (per-unit rounding that loses money, a
-  fixed-window rate limiter off-by-one, a boolean-precedence authorization bypass,
-  a lowest-balance tracker comparing the wrong way, a dropped divide-by-zero guard,
-  and floor-instead-of-ceiling page counting). Every case is authored leak-free and
-  fully certified (baseline fails, reference fix passes, 100% mutant-kill rate),
-  verified in CI.
+- Audit Pack v2 (`benchmark_sets/audit_v2`): a second batch of ten patch-backed
+  cases targeting high-impact logic defects across distinct classes (per-unit
+  rounding, a fixed-window rate limiter off-by-one, a boolean-precedence
+  authorization bypass, a lowest-balance tracker comparing the wrong way, a
+  dropped divide-by-zero guard, floor-instead-of-ceiling page counting, a
+  truthiness fallback that discards an explicit zero, an off-by-one string
+  truncation, a missing backoff clamp, and an or-where-and authorization check).
+  Every case is authored leak-free and fully certified (baseline fails, reference
+  fix passes, 100% mutant-kill rate), verified in CI.
 - `shallow-patch` reviewer: a generic adversarial baseline that localizes the bug
   from the shipped reference patch and then proposes a superficial change that
   applies cleanly but repairs nothing. Unlike `keyword_gamer` it needs no per-case
