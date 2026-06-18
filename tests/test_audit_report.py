@@ -45,8 +45,16 @@ def _sample_run(run_id: str, validated: float, detection: float) -> RunResult:
 def test_audit_report_empty_state(tmp_path: Path):
     data = build_audit_report_data([])
     assert data["empty"] is True
+    assert data["summary"]["benchmark_pack"] == "audit_v1"
     markdown = write_audit_report(tmp_path, tmp_path / "report.md")
     assert markdown["empty"] is True
+
+
+def test_audit_report_is_pack_agnostic():
+    data = build_audit_report_data([], benchmark_set="audit_v2")
+    assert data["summary"]["benchmark_pack"] == "audit_v2"
+    assert "Audit Pack v2" in data["title"]
+    assert any("audit_v2" in command for command in data["reproducibility_commands"])
 
 
 def test_audit_report_uses_real_run_json_only(tmp_path: Path):
