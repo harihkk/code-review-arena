@@ -63,7 +63,12 @@ def load_case(case_dir: Path) -> BenchmarkCase:
 
 def load_cases(benchmark_dir: Path) -> list[BenchmarkCase]:
     manifest = load_manifest(benchmark_dir)
-    return [load_case(benchmark_dir / case_id) for case_id in manifest.cases]
+    cases = [load_case(benchmark_dir / case_id) for case_id in manifest.cases]
+    if manifest.default_docker_image:
+        for case in cases:
+            if case.execution.docker_image is None:
+                case.execution.docker_image = manifest.default_docker_image
+    return cases
 
 
 def _read_relevant_files(

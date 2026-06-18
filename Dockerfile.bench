@@ -1,0 +1,21 @@
+# Sandbox image for executing benchmark case tests.
+#
+# This image holds ONLY a Python interpreter and the test dependencies the
+# shipped packs need. It deliberately contains no arena source: case tests run
+# untrusted candidate code, so the sandbox must not carry the harness with it.
+# The executor runs containers from this image with no network, all capabilities
+# dropped, a read-only root, and a non-root user (see arena/execution).
+#
+# Build and tag it with scripts/build_bench_image.sh, which pins the tag the
+# shipped manifests reference (benchmark_sets/*/manifest.yaml: default_docker_image).
+FROM python:3.12-slim
+
+# Pinned so a certified run is reproducible: the same image digest every time.
+RUN pip install --no-cache-dir \
+    pytest==9.0.3 \
+    fastapi==0.136.3 \
+    pydantic==2.13.4 \
+    starlette==1.1.0
+
+# Cases mount their workspace at /workspace and run their own test command there.
+WORKDIR /workspace

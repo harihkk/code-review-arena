@@ -164,6 +164,10 @@ class CaseManifest(BaseModel):
     version: str
     name: str
     cases: list[str]
+    # Execution image applied to every case that does not set its own
+    # docker_image. Lets a pack target one sandbox image in a single place
+    # instead of repeating it across every case.yaml.
+    default_docker_image: str | None = None
 
 
 class Finding(BaseModel):
