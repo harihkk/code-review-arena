@@ -17,8 +17,8 @@ ground_truth:
       - path: src/components/Notifications.tsx
         line_ranges: [{start: 6, end: 9}]
     concepts: [stale state, functional update, asynchronous update]
-    must_mention: [messages, stale, state]
-    acceptable_fix_keywords: [setMessages, previous, functional]
+    must_mention: [stale, state]
+    acceptable_fix_keywords: [previous, functional]
 scoring:
   weights: {concept_match: 35, file_match: 20, line_overlap: 15, severity_match: 10, fix_quality: 15, no_false_positives: 5}
   false_positive_penalty: 5

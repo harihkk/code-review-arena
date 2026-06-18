@@ -9,7 +9,7 @@ class Ledger:
         self.balance += amount
 
 
-def test_duplicate_kafka_delivery_is_idempotent():
+def test_repeated_kafka_delivery_credits_once():
     ledger = Ledger()
     consumer = PaymentConsumer(ledger)
     event = {"event_id": "evt-9", "account_id": "acct-1", "amount": 100}
