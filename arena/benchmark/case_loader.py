@@ -11,6 +11,7 @@ import yaml
 from arena.benchmark.diff_loader import load_diff
 from arena.core.errors import ValidationError
 from arena.core.models import BenchmarkCase, CaseContext, CaseManifest, ReviewerCaseMetadata
+from arena.execution.integrity import find_unsafe_files
 from arena.patching.patch_parser import touched_files
 
 
@@ -50,6 +51,12 @@ def load_case(case_dir: Path) -> BenchmarkCase:
         case = BenchmarkCase.model_validate(yaml.safe_load(config_path.read_text(encoding="utf-8")))
     except Exception as exc:
         raise ValidationError(f"Invalid case metadata in {config_path}: {exc}") from exc
+    unsafe = find_unsafe_files(case_dir)
+    if unsafe:
+        raise ValidationError(
+            f"Case {case_dir.name} contains unsafe paths (symlinks or special files): "
+            f"{', '.join(unsafe)}"
+        )
     case.case_dir = case_dir
     return case
 

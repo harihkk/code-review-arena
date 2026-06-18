@@ -73,3 +73,23 @@ def manifest_changes(before: dict[str, str], after: dict[str, str]) -> list[str]
 def unsafe_entries(manifest: dict[str, str]) -> list[str]:
     """Relative paths in ``manifest`` that are symlinks or special files."""
     return sorted(key for key, value in manifest.items() if value in {"symlink", "special"})
+
+
+def find_unsafe_files(root: Path) -> list[str]:
+    """Symlinks and special files (sockets/devices/FIFOs) under ``root``.
+
+    A pack must contain only regular files and directories: a symlink would be
+    followed when the case is copied into a workspace, letting an untrusted pack
+    read or write outside its tree.
+    """
+    unsafe: list[str] = []
+    if not root.is_dir():
+        return unsafe
+    for path in sorted(root.rglob("*")):
+        if any(part in _IGNORED_DIR_NAMES for part in path.relative_to(root).parts):
+            continue
+        if path.is_symlink():
+            unsafe.append(_relposix(path, root))
+        elif not path.is_dir() and not path.is_file():
+            unsafe.append(_relposix(path, root))
+    return unsafe

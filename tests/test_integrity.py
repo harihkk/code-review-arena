@@ -6,8 +6,15 @@ from pathlib import Path
 import pytest
 
 from arena.benchmark.benchmark_runner import run_benchmark
+from arena.benchmark.case_loader import load_case
+from arena.core.errors import ValidationError
 from arena.core.models import CaseContext, Finding, ReviewerResponse, ReviewResult
-from arena.execution.integrity import file_manifest, manifest_changes, unsafe_entries
+from arena.execution.integrity import (
+    file_manifest,
+    find_unsafe_files,
+    manifest_changes,
+    unsafe_entries,
+)
 from arena.execution.test_executor import TestExecutionRequest, TestExecutor
 from arena.reviewers.base import BaseReviewer
 
@@ -139,6 +146,39 @@ def test_manifest_flags_symlinks_as_unsafe(tmp_path):
     manifest = file_manifest(tmp_path)
     assert manifest["link.py"] == "symlink"
     assert unsafe_entries(manifest) == ["link.py"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_find_unsafe_files_flags_symlinks(tmp_path):
+    (tmp_path / "ok.py").write_text("x = 1\n")
+    (tmp_path / "link.py").symlink_to("ok.py")
+    unsafe = find_unsafe_files(tmp_path)
+    assert "link.py" in unsafe
+    assert "ok.py" not in unsafe
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_load_case_rejects_a_symlinked_pack(tmp_path):
+    case = tmp_path / "evil_case"
+    (case / "after").mkdir(parents=True)
+    (case / "after" / "app.py").write_text("x = 1\n")
+    (case / "after" / "sneaky.py").symlink_to("app.py")
+    (case / "case.yaml").write_text(
+        "id: evil_case\n"
+        "title: Evil\n"
+        "category: correctness\n"
+        "severity: high\n"
+        "stack: [python]\n"
+        "description: A pack that smuggles a symlink.\n"
+        "input: {after_dir: after}\n"
+        "ground_truth:\n"
+        "  bugs:\n"
+        "    - summary: b\n"
+        "      files: [{path: app.py, line_ranges: [{start: 1, end: 1}]}]\n"
+        "      concepts: [correctness]\n"
+    )
+    with pytest.raises(ValidationError, match="unsafe"):
+        load_case(case)
 
 
 def test_tampering_during_execution_is_detected(tmp_path):
