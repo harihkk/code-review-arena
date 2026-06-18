@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>CodeReview Arena - 2026-06-18_18-01-57</title>
+<style>
+body { font: 15px system-ui, sans-serif; max-width: 1000px; margin: 2rem auto; color: #16202a; }
+.cards { display: flex; flex-wrap: wrap; gap: 1rem; margin: 1rem 0 2rem; }
+.card { background: #f3f6f8; padding: 1rem; border-radius: 8px; min-width: 130px; }
+.value { font-size: 1.7rem; font-weight: bold; display: block; }
+table { border-collapse: collapse; width: 100%; }
+th, td { padding: .65rem; border-bottom: 1px solid #ddd; text-align: left; }
+a { color: #155eef; }
+article { border: 1px solid #e4e9ef; border-radius: 10px; padding: 1rem; margin: 1rem 0; }
+.score { color: #155eef; font-size: .9em; margin-left: .5rem; }
+.breakdown { display: flex; flex-wrap: wrap; gap: .5rem; }
+.breakdown span { background: #eef4ff; border-radius: 999px; padding: .35rem .65rem; }
+pre { overflow: auto; background: #101827; color: #e8edf5; padding: .9rem; border-radius: 8px; }
+</style></head><body>
+<h1>CodeReview Arena Report</h1>
+<p>control:perfect on
+v1 - 2026-06-18_18-01-57</p>
+<section class="cards">
+<div class="card"><span class="value">100.0</span>Review quality</div>
+<div class="card"><span class="value">10/10</span>Bugs found</div>
+<div class="card"><span class="value">0</span>False positives</div>
+<div class="card"><span class="value">$0.0000</span>Est. cost</div>
+</section>
+
+<h2>Cases</h2><table><thead><tr><th>Case</th><th>Score</th><th>Found</th>
+<th>False positives</th><th>Line match</th><th>Deterministic</th></tr></thead>
+<tbody><tr><td><a href='#fastapi_auth_bypass_001'>fastapi_auth_bypass_001</a></td><td>100.0</td><td>Yes</td><td>0</td><td>full</td><td>n/a</td></tr><tr><td><a href='#spring_boot_null_handling_001'>spring_boot_null_handling_001</a></td><td>100.0</td><td>Yes</td><td>0</td><td>full</td><td>n/a</td></tr><tr><td><a href='#graphql_n_plus_one_001'>graphql_n_plus_one_001</a></td><td>100.0</td><td>Yes</td><td>0</td><td>full</td><td>n/a</td></tr><tr><td><a href='#react_stale_state_001'>react_stale_state_001</a></td><td>100.0</td><td>Yes</td><td>0</td><td>full</td><td>n/a</td></tr><tr><td><a href='#kafka_idempotency_bug_001'>kafka_idempotency_bug_001</a></td><td>100.0</td><td>Yes</td><td>0</td><td>full</td><td>n/a</td></tr><tr><td><a href='#redis_cache_key_collision_001'>redis_cache_key_collision_001</a></td><td>100.0</td><td>Yes</td><td>0</td><td>full</td><td>n/a</td></tr><tr><td><a href='#sql_permission_leak_001'>sql_permission_leak_001</a></td><td>100.0</td><td>Yes</td><td>0</td><td>full</td><td>n/a</td></tr><tr><td><a href='#rag_fake_citation_001'>rag_fake_citation_001</a></td><td>100.0</td><td>Yes</td><td>0</td><td>full</td><td>n/a</td></tr><tr><td><a href='#async_race_condition_001'>async_race_condition_001</a></td><td>100.0</td><td>Yes</td><td>0</td><td>full</td><td>n/a</td></tr><tr><td><a href='#api_contract_regression_001'>api_contract_regression_001</a></td><td>100.0</td><td>Yes</td><td>0</td><td>full</td><td>n/a</td></tr></tbody></table>
+<h2>False Positive Summary</h2><ul><li>None</li></ul>
+<h2>Missed Bug Summary</h2><ul><li>None</li></ul>
+<h2>Case Traces</h2><article id="fastapi_auth_bypass_001">
+<h3>fastapi_auth_bypass_001 <span class="score">quality 100.0/100</span></h3>
+<p><strong>Ground truth:</strong> Missing authorization check on admin endpoint.</p>
+<p><strong>Finding:</strong> Missing authorization check on admin endpoint. This concerns authorization role-based access control privilege escalation admin role authorization.</p>
+<h4>Scoring breakdown</h4>
+<div class="breakdown">
+<span>Concept 35.0/35</span>
+<span>File 20.0/20</span>
+<span>Line 15.0/15</span>
+<span>Severity 10.0/10</span>
+<span>Fix 15.0/15</span>
+</div>
+
+
+</article><article id="spring_boot_null_handling_001">
+<h3>spring_boot_null_handling_001 <span class="score">quality 100.0/100</span></h3>
+<p><strong>Ground truth:</strong> Missing records now cause an Optional runtime exception instead of a 404.</p>
+<p><strong>Finding:</strong> Missing records now cause an Optional runtime exception instead of a 404. This concerns missing record Optional not found findById empty exception.</p>
+<h4>Scoring breakdown</h4>
+<div class="breakdown">
+<span>Concept 35.0/35</span>
+<span>File 20.0/20</span>
+<span>Line 15.0/15</span>
+<span>Severity 10.0/10</span>
+<span>Fix 15.0/15</span>
+</div>
+
+
+</article><article id="graphql_n_plus_one_001">
+<h3>graphql_n_plus_one_001 <span class="score">quality 100.0/100</span></h3>
+<p><strong>Ground truth:</strong> Customer lookups inside the order map introduce N+1 database queries.</p>
+<p><strong>Finding:</strong> Customer lookups inside the order map introduce N+1 database queries. This concerns N+1 batching database query customer loop query.</p>
+<h4>Scoring breakdown</h4>
+<div class="breakdown">
+<span>Concept 35.0/35</span>
+<span>File 20.0/20</span>
+<span>Line 15.0/15</span>
+<span>Severity 10.0/10</span>
+<span>Fix 15.0/15</span>
+</div>
+
+
+</article><article id="react_stale_state_001">
+<h3>react_stale_state_001 <span class="score">quality 100.0/100</span></h3>
+<p><strong>Ground truth:</strong> Async updates close over stale messages state and can drop notifications.</p>
+<p><strong>Finding:</strong> Async updates close over stale messages state and can drop notifications. This concerns stale state functional update asynchronous update messages stale state.</p>
+<h4>Scoring breakdown</h4>
+<div class="breakdown">
+<span>Concept 35.0/35</span>
+<span>File 20.0/20</span>
+<span>Line 15.0/15</span>
+<span>Severity 10.0/10</span>
+<span>Fix 15.0/15</span>
+</div>
+
+
+</article><article id="kafka_idempotency_bug_001">
+<h3>kafka_idempotency_bug_001 <span class="score">quality 100.0/100</span></h3>
+<p><strong>Ground truth:</strong> Payment updates are no longer idempotent for duplicate Kafka events.</p>
+<p><strong>Finding:</strong> Payment updates are no longer idempotent for duplicate Kafka events. This concerns idempotency duplicate event at-least-once delivery event_id duplicate credit.</p>
+<h4>Scoring breakdown</h4>
+<div class="breakdown">
+<span>Concept 35.0/35</span>
+<span>File 20.0/20</span>
+<span>Line 15.0/15</span>
+<span>Severity 10.0/10</span>
+<span>Fix 15.0/15</span>
+</div>
+
+
+</article><article id="redis_cache_key_collision_001">
+<h3>redis_cache_key_collision_001 <span class="score">quality 100.0/100</span></h3>
+<p><strong>Ground truth:</strong> Under-specified Redis keys leak cached search data across tenants and queries.</p>
+<p><strong>Finding:</strong> Under-specified Redis keys leak cached search data across tenants and queries. This concerns cache key collision tenant isolation data leakage tenant_id query cache.</p>
+<h4>Scoring breakdown</h4>
+<div class="breakdown">
+<span>Concept 35.0/35</span>
+<span>File 20.0/20</span>
+<span>Line 15.0/15</span>
+<span>Severity 10.0/10</span>
+<span>Fix 15.0/15</span>
+</div>
+
+
+</article><article id="sql_permission_leak_001">
+<h3>sql_permission_leak_001 <span class="score">quality 100.0/100</span></h3>
+<p><strong>Ground truth:</strong> Document access omits organization ownership filtering.</p>
+<p><strong>Finding:</strong> Document access omits organization ownership filtering. This concerns authorization tenant isolation data exposure organization_id document ownership.</p>
+<h4>Scoring breakdown</h4>
+<div class="breakdown">
+<span>Concept 35.0/35</span>
+<span>File 20.0/20</span>
+<span>Line 15.0/15</span>
+<span>Severity 10.0/10</span>
+<span>Fix 15.0/15</span>
+</div>
+
+
+</article><article id="rag_fake_citation_001">
+<h3>rag_fake_citation_001 <span class="score">quality 100.0/100</span></h3>
+<p><strong>Ground truth:</strong> Generated citation IDs are not validated against retrieved context.</p>
+<p><strong>Finding:</strong> Generated citation IDs are not validated against retrieved context. This concerns citation validation retrieved context fabricated citation citation_ids retrieved_chunks validate.</p>
+<h4>Scoring breakdown</h4>
+<div class="breakdown">
+<span>Concept 35.0/35</span>
+<span>File 20.0/20</span>
+<span>Line 15.0/15</span>
+<span>Severity 10.0/10</span>
+<span>Fix 15.0/15</span>
+</div>
+
+
+</article><article id="async_race_condition_001">
+<h3>async_race_condition_001 <span class="score">quality 100.0/100</span></h3>
+<p><strong>Ground truth:</strong> Concurrent balance mutations are non-atomic and can lose writes.</p>
+<p><strong>Finding:</strong> Concurrent balance mutations are non-atomic and can lose writes. This concerns race condition atomic update lost write concurrent balance lock.</p>
+<h4>Scoring breakdown</h4>
+<div class="breakdown">
+<span>Concept 35.0/35</span>
+<span>File 20.0/20</span>
+<span>Line 15.0/15</span>
+<span>Severity 10.0/10</span>
+<span>Fix 15.0/15</span>
+</div>
+
+
+</article><article id="api_contract_regression_001">
+<h3>api_contract_regression_001 <span class="score">quality 100.0/100</span></h3>
+<p><strong>Ground truth:</strong> Renamed response fields break existing clients expecting snake_case keys.</p>
+<p><strong>Finding:</strong> Renamed response fields break existing clients expecting snake_case keys. This concerns backward compatibility response schema API contract snake_case camelCase client.</p>
+<h4>Scoring breakdown</h4>
+<div class="breakdown">
+<span>Concept 35.0/35</span>
+<span>File 20.0/20</span>
+<span>Line 15.0/15</span>
+<span>Severity 10.0/10</span>
+<span>Fix 15.0/15</span>
+</div>
+
+
+</article>
+</body></html>
