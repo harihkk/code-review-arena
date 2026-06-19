@@ -8,7 +8,9 @@ from pathlib import Path
 DEFAULT_BENCHMARK_SET = Path("benchmark_sets/v1")
 DEFAULT_RUNS_DIR = Path("runs")
 DEFAULT_DB_PATH = Path("arena.db")
-PROMPT_VERSION = "v1"
+# v2 removed test/static-analysis output from the default (blind) reviewer payload;
+# it is now opt-in via --reveal-test-output and recorded as a test-assisted run.
+PROMPT_VERSION = "v2"
 
 # Version of the JSON the dashboard consumes (audit report + verification snapshot).
 # Bump on any breaking shape change; the dashboard refuses to render a mismatch.

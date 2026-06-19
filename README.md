@@ -19,9 +19,11 @@ locally and the harness is model-agnostic.
 Each case is a seeded pull request with one or more known bugs, the files a fix should
 touch, and the checks a fix must pass. The reviewer payload is blind: case id, stack,
 the diff, and a bounded set of relevant files, with no title, description, category,
-severity, or any ground truth (`--reveal-metadata` exists for debugging only). The
-reviewer returns its findings and an optional patch, and the harness takes it from
-there:
+severity, or any ground truth, and no pre-patch test or static-analysis output (whose
+failing assertions would disclose the expected values). `--reveal-metadata` and
+`--reveal-test-output` exist only for debugging or an openly test-assisted run, which is
+recorded as such in the run metadata. The reviewer returns its findings and an optional
+patch, and the harness takes it from there:
 
 ```
 diff + files  ->  reviewer  ->  patch  ->  apply in workspace  ->  tests  ->  validators  ->  score

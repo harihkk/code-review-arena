@@ -48,6 +48,13 @@ def run(
         help="Include case title/description/category/severity in the reviewer payload. "
         "Debugging only: scored runs should stay blind.",
     ),
+    reveal_test_output: bool = typer.Option(
+        False,
+        "--reveal-test-output",
+        help="Include pre-patch test and static-analysis output in the reviewer payload "
+        "(an openly test-assisted run, recorded as test_assisted in metadata). Off by "
+        "default: a blind run must not see failing-test expected values.",
+    ),
     enable_repair: bool = typer.Option(
         False,
         "--enable-repair",
@@ -79,6 +86,7 @@ def run(
         as_json,
         reveal_metadata=reveal_metadata,
         enable_repair=enable_repair,
+        reveal_test_output=reveal_test_output,
         max_wall_seconds=max_wall_seconds,
         max_cost=max_cost,
         model=model,
