@@ -142,6 +142,7 @@ def run_mutation_test(
     tests_dir = case.input.tests_dir
 
     killed = 0
+    evaluated = 0
     survivors: list[str] = []
     with fixed_solution(case) as fixed:
         if fixed is None or not (fixed / bug_path).is_file():
@@ -166,8 +167,14 @@ def run_mutation_test(
                         allow_local_execution=allow_local_execution,
                     )
                 )
-            if result.ran and not result.passed:
+            if not result.ran:
+                # The backend was unavailable for this mutant; it is inconclusive,
+                # not a survivor. Counting it as survived would report kill_rate=0
+                # ("the tests are weak") when really nothing ran.
+                continue
+            evaluated += 1
+            if not result.passed:
                 killed += 1
             else:
                 survivors.append(mutant.description)
-    return MutationResult(total=len(mutants), killed=killed, survivors=survivors)
+    return MutationResult(total=evaluated, killed=killed, survivors=survivors)

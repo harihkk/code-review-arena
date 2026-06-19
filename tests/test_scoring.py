@@ -13,6 +13,18 @@ def test_normalized_file_matching():
     assert path_matches("b/app/routes/admin.py", "app/routes/admin.py")
 
 
+def test_normalize_path_does_not_eat_leading_dots():
+    # lstrip("./") would strip these leading dots as a character set, collapsing
+    # distinct paths together. Only a single "./" prefix should be removed.
+    assert normalize_path("../escape/x.py") == "../escape/x.py"
+    assert normalize_path(".github/workflows/ci.yml") == ".github/workflows/ci.yml"
+    assert not path_matches("../app/x.py", "app/x.py")
+    assert not path_matches(".github/x.py", "github/x.py")
+    # A real leading "./" or git a/ b/ prefix is still stripped.
+    assert normalize_path("./app/x.py") == "app/x.py"
+    assert normalize_path("a/app/x.py") == "app/x.py"
+
+
 def test_perfect_control_scores_full_points(benchmark_dir):
     case = _case(benchmark_dir)
     result = score_case(case, ControlReviewer("perfect").review(build_context(case)))

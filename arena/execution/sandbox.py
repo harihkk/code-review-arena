@@ -17,7 +17,10 @@ def materialized_case(case: BenchmarkCase) -> Iterator[Path]:
     with tempfile.TemporaryDirectory(prefix=f"arena-{case.id}-") as directory:
         root = Path(directory)
         shutil.copytree(case.case_dir / case.input.after_dir, root, dirs_exist_ok=True)
-        tests = case.case_dir / (case.input.tests_dir or "tests")
-        if case.input.tests_dir and tests.is_dir():
-            shutil.copytree(tests, root / "tests", dirs_exist_ok=True)
+        tests_dir = case.input.tests_dir
+        tests = case.case_dir / (tests_dir or "tests")
+        if tests_dir and tests.is_dir():
+            # Copy to the case's declared tests_dir, not a hardcoded "tests", so a
+            # case whose test_command targets another directory still finds them.
+            shutil.copytree(tests, root / tests_dir, dirs_exist_ok=True)
         yield root

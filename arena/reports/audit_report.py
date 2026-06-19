@@ -125,12 +125,6 @@ def build_audit_report_data(
                 if reason in FAILURE_REASON_LABELS:
                     failure_counter[reason] += 1
                     run_failure_counter[reason] += 1
-                elif reason == "detection_failed":
-                    failure_counter["detection_failed"] += 1
-                    run_failure_counter["detection_failed"] += 1
-                elif reason == "localization_failed":
-                    failure_counter["localization_failed"] += 1
-                    run_failure_counter["localization_failed"] += 1
         reviewer_rows.append(
             {
                 "reviewer": run.reviewer,
@@ -212,9 +206,11 @@ def _select_case_studies(runs: list[RunResult]) -> list[dict[str, Any]]:
             if not reasons:
                 continue
             top_reason = max(reasons, key=lambda reason: priority.get(reason, 0))
+            # Cases that passed validation were already skipped above, so any case
+            # here is unvalidated; for a detected-but-unrepaired case, surface its
+            # first reported reason.
             detection_only = case.bug_found and case.correct_file and case.correct_line
-            validated = case.deterministic_pass is True
-            if detection_only and not validated:
+            if detection_only:
                 top_reason = reasons[0]
             finding_summary = ""
             if case.scored_findings:
