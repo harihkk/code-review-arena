@@ -9,7 +9,27 @@ from arena.core.models import (
 )
 from arena.patching.patch_models import PatchApplyResult
 from arena.scoring.deterministic_scorer import score_deterministic_case
-from arena.scoring.scorer import apply_execution_fix_quality, score_case
+from arena.scoring.scorer import _max_weight_matching, apply_execution_fix_quality, score_case
+
+
+def test_max_weight_matching_beats_greedy_assignment():
+    # finding 0 matches bug0 (10) and bug1 (9); finding 1 matches only bug0 (8).
+    # Greedy takes the single best pair bug0<-finding0 (10) and leaves bug1
+    # unmatched (total 10). The optimal assignment pairs bug1<-finding0 (9) and
+    # bug0<-finding1 (8) for total 17, matching both bugs.
+    weights = {(0, 0): 10.0, (1, 0): 9.0, (0, 1): 8.0}
+    assert _max_weight_matching(weights, num_bugs=2) == {0: 1, 1: 0}
+
+
+def test_max_weight_matching_single_bug_picks_highest_weight_finding():
+    # The single-bug case (every shipped case today): pick the best finding, so
+    # the result is identical to the old greedy assignment.
+    weights = {(0, 0): 3.0, (0, 1): 7.0, (0, 2): 5.0}
+    assert _max_weight_matching(weights, num_bugs=1) == {0: 1}
+
+
+def test_max_weight_matching_with_no_eligible_pairs_is_empty():
+    assert _max_weight_matching({}, num_bugs=2) == {}
 
 
 def _case(**overrides) -> BenchmarkCase:
