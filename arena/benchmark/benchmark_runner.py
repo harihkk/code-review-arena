@@ -272,7 +272,14 @@ def _evaluate_case(
                 f"exit_code={executed.exit_code}\nduration_ms={executed.duration_ms}\n"
                 f"{executed.stdout}{executed.stderr}"
             )
-        if case.execution.run_static_analysis and case.execution.static_analysis_command:
+        if (
+            allow_local_execution
+            and case.execution.run_static_analysis
+            and case.execution.static_analysis_command
+        ):
+            # static_analysis_command is pack-controlled, so it is host code
+            # execution and must require the same explicit local-execution opt-in
+            # as the test command, never run unconditionally.
             static_output = run_static_analysis(
                 materialized,
                 case.execution.static_analysis_command,

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import shlex
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -11,6 +10,10 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from arena.execution.hardening import resource_limiter, sandboxed_home_env
+from arena.execution.process import run_supervised
+
+# Match the test executor's cap so all pack-controlled command output is bounded.
+_OUTPUT_LIMIT_BYTES = 512_000
 
 
 class CommandResult(BaseModel):
@@ -22,37 +25,28 @@ class CommandResult(BaseModel):
 
 
 def run_command(command: str, cwd: Path, timeout_seconds: int) -> CommandResult:
+    """Run a pack-controlled command through the bounded process supervisor.
+
+    Goes through run_supervised so the command gets process-tree cleanup, a hard
+    byte-bounded output cap, and the same POSIX-only / Windows-fail-closed
+    boundary as test execution -- instead of a bare subprocess.run that buffers
+    unbounded output and leaves descendants running. ExecutionError (Windows)
+    propagates so the caller fails closed.
+    """
     started = time.perf_counter()
     arguments = shlex.split(command)
     if arguments and arguments[0] == "pytest":
         arguments = [sys.executable, "-m", "pytest", *arguments[1:]]
     try:
         with sandboxed_home_env() as env:
-            completed = subprocess.run(
+            result = run_supervised(
                 arguments,
                 cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
-                check=False,
                 env=env,
+                timeout=timeout_seconds,
                 preexec_fn=resource_limiter(timeout_seconds),
+                output_limit=_OUTPUT_LIMIT_BYTES,
             )
-        output = (completed.stdout + "\n" + completed.stderr).strip()
-        return CommandResult(
-            command=command,
-            return_code=completed.returncode,
-            output=output,
-            duration_ms=int((time.perf_counter() - started) * 1000),
-        )
-    except subprocess.TimeoutExpired as exc:
-        return CommandResult(
-            command=command,
-            return_code=124,
-            output=f"Timed out after {timeout_seconds}s: {exc}",
-            duration_ms=int((time.perf_counter() - started) * 1000),
-            timed_out=True,
-        )
     except FileNotFoundError as exc:
         return CommandResult(
             command=command,
@@ -60,3 +54,11 @@ def run_command(command: str, cwd: Path, timeout_seconds: int) -> CommandResult:
             output=f"Command unavailable: {exc}",
             duration_ms=int((time.perf_counter() - started) * 1000),
         )
+    output = (result.stdout + "\n" + result.stderr).strip()
+    return CommandResult(
+        command=command,
+        return_code=124 if result.timed_out else (result.returncode or 0),
+        output=output,
+        duration_ms=int((time.perf_counter() - started) * 1000),
+        timed_out=result.timed_out,
+    )
