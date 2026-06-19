@@ -43,11 +43,16 @@ def leaderboard(
         "Pack",
     ]:
         table.add_column(column)
+    show_ci = any(row.get("metric_ci") for row in rows)
     for row in rows:
+        cell = _metric_value(row["metric_value"], display_metric)
+        ci = row.get("metric_ci")
+        if ci is not None:
+            cell += f"  [{ci[0] * 100:.0f}-{ci[1] * 100:.0f}]"
         table.add_row(
             str(row["reviewer"]),
             str(row["model"]),
-            _metric_value(row["metric_value"], display_metric),
+            cell,
             str(row["bugs_found"]),
             str(row["false_positives"]),
             f"${row['cost']:.4f}",
@@ -55,6 +60,11 @@ def leaderboard(
             str(row["pack"]),
         )
     Console(width=140).print(table)
+    if show_ci:
+        Console(stderr=True).print(
+            "[dim]Bracketed range is the Wilson 95% interval; at these pack sizes it is "
+            "wide, so reviewers whose intervals overlap are not reliably ranked.[/dim]"
+        )
 
 
 def _metric_value(value: float | None, metric: str) -> str:

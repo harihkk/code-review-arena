@@ -10,7 +10,7 @@ from arena.core.models import (
 )
 from arena.execution.test_executor import TestExecutionResult
 from arena.patching.patch_models import PatchApplyResult
-from arena.scoring.metrics import f_beta_score, precision, rate, recall
+from arena.scoring.metrics import f_beta_score, precision, rate, recall, wilson_interval
 from arena.validators.base import ValidatorResult
 
 
@@ -126,6 +126,7 @@ def aggregate_deterministic_metrics(
     validated_fn = validatable_count - validated_tp
     validated_precision = precision(validated_tp, fp)
     validated_recall = recall(validated_tp, validated_fn)
+    validated_ci = wilson_interval(validated_tp, validatable_count)
     patch_provided = sum(score.patch_provided for score in scores)
     patch_applied = sum(score.patch_applied for score in scores)
     tests_ran = sum(score.tests_ran for score in scores)
@@ -161,6 +162,8 @@ def aggregate_deterministic_metrics(
         validated_case_rate=(
             round(validated_tp / validatable_count, 6) if validatable_count else 0.0
         ),
+        validated_case_rate_ci_low=validated_ci[0] if validated_ci else None,
+        validated_case_rate_ci_high=validated_ci[1] if validated_ci else None,
         complete_repair_rate=(
             round(complete_repairs / validatable_count, 6) if validatable_count else 0.0
         ),

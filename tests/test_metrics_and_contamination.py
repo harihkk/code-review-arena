@@ -16,7 +16,7 @@ from arena.core.models import (
 )
 from arena.reviewers.controls import ControlReviewer
 from arena.scoring.deterministic_scorer import aggregate_deterministic_metrics
-from arena.scoring.metrics import f_beta_score, precision, recall
+from arena.scoring.metrics import f_beta_score, precision, recall, wilson_interval
 from arena.scoring.scorer import score_case
 
 AUDIT = Path("benchmark_sets/audit_v1")
@@ -111,6 +111,25 @@ def test_six_headline_metrics_match_their_formulas():
     assert metrics.structural_pass_rate == 0.6  # 6/10 passed
     assert metrics.false_positives_per_case == 0.4  # 4/10
     assert metrics.deterministic_pass_rate == 0.5  # 5/10
+
+
+def test_wilson_interval_widens_at_small_sample_sizes():
+    assert wilson_interval(0, 0) is None
+    low, high = wilson_interval(7, 10)
+    assert 0.0 <= low < 0.7 < high <= 1.0
+    # Even a perfect 10/10 has a lower bound well below 1.0 at n=10.
+    low10, high10 = wilson_interval(10, 10)
+    assert low10 < 0.8 and high10 == 1.0
+
+
+def test_validated_case_rate_carries_a_confidence_interval():
+    metrics = aggregate_deterministic_metrics(
+        _synthetic_run(), beta=1.0, total_cost=0.0, total_latency_ms=0
+    )
+    assert metrics.validated_case_rate == 0.5
+    assert metrics.validated_case_rate_ci_low is not None
+    assert metrics.validated_case_rate_ci_high is not None
+    assert metrics.validated_case_rate_ci_low < 0.5 < metrics.validated_case_rate_ci_high
 
 
 def test_beta_weighting_favours_recall_as_beta_grows():
