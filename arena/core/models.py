@@ -16,6 +16,12 @@ RunStatus = Literal["complete", "partial", "invalid", "failed", "cancelled", "le
 ExecutionBackend = Literal["docker", "trusted-local", "none"]
 # Bumped when the run JSON shape changes in a way that breaks comparability.
 RUN_SCHEMA_VERSION = 2
+# Hard caps that bound finding-to-bug matching so it cannot be driven into a
+# pathological size by an adversarial pack or a reviewer spamming findings. They
+# are generous relative to any real case or review, and rejection is at the
+# schema layer (a response/pack exceeding them is invalid, not silently truncated).
+MAX_BUGS_PER_CASE = 50
+MAX_FINDINGS_PER_RESPONSE = 200
 
 
 class LineRange(BaseModel):
@@ -59,7 +65,7 @@ class AcceptableFinding(BaseModel):
 
 
 class GroundTruth(BaseModel):
-    bugs: list[GroundTruthBug] = Field(min_length=1)
+    bugs: list[GroundTruthBug] = Field(min_length=1, max_length=MAX_BUGS_PER_CASE)
     acceptable_findings: list[AcceptableFinding] = Field(default_factory=list)
 
     @model_validator(mode="before")
@@ -195,7 +201,7 @@ class Finding(BaseModel):
 
 
 class ReviewResult(BaseModel):
-    findings: list[Finding]
+    findings: list[Finding] = Field(max_length=MAX_FINDINGS_PER_RESPONSE)
     # The reviewer's single complete repair for the whole case. This is the only
     # patch Arena applies; per-finding ``suggested_patch`` is advisory and never
     # applied (combining finding patches has ambiguous order/overlap semantics).

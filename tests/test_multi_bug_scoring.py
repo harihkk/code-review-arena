@@ -1,6 +1,13 @@
 """Multi-bug ground truth, applied weights, capped penalties, execution-backed fix quality."""
 
+import random
+
+import pydantic
+import pytest
+
 from arena.core.models import (
+    MAX_BUGS_PER_CASE,
+    MAX_FINDINGS_PER_RESPONSE,
     BenchmarkCase,
     Finding,
     GroundTruth,
@@ -10,6 +17,29 @@ from arena.core.models import (
 from arena.patching.patch_models import PatchApplyResult
 from arena.scoring.deterministic_scorer import score_deterministic_case
 from arena.scoring.scorer import _max_weight_matching, apply_execution_fix_quality, score_case
+
+
+def _matching_total(weights: dict, num_bugs: int) -> float:
+    return sum(weights[(b, f)] for b, f in _max_weight_matching(weights, num_bugs).items())
+
+
+def _brute_force_optimal_total(weights: dict, num_bugs: int) -> float:
+    """Exhaustive maximum-weight matching, the slow reference oracle for tests."""
+    findings = sorted({f for (_b, f) in weights})
+    best = 0.0
+
+    def rec(bug: int, used: frozenset, total: float) -> None:
+        nonlocal best
+        if bug == num_bugs:
+            best = max(best, total)
+            return
+        rec(bug + 1, used, total)  # leave this bug unmatched
+        for finding in findings:
+            if finding not in used and (bug, finding) in weights:
+                rec(bug + 1, used | {finding}, total + weights[(bug, finding)])
+
+    rec(0, frozenset(), 0.0)
+    return best
 
 
 def test_max_weight_matching_beats_greedy_assignment():
@@ -22,8 +52,6 @@ def test_max_weight_matching_beats_greedy_assignment():
 
 
 def test_max_weight_matching_single_bug_picks_highest_weight_finding():
-    # The single-bug case (every shipped case today): pick the best finding, so
-    # the result is identical to the old greedy assignment.
     weights = {(0, 0): 3.0, (0, 1): 7.0, (0, 2): 5.0}
     assert _max_weight_matching(weights, num_bugs=1) == {0: 1}
 
@@ -32,16 +60,89 @@ def test_max_weight_matching_with_no_eligible_pairs_is_empty():
     assert _max_weight_matching({}, num_bugs=2) == {}
 
 
-def test_max_weight_matching_bounds_compute_on_oversized_input():
-    # Adversarial blow-up: many bugs each eligible to many findings. The exact
-    # search is factorial here and would hang without a cap; the step budget must
-    # trip and fall back to a valid greedy matching that returns promptly.
-    n = 25
-    weights = {(bug, finding): float(bug + finding) for bug in range(n) for finding in range(n)}
-    matching = _max_weight_matching(weights, num_bugs=n)
-    assert len(set(matching.values())) == len(matching)  # no finding reused
-    assert all(0 <= bug < n for bug in matching)
-    assert all(0 <= finding < n for finding in matching.values())
+def test_max_weight_matching_leaves_extra_bugs_and_findings_unmatched():
+    # Two bugs contend for one finding: the higher-weight bug wins, the other is
+    # unmatched (the optimal total is 5, not 3).
+    assert _max_weight_matching({(0, 0): 3.0, (1, 0): 5.0}, num_bugs=2) == {1: 0}
+    # A bug with no eligible finding stays unmatched.
+    assert _max_weight_matching({(0, 0): 4.0}, num_bugs=2) == {0: 0}
+
+
+def test_max_weight_matching_is_deterministic_under_ties():
+    # Two equally-good findings for one bug: the result is an optimum (weight 5)
+    # and identical across calls, never dependent on iteration order.
+    weights = {(0, 0): 5.0, (0, 1): 5.0}
+    first = _max_weight_matching(weights, num_bugs=1)
+    assert _matching_total(weights, num_bugs=1) == 5.0
+    assert first == _max_weight_matching(weights, num_bugs=1)
+
+
+def test_max_weight_matching_equals_brute_force_optimum_on_random_cases():
+    # Property check: the Hungarian assignment achieves the exact optimum total
+    # the exhaustive oracle finds, and always returns a valid injective matching.
+    rng = random.Random(20260619)
+    for _ in range(300):
+        num_bugs = rng.randint(0, 4)
+        num_findings = rng.randint(0, 5)
+        weights = {
+            (bug, finding): round(rng.uniform(0.1, 10.0), 3)
+            for bug in range(num_bugs)
+            for finding in range(num_findings)
+            if rng.random() < 0.6
+        }
+        matching = _max_weight_matching(weights, num_bugs)
+        assert len(set(matching.values())) == len(matching)  # injective
+        assert all((bug, finding) in weights for bug, finding in matching.items())
+        assert (
+            abs(_matching_total(weights, num_bugs) - _brute_force_optimal_total(weights, num_bugs))
+            < 1e-6
+        )
+
+
+def test_max_weight_matching_handles_large_allowed_input_fast():
+    # At the schema caps the matrix is bounded, so the polynomial solver stays fast
+    # and exact (no fallback). 40 bugs x 60 findings, all eligible.
+    num_bugs, num_findings = 40, 60
+    weights = {
+        (bug, finding): float((bug * 7 + finding) % 13 + 1)
+        for bug in range(num_bugs)
+        for finding in range(num_findings)
+    }
+    matching = _max_weight_matching(weights, num_bugs=num_bugs)
+    assert len(set(matching.values())) == len(matching)
+    assert len(matching) == num_bugs  # findings >= bugs, so every bug matches
+
+
+def test_review_result_rejects_too_many_findings():
+    finding = Finding(
+        title="t",
+        summary="s",
+        category="correctness",
+        severity="low",
+        file="a.py",
+        line_start=1,
+        line_end=1,
+        evidence="e",
+        confidence=0.5,
+    )
+    ReviewResult(findings=[finding], overall_risk="low", review_summary="ok")  # within cap
+    with pytest.raises(pydantic.ValidationError):
+        ReviewResult(
+            findings=[finding] * (MAX_FINDINGS_PER_RESPONSE + 1),
+            overall_risk="low",
+            review_summary="too many",
+        )
+
+
+def test_ground_truth_rejects_too_many_bugs():
+    bug = {
+        "summary": "b",
+        "files": [{"path": "a.py", "line_ranges": [{"start": 1, "end": 1}]}],
+        "concepts": ["x"],
+    }
+    GroundTruth.model_validate({"bugs": [bug]})  # within cap
+    with pytest.raises(pydantic.ValidationError):
+        GroundTruth.model_validate({"bugs": [bug] * (MAX_BUGS_PER_CASE + 1)})
 
 
 def _case(**overrides) -> BenchmarkCase:
