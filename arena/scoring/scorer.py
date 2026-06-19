@@ -83,26 +83,64 @@ def _pair_components(
     )
 
 
+# Cap on branch-and-bound nodes before falling back to greedy. Comfortably covers
+# realistic cases (few bugs, few eligible findings each); the cap exists only so a
+# pathological pack (many declared bugs) plus a reviewer spamming findings cannot
+# turn matching into a denial-of-service.
+_MATCHING_STEP_BUDGET = 200_000
+# Recursion is one level per bug; cap it so an absurd bug count cannot hit Python's
+# recursion limit. Beyond this the exact search is hopeless anyway, so use greedy.
+_MATCHING_MAX_BUGS = 64
+
+
+def _greedy_matching(weights: dict[tuple[int, int], float], num_bugs: int) -> dict[int, int]:
+    """Highest-weight pair first; the bounded fallback for oversized inputs."""
+    assigned: dict[int, int] = {}
+    used: set[int] = set()
+    for (bug, finding), _weight in sorted(weights.items(), key=lambda kv: (-kv[1], kv[0])):
+        if bug in assigned or finding in used:
+            continue
+        assigned[bug] = finding
+        used.add(finding)
+    return assigned
+
+
 def _max_weight_matching(weights: dict[tuple[int, int], float], num_bugs: int) -> dict[int, int]:
     """Deterministic maximum-weight one-to-one matching of bugs to findings.
 
     Greedy assignment (take the single highest-weight pair, repeat) can be
     globally suboptimal: a finding that is the best match for two bugs hogs one
     and leaves the other unmatched even when a different pairing scores higher in
-    total. This returns an assignment with the maximum total weight. It is exact
-    via branch-and-bound over bugs, which is cheap because the number of bugs and
-    eligible findings per case is small. Ties resolve deterministically (skip a
-    bug before assigning it, lower finding indices first), so the result never
-    depends on dict ordering.
+    total. This returns an assignment with the maximum total weight via
+    branch-and-bound over bugs. Ties resolve deterministically (skip a bug before
+    assigning it, lower finding indices first), so the result never depends on
+    dict ordering.
+
+    Complexity: time is worst case O(product over bugs of (1 + eligible findings
+    per bug)), exponential in the number of bugs; memory is O(bugs) recursion
+    depth. Realistic cases are tiny (typically one bug). To stay safe on
+    adversarial input the search is capped at _MATCHING_STEP_BUDGET nodes; beyond
+    that it returns the greedy assignment (O(pairs log pairs)) rather than running
+    unbounded.
     """
+    if num_bugs > _MATCHING_MAX_BUGS:
+        return _greedy_matching(weights, num_bugs)
     options = {
         bug: sorted(finding for (b, finding) in weights if b == bug) for bug in range(num_bugs)
     }
     best_total = -1.0
     best_assign: dict[int, int] = {}
+    steps = 0
+    overflowed = False
 
     def recurse(bug: int, used: frozenset[int], total: float, current: dict[int, int]) -> None:
-        nonlocal best_total, best_assign
+        nonlocal best_total, best_assign, steps, overflowed
+        if overflowed:
+            return
+        steps += 1
+        if steps > _MATCHING_STEP_BUDGET:
+            overflowed = True
+            return
         if bug == num_bugs:
             if total > best_total:
                 best_total = total
@@ -110,6 +148,8 @@ def _max_weight_matching(weights: dict[tuple[int, int], float], num_bugs: int) -
             return
         recurse(bug + 1, used, total, current)  # leave this bug unmatched
         for finding in options[bug]:
+            if overflowed:
+                return
             if finding in used:
                 continue
             current[bug] = finding
@@ -117,6 +157,8 @@ def _max_weight_matching(weights: dict[tuple[int, int], float], num_bugs: int) -
             del current[bug]
 
     recurse(0, frozenset(), 0.0, {})
+    if overflowed:
+        return _greedy_matching(weights, num_bugs)
     return best_assign
 
 
