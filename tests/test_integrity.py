@@ -82,6 +82,11 @@ def _build_tamper_pack(root: Path) -> Path:
         "execution: {run_tests: true, test_command: 'pytest -q tests', timeout_seconds: 60}\n"
         "validation: {patch_required: true, tests_required: true}\n"
     )
+    # A valid pack must ship a reference.patch when patch_required; the tamper
+    # reviewer supplies its own patch, so this only satisfies validation.
+    (case / "reference.patch").write_text(
+        "--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-VALUE = 1\n+VALUE = 2\n"
+    )
     return pack
 
 
