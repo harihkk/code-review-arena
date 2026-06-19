@@ -1,7 +1,7 @@
 """Score structured reviewer findings against multi-bug ground truth.
 
 Each ground-truth bug can be matched by at most one finding and vice versa
-(greedy one-to-one assignment by weighted score). Component scores are scaled
+(maximum-weight one-to-one assignment by weighted score). Component scores are scaled
 to the case's declared ``scoring.weights``, so per-case weight tuning is
 actually applied. Extra findings matching the case's ``acceptable_findings``
 allowlist are scored neutral; the remainder count as false positives with a
@@ -83,27 +83,60 @@ def _pair_components(
     )
 
 
+def _max_weight_matching(weights: dict[tuple[int, int], float], num_bugs: int) -> dict[int, int]:
+    """Deterministic maximum-weight one-to-one matching of bugs to findings.
+
+    Greedy assignment (take the single highest-weight pair, repeat) can be
+    globally suboptimal: a finding that is the best match for two bugs hogs one
+    and leaves the other unmatched even when a different pairing scores higher in
+    total. This returns an assignment with the maximum total weight. It is exact
+    via branch-and-bound over bugs, which is cheap because the number of bugs and
+    eligible findings per case is small. Ties resolve deterministically (skip a
+    bug before assigning it, lower finding indices first), so the result never
+    depends on dict ordering.
+    """
+    options = {
+        bug: sorted(finding for (b, finding) in weights if b == bug) for bug in range(num_bugs)
+    }
+    best_total = -1.0
+    best_assign: dict[int, int] = {}
+
+    def recurse(bug: int, used: frozenset[int], total: float, current: dict[int, int]) -> None:
+        nonlocal best_total, best_assign
+        if bug == num_bugs:
+            if total > best_total:
+                best_total = total
+                best_assign = dict(current)
+            return
+        recurse(bug + 1, used, total, current)  # leave this bug unmatched
+        for finding in options[bug]:
+            if finding in used:
+                continue
+            current[bug] = finding
+            recurse(bug + 1, used | {finding}, total + weights[(bug, finding)], current)
+            del current[bug]
+
+    recurse(0, frozenset(), 0.0, {})
+    return best_assign
+
+
 def _assign_findings_to_bugs(
     findings: list[Finding], case: BenchmarkCase
 ) -> dict[int, tuple[int, _PairComponents]]:
-    """Greedy one-to-one assignment of findings to bugs, best weighted value first."""
-    candidates: list[tuple[float, int, int, _PairComponents]] = []
+    """Maximum-weight one-to-one assignment of findings to bugs."""
+    components: dict[tuple[int, int], _PairComponents] = {}
+    weights: dict[tuple[int, int], float] = {}
     for finding_index, finding in enumerate(findings):
         for bug_index in range(len(case.ground_truth.bugs)):
-            components = _pair_components(finding, case, bug_index)
-            if components is not None:
-                candidates.append(
-                    (components.weighted_value(case), finding_index, bug_index, components)
-                )
-    candidates.sort(key=lambda item: (-item[0], item[1], item[2]))
-    assigned: dict[int, tuple[int, _PairComponents]] = {}
-    used_findings: set[int] = set()
-    for _value, finding_index, bug_index, components in candidates:
-        if bug_index in assigned or finding_index in used_findings:
-            continue
-        assigned[bug_index] = (finding_index, components)
-        used_findings.add(finding_index)
-    return assigned
+            pair = _pair_components(finding, case, bug_index)
+            if pair is not None:
+                components[(bug_index, finding_index)] = pair
+                weights[(bug_index, finding_index)] = pair.weighted_value(case)
+    matching = _max_weight_matching(weights, len(case.ground_truth.bugs))
+    return {
+        bug_index: (finding_index, components[(bug_index, finding_index)])
+        for bug_index, finding_index in matching.items()
+    }
 
 
 def _is_acceptable(finding: Finding, case: BenchmarkCase) -> bool:
