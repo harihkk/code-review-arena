@@ -32,11 +32,25 @@ class Job(BaseModel):
 
 
 class JobQueue:
-    def __init__(self, max_pending: int = 4) -> None:
+    def __init__(self, max_pending: int = 4, max_finished: int = 100) -> None:
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="arena-run")
         self._lock = threading.Lock()
         self._jobs: dict[str, Job] = {}
         self._max_pending = max_pending
+        self._max_finished = max_finished
+
+    def _evict_finished_locked(self) -> None:
+        """Bound memory: keep only the most recent ``max_finished`` finished jobs.
+
+        Active (queued/running) jobs are never evicted. Without this the job map
+        would grow without bound over a long-running server's lifetime.
+        """
+        finished = [job for job in self._jobs.values() if job.status in {"completed", "failed"}]
+        if len(finished) <= self._max_finished:
+            return
+        finished.sort(key=lambda job: job.completed_at or job.submitted_at)
+        for job in finished[: len(finished) - self._max_finished]:
+            self._jobs.pop(job.id, None)
 
     def submit(self, run: Callable[[], str]) -> Job | None:
         """Queue a callable returning a run_id; None when the queue is full."""
@@ -44,6 +58,7 @@ class JobQueue:
             pending = sum(1 for job in self._jobs.values() if job.status in {"queued", "running"})
             if pending >= self._max_pending:
                 return None
+            self._evict_finished_locked()
             job = Job(id=uuid.uuid4().hex, status="queued", submitted_at=datetime.now())
             self._jobs[job.id] = job
 
