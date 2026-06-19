@@ -6,7 +6,9 @@ fix applied on top of it, and the hidden tests pin the correct behavior.
 
 from pathlib import Path
 
-from arena.benchmark.certify import certify_pack
+from arena.benchmark.case_loader import load_cases
+from arena.benchmark.certify import _check_determinism, certify_pack
+from arena.execution.test_executor import TestExecutionResult
 
 # A bug file with a tightly tested fix plus an untested helper. The helper's
 # comparison and boolean mutants survive (no test exercises them), dragging the
@@ -99,6 +101,43 @@ def test_certify_flags_a_case_whose_baseline_does_not_fail(tmp_path):
     assert case.reference_passes is True
     assert not case.certified
     assert report.level == "development"
+
+
+class _ScriptedExecutor:
+    """Returns verdicts by call order: the first ``runs`` calls are the baseline
+    (made to fail), the rest are the reference. ``reference_pattern`` decides each
+    reference run's pass/fail, letting a test simulate a flaky reference."""
+
+    def __init__(self, runs, reference_pattern):
+        self.runs = runs
+        self.reference_pattern = reference_pattern
+        self.calls = 0
+
+    def execute(self, request):
+        self.calls += 1
+        if self.calls <= self.runs:
+            passed = False  # baseline must fail
+        else:
+            index = (self.calls - self.runs - 1) % len(self.reference_pattern)
+            passed = self.reference_pattern[index]
+        return TestExecutionResult(
+            case_id=request.case_id, ran=True, passed=passed, execution_mode="local"
+        )
+
+
+def test_determinism_gate_demotes_a_flaky_case(tmp_path):
+    # The reference passes on one run and fails on the next: the verdict wobbles,
+    # so the determinism gate must report not-deterministic (no 'verified' rung).
+    pack = _build_pack(
+        tmp_path,
+        after="def is_adult(age):\n    return age > 18\n",
+        reference_patch=REFERENCE_PATCH,
+    )
+    case = load_cases(pack)[0]
+    flaky = _ScriptedExecutor(runs=2, reference_pattern=[True, False])
+    assert _check_determinism(case, executor=flaky, allow_local_execution=True, runs=2) is False
+    stable = _ScriptedExecutor(runs=2, reference_pattern=[True])
+    assert _check_determinism(case, executor=stable, allow_local_execution=True, runs=2) is True
 
 
 def test_determinism_gate_promotes_a_stable_case_to_verified(tmp_path):
