@@ -9,10 +9,12 @@ from pathlib import Path, PurePosixPath
 
 from arena.patching.patch_models import PatchApplyRequest, PatchApplyResult
 from arena.patching.patch_parser import (
+    referenced_paths,
     touched_files,
     unsafe_patch_modes,
     unsafe_patch_paths,
 )
+from arena.security.paths import assert_safe_delete_target, validate_case_id
 
 # Files that influence test collection or execution regardless of location;
 # a patch may never create or modify them.
@@ -41,8 +43,16 @@ class PatchApplier:
 
     def apply(self, request: PatchApplyRequest) -> PatchApplyResult:
         started = time.perf_counter()
-        workspace = self.runs_root / request.run_id / "workspaces" / request.case_id
+        # case_id and run_id become physical path components; validate them as
+        # slugs so an adversarial pack cannot escape the workspaces root.
+        validate_case_id(request.case_id)
+        validate_case_id(request.run_id)
+        workspaces_root = self.runs_root / request.run_id / "workspaces"
+        workspace = workspaces_root / request.case_id
         if workspace.exists():
+            # Never rmtree outside the workspaces root (also rejects a symlinked
+            # workspace pointing elsewhere).
+            assert_safe_delete_target(workspaces_root, workspace)
             shutil.rmtree(workspace)
         workspace.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(request.source_dir, workspace)
@@ -61,7 +71,14 @@ class PatchApplier:
                 started,
                 unsafe_paths=unsafe,
             )
-        protected = [path for path in paths if is_protected_path(path, request.protected_paths)]
+        # Check protection against every path the diff names (sources, targets,
+        # renames, copies), not just the +++ targets in touched_files: a pure
+        # "rename to conftest.py" has no +++ line but must still be rejected.
+        protected = [
+            path
+            for path in referenced_paths(request.patch_text)
+            if is_protected_path(path, request.protected_paths)
+        ]
         if protected:
             return self._result(
                 request,

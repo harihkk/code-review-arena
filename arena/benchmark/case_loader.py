@@ -13,6 +13,7 @@ from arena.core.errors import ValidationError
 from arena.core.models import BenchmarkCase, CaseContext, CaseManifest, ReviewerCaseMetadata
 from arena.execution.integrity import find_unsafe_files
 from arena.patching.patch_parser import touched_files
+from arena.security.paths import resolve_under, validate_case_id
 
 
 @dataclass(frozen=True)
@@ -57,12 +58,21 @@ def load_case(case_dir: Path) -> BenchmarkCase:
             f"Case {case_dir.name} contains unsafe paths (symlinks or special files): "
             f"{', '.join(unsafe)}"
         )
+    # The case id and its input path fields are attacker-controlled and become
+    # physical paths; reject any that are not slugs or that escape the case dir.
+    validate_case_id(case.id)
+    for field in (case.input.diff, case.input.before_dir, case.input.after_dir):
+        resolve_under(case_dir, field)
+    if case.input.tests_dir is not None:
+        resolve_under(case_dir, case.input.tests_dir)
     case.case_dir = case_dir
     return case
 
 
 def load_cases(benchmark_dir: Path) -> list[BenchmarkCase]:
     manifest = load_manifest(benchmark_dir)
+    for case_id in manifest.cases:
+        validate_case_id(case_id)
     cases = [load_case(benchmark_dir / case_id) for case_id in manifest.cases]
     if manifest.default_docker_image:
         for case in cases:
