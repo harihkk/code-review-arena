@@ -190,7 +190,10 @@ def _verified_run(**overrides) -> RunResult:
         execution_backend="docker",
         coverage_rate=1.0,
         metadata=RunMetadata(
-            prompt_version="v2", benchmark_version="v1", pack_checksum_verified=True
+            prompt_version="v2",
+            benchmark_version="v1",
+            pack_checksum_verified=True,
+            pack_digest_externally_verified=True,
         ),
     )
     base.update(overrides)
@@ -198,22 +201,50 @@ def _verified_run(**overrides) -> RunResult:
 
 
 def test_leaderboard_eligibility_rules():
-    # Default eligibility now requires a verified run: docker-backed, full
-    # coverage, and a pack whose checksum matched a pinned pack.sha256.
+    # Default eligibility requires an externally verified run: docker-backed, full
+    # coverage, and a pack content match against an out-of-band digest.
     assert leaderboard_eligible(_verified_run()) is True
     # Pre-v2 and non-complete runs are excluded regardless of verification.
     assert leaderboard_eligible(_verified_run(schema_version=1)) is False
     for status in ("partial", "invalid", "failed", "cancelled", "legacy"):
         assert leaderboard_eligible(_verified_run(run_status=status)) is False
-    # A docker run on a pack that was never pinned (pack_checksum_verified is None)
-    # is unverified: excluded by default, inspectable with include_unverified.
-    unpinned = _verified_run(metadata=RunMetadata(prompt_version="v2", benchmark_version="v1"))
-    assert leaderboard_eligible(unpinned) is False
-    assert leaderboard_eligible(unpinned, include_unverified=True) is True
+    # A self-consistent pack (its own pack.sha256 matches) that was NOT checked
+    # against an external digest is ineligible: regenerating pack.sha256 cannot
+    # buy a leaderboard spot. Inspectable only with include_unverified.
+    internal_only = _verified_run(
+        metadata=RunMetadata(
+            prompt_version="v2",
+            benchmark_version="v1",
+            pack_checksum_verified=True,
+            pack_digest_externally_verified=False,
+        )
+    )
+    assert leaderboard_eligible(internal_only) is False
+    assert leaderboard_eligible(internal_only, include_unverified=True) is True
     # Trusted-local runs are unverified too: excluded by default, included on opt-in.
     local = _minimal_run(schema_version=2, run_status="complete", execution_backend="trusted-local")
     assert leaderboard_eligible(local) is False
     assert leaderboard_eligible(local, include_unverified=True) is True
+
+
+def test_self_consistent_pack_is_not_externally_verified(tmp_path):
+    import shutil
+
+    from arena.benchmark.pack_hash import write_checksum
+
+    # Copy a valid pack and regenerate its own pack.sha256, exactly what an
+    # attacker who edited a pack would do, then run it with no external digest.
+    pack = tmp_path / "v1_copy"
+    shutil.copytree(V1, pack)
+    write_checksum(pack)
+    run = run_benchmark(
+        pack, ControlReviewer("perfect"), output_dir=tmp_path / "runs", persist=False, mode="review"
+    )
+    # The pack matches its own hash, but that is only self-consistency...
+    assert run.metadata.pack_checksum_verified is True
+    # ...it was never verified against an external digest, so it cannot be eligible.
+    assert run.metadata.pack_digest_externally_verified is False
+    assert leaderboard_eligible(run) is False
 
 
 def test_expected_pack_sha256_mismatch_aborts_before_run_dir(tmp_path):

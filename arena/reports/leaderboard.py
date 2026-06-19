@@ -41,9 +41,12 @@ def leaderboard_eligible(run: RunResult, *, include_unverified: bool = False) ->
 
     A verified run is one whose result can be trusted: it ran in Docker (not on
     the host), covered every eligible case, and ran a pack whose content matched
-    a pinned pack.sha256. Anything short of that (trusted-local, no backend, a
-    pack that was never pinned, or partial coverage) is inspectable only with
-    include_unverified, never on the default leaderboard.
+    a digest supplied out of band (--expected-pack-sha256). The pack's own
+    pack.sha256 is NOT sufficient: it lives inside the pack, so an edited pack
+    with a regenerated hash still has pack_checksum_verified True. Anything short
+    of an external digest match (trusted-local, no backend, partial coverage, or
+    only self-consistent) is inspectable only with include_unverified, never on
+    the default leaderboard.
     """
     if run.schema_version < 2 or run.run_status != "complete":
         return False
@@ -52,7 +55,7 @@ def leaderboard_eligible(run: RunResult, *, include_unverified: bool = False) ->
     return (
         run.execution_backend == "docker"
         and run.coverage_rate == 1.0
-        and run.metadata.pack_checksum_verified is True
+        and run.metadata.pack_digest_externally_verified is True
     )
 
 

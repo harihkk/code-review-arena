@@ -438,7 +438,14 @@ class RunMetadata(BaseModel):
     test_assisted: bool = False
     pack_checksum: str | None = None
     # True/False when the pack ships a pack.sha256 to compare against; None otherwise.
+    # This is SELF-consistency only: pack.sha256 lives inside the pack, so an edited
+    # pack with a regenerated hash still verifies True. It is not a trust anchor.
     pack_checksum_verified: bool | None = None
+    # True only when the run was checked against a digest supplied out of band
+    # (--expected-pack-sha256) and matched. This is the external trust anchor that
+    # default leaderboard eligibility requires; a regenerated internal pack.sha256
+    # cannot set it.
+    pack_digest_externally_verified: bool = False
 
 
 class RunResult(BaseModel):

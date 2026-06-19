@@ -615,6 +615,10 @@ def run_benchmark(
             test_assisted=bool(getattr(reviewer, "reveal_test_output", False)),
             pack_checksum=checksum,
             pack_checksum_verified=checksum_verified,
+            # Reaching here with expected_pack_sha256 set means it matched (a
+            # mismatch aborts above), so the pack was verified against an external
+            # digest, not just its own pack.sha256.
+            pack_digest_externally_verified=expected_pack_sha256 is not None,
         ),
         case_results=case_results,
         total_score=(
@@ -692,6 +696,7 @@ def _write_run_manifest(
         "benchmark_dir": str(benchmark_dir),
         "pack_checksum": run.metadata.pack_checksum,
         "pack_checksum_verified": run.metadata.pack_checksum_verified,
+        "pack_digest_externally_verified": run.metadata.pack_digest_externally_verified,
         "prompt_version": run.metadata.prompt_version,
         "reviewer": {
             "identifier": reviewer.identifier,
