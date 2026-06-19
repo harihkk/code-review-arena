@@ -22,7 +22,9 @@ _COPY_BACKOFF_SECONDS = 0.1
 def _copytree_resilient(src: Path, dst: Path) -> None:
     for attempt in range(_COPY_RETRIES):
         try:
-            shutil.copytree(src, dst, dirs_exist_ok=True)
+            # symlinks=True copies links as links rather than following them into
+            # host data; admission rejects symlinks, this is defense in depth.
+            shutil.copytree(src, dst, dirs_exist_ok=True, symlinks=True)
             return
         except InterruptedError:
             if attempt == _COPY_RETRIES - 1:
