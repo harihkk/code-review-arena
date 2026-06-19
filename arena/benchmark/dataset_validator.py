@@ -79,6 +79,21 @@ def validate_dataset(benchmark_dir: Path) -> list[str]:
     return errors
 
 
+def load_and_validate_pack(benchmark_dir: Path) -> list[BenchmarkCase]:
+    """Load a pack only if it passes validation, else raise ValidationError.
+
+    This is the single enforced precondition for execution: callers that run a
+    pack (arena run, certify-pack, the API job) go through here so a partially
+    valid or tampered pack aborts before any run directory or side effect is
+    created, rather than relying on a separate `arena validate` step.
+    """
+    errors = validate_dataset(benchmark_dir)
+    if errors:
+        joined = "\n  ".join(errors)
+        raise ValidationError(f"benchmark pack {benchmark_dir} failed validation:\n  {joined}")
+    return load_cases(benchmark_dir)
+
+
 def _manifest_directory_mismatches(benchmark_dir: Path) -> list[str]:
     """Flag case directories present on disk but absent from the manifest (and vice versa)."""
     manifest = load_manifest(benchmark_dir)

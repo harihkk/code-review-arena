@@ -24,7 +24,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from arena.benchmark.case_loader import load_cases
+from arena.benchmark.dataset_validator import load_and_validate_pack
 from arena.benchmark.mutation import run_mutation_test
 from arena.benchmark.solution import fixed_solution
 from arena.core.models import BenchmarkCase
@@ -231,7 +231,7 @@ def certify_pack(
 ) -> PackCertification:
     executor = TestExecutor()
     result = PackCertification(pack=benchmark_dir.name)
-    for case in load_cases(benchmark_dir):
+    for case in load_and_validate_pack(benchmark_dir):
         result.cases.append(
             certify_case(
                 case,

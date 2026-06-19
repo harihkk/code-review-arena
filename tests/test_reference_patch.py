@@ -4,6 +4,7 @@ import pytest
 
 from arena.benchmark.benchmark_runner import run_benchmark
 from arena.benchmark.case_loader import build_context, load_cases
+from arena.core.errors import ValidationError
 from arena.core.registry import create_reviewer
 from arena.patching.patch_applier import PatchApplier
 from arena.patching.patch_models import PatchApplyRequest
@@ -56,24 +57,26 @@ def test_reference_patch_reviewer_passes_audit_v1(audit_benchmark_dir: Path, tmp
     assert all(result.deterministic_pass for result in run.case_results)
 
 
-def test_missing_reference_patch_fails_gracefully(audit_benchmark_dir: Path, tmp_path: Path):
+def test_missing_reference_patch_aborts_the_run(audit_benchmark_dir: Path, tmp_path: Path):
     import shutil
 
     case = load_cases(audit_benchmark_dir)[0]
     bench_copy = tmp_path / "audit_copy"
     shutil.copytree(audit_benchmark_dir, bench_copy)
     (bench_copy / case.id / REFERENCE_PATCH_FILENAME).unlink()
+    # The reviewer itself still degrades gracefully (no patch artifact to load).
     context = build_context(case).model_copy(update={"case_dir": bench_copy / case.id})
     finding = ReferencePatchReviewer().review(context).parsed_response.findings[0]
     assert finding.suggested_patch is None
-    run = run_benchmark(
-        bench_copy,
-        create_reviewer("reference-patch"),
-        output_dir=tmp_path / "runs",
-        db_path=tmp_path / "arena.db",
-        mode="full",
-        allow_local_execution=True,
-    )
-    missing_result = next(item for item in run.case_results if item.case_id == case.id)
-    assert missing_result.deterministic_pass is False
-    assert "patch_required_but_missing" in missing_result.failure_reasons
+    # But a pack missing a required reference.patch is invalid, so the run aborts
+    # at validation rather than silently producing a failed case (mandatory-pack-
+    # validation behavior). validate_case has always flagged this; it is now enforced.
+    with pytest.raises(ValidationError):
+        run_benchmark(
+            bench_copy,
+            create_reviewer("reference-patch"),
+            output_dir=tmp_path / "runs",
+            db_path=tmp_path / "arena.db",
+            mode="full",
+            allow_local_execution=True,
+        )

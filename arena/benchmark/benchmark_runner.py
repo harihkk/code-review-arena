@@ -13,7 +13,8 @@ from time import monotonic
 from typing import Literal
 
 from arena import __version__
-from arena.benchmark.case_loader import build_context, load_cases, load_manifest
+from arena.benchmark.case_loader import build_context, load_manifest
+from arena.benchmark.dataset_validator import load_and_validate_pack
 from arena.benchmark.pack_hash import pack_checksum, stored_checksum
 from arena.core.config import (
     PROMPT_VERSION,
@@ -503,6 +504,9 @@ def run_benchmark(
     max_wall_seconds: float | None = None,
     max_cost: float | None = None,
 ) -> RunResult:
+    # Validation is a precondition: a partially valid or tampered pack must abort
+    # before any run directory or side effect is created.
+    cases = load_and_validate_pack(benchmark_dir)
     root = output_dir or runs_path()
     root.mkdir(parents=True, exist_ok=True)
     run_id, run_dir = _reserve_run_dir(root)
@@ -533,7 +537,7 @@ def run_benchmark(
     test_executor = TestExecutor()
     patch_applier = PatchApplier(root)
     selected_beta = beta or 1.0
-    for case in load_cases(benchmark_dir):
+    for case in cases:
         if budget_stopped_reason is None:
             elapsed = (datetime.now() - started).total_seconds()
             if max_wall_seconds is not None and elapsed >= max_wall_seconds:
