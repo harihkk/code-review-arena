@@ -6,12 +6,13 @@ and contaminate later cases, hold ports, or keep burning CPU. We start the child
 in a new session and, on timeout, cancellation, or any error, signal the entire
 process group.
 
-Byte-bounded output (a hard memory cap enforced by incremental reads, with the
-process group killed on overflow) is implemented and tested on POSIX only. The
-Windows path is best-effort and UNVERIFIED: it buffers the full output via
-subprocess.run before truncating, so it does not bound parent memory and is not
-a supported execution platform for adversarial output. Supported, verified
-execution is POSIX trusted-local and Docker (Linux).
+Safe execution of pack-controlled commands (process-group tree-kill on timeout
+and a hard byte-bounded memory cap enforced by incremental reads) is implemented
+and tested on POSIX only. On Windows there is no equivalent here, so command
+execution FAILS CLOSED: run_supervised raises ExecutionError rather than running
+a pack command with no tree-kill and unbounded output. Non-execution commands
+(reports, validation, pack hashing) do not call run_supervised and remain usable
+on Windows; to execute benchmarks, use Docker or a POSIX environment.
 """
 
 from __future__ import annotations
@@ -25,6 +26,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from time import monotonic
+
+from arena.core.errors import ExecutionError
 
 # How long to wait for a group to exit after each signal before escalating.
 _GROUP_GRACE_SECONDS = 2.0
@@ -44,12 +47,6 @@ class SupervisedResult:
     output_limit_exceeded: bool = False
 
 
-def _truncate(text: str, limit: int | None) -> str:
-    if limit is None or len(text) <= limit:
-        return text
-    return text[:limit] + f"\n... [truncated at {limit} bytes]"
-
-
 def run_supervised(
     args: list[str],
     *,
@@ -61,11 +58,17 @@ def run_supervised(
 ) -> SupervisedResult:
     """Run argv with a hard timeout, killing the whole process tree on timeout.
 
-    On POSIX the child runs in a new session so the entire tree can be signalled;
-    on Windows we fall back to ``subprocess.run`` (best-effort, no tree kill).
+    The child runs in a new session so the entire tree can be signalled, and its
+    output is byte-bounded. This is POSIX-only; on Windows the call fails closed
+    (raises ExecutionError) because there is no tree-kill or memory bound here.
     """
     if sys.platform == "win32":
-        return _run_windows(args, cwd=cwd, env=env, timeout=timeout, output_limit=output_limit)
+        raise ExecutionError(
+            "Running pack-controlled commands is not supported on Windows: this "
+            "harness can only bound output and kill the process tree on POSIX. "
+            "Run benchmarks under Docker or a POSIX (Linux/macOS) environment. "
+            "Non-execution commands (reports, validation, pack hashing) still work."
+        )
     return _run_posix(
         args, cwd=cwd, env=env, timeout=timeout, preexec_fn=preexec_fn, output_limit=output_limit
     )
@@ -195,34 +198,3 @@ def _terminate_group(process: subprocess.Popen) -> None:
             return
         except subprocess.TimeoutExpired:
             continue
-
-
-def _run_windows(
-    args: list[str],
-    *,
-    cwd: Path,
-    env: dict[str, str],
-    timeout: float,
-    output_limit: int | None,
-) -> SupervisedResult:
-    # UNVERIFIED best-effort path: capture_output buffers the whole output in
-    # memory before truncation, so output_limit is NOT a memory bound here (it
-    # only trims the saved string, by characters). Windows is not a supported
-    # execution platform for adversarial output; output_limit_exceeded is left
-    # unset because overflow cannot be detected after the fact.
-    try:
-        completed = subprocess.run(
-            args, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout, check=False
-        )
-        return SupervisedResult(
-            completed.returncode,
-            _truncate(completed.stdout, output_limit),
-            _truncate(completed.stderr, output_limit),
-            timed_out=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        stdout = exc.stdout if isinstance(exc.stdout, str) else ""
-        stderr = exc.stderr if isinstance(exc.stderr, str) else ""
-        return SupervisedResult(
-            None, _truncate(stdout, output_limit), _truncate(stderr, output_limit), timed_out=True
-        )
