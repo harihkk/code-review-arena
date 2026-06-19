@@ -32,6 +32,18 @@ def test_max_weight_matching_with_no_eligible_pairs_is_empty():
     assert _max_weight_matching({}, num_bugs=2) == {}
 
 
+def test_max_weight_matching_bounds_compute_on_oversized_input():
+    # Adversarial blow-up: many bugs each eligible to many findings. The exact
+    # search is factorial here and would hang without a cap; the step budget must
+    # trip and fall back to a valid greedy matching that returns promptly.
+    n = 25
+    weights = {(bug, finding): float(bug + finding) for bug in range(n) for finding in range(n)}
+    matching = _max_weight_matching(weights, num_bugs=n)
+    assert len(set(matching.values())) == len(matching)  # no finding reused
+    assert all(0 <= bug < n for bug in matching)
+    assert all(0 <= finding < n for finding in matching.values())
+
+
 def _case(**overrides) -> BenchmarkCase:
     data = {
         "id": "synthetic_case",
