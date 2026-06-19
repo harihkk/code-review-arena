@@ -45,6 +45,11 @@ def load_manifest(benchmark_dir: Path) -> CaseManifest:
 
 
 def load_case(case_dir: Path) -> BenchmarkCase:
+    # A symlinked case directory would let the loader read and (after copy) execute
+    # files outside the pack. find_unsafe_files walks the contents but os.walk
+    # follows a symlinked root, so the root itself must be rejected here.
+    if case_dir.is_symlink():
+        raise ValidationError(f"case directory is a symlink: {case_dir}")
     config_path = case_dir / "case.yaml"
     if not config_path.is_file():
         raise ValidationError(f"Missing case.yaml: {config_path}")
@@ -70,9 +75,17 @@ def load_case(case_dir: Path) -> BenchmarkCase:
 
 
 def load_cases(benchmark_dir: Path) -> list[BenchmarkCase]:
+    if benchmark_dir.is_symlink():
+        raise ValidationError(f"benchmark root is a symlink: {benchmark_dir}")
     manifest = load_manifest(benchmark_dir)
     for case_id in manifest.cases:
+        # Slug-validate, reject a symlinked case directory, and resolve the path
+        # under the benchmark root so a manifest entry cannot escape the pack
+        # (a symlinked case dir would otherwise become an accepted outside root).
         validate_case_id(case_id)
+        if (benchmark_dir / case_id).is_symlink():
+            raise ValidationError(f"case directory is a symlink: {case_id}")
+        resolve_under(benchmark_dir, case_id)
     cases = [load_case(benchmark_dir / case_id) for case_id in manifest.cases]
     if manifest.default_docker_image:
         for case in cases:

@@ -9,7 +9,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from arena.core.errors import ValidationError
 from arena.core.models import BenchmarkCase
+from arena.execution.integrity import find_unsafe_files
 
 # The directory walk inside copytree can surface EINTR when a signal arrives
 # mid-copy (observed under load on macOS while a model run was in flight). A copy
@@ -44,4 +46,14 @@ def materialized_case(case: BenchmarkCase) -> Iterator[Path]:
             # Copy to the case's declared tests_dir, not a hardcoded "tests", so a
             # case whose test_command targets another directory still finds them.
             _copytree_resilient(tests, root / tests_dir)
+        # copytree preserves symlinks rather than following them; re-scan the
+        # materialized workspace and refuse to execute if any symlink or special
+        # file survived (a link the local test command could otherwise follow out
+        # of the workspace at runtime).
+        unsafe = find_unsafe_files(root)
+        if unsafe:
+            raise ValidationError(
+                f"workspace for case {case.id} contains unsafe entries after copy: "
+                f"{', '.join(unsafe)}"
+            )
         yield root
