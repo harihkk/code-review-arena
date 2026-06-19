@@ -5,6 +5,13 @@ fixture spawns (background shells, dev servers, grandchildren) survive a timeout
 and contaminate later cases, hold ports, or keep burning CPU. We start the child
 in a new session and, on timeout, cancellation, or any error, signal the entire
 process group.
+
+Byte-bounded output (a hard memory cap enforced by incremental reads, with the
+process group killed on overflow) is implemented and tested on POSIX only. The
+Windows path is best-effort and UNVERIFIED: it buffers the full output via
+subprocess.run before truncating, so it does not bound parent memory and is not
+a supported execution platform for adversarial output. Supported, verified
+execution is POSIX trusted-local and Docker (Linux).
 """
 
 from __future__ import annotations
@@ -198,6 +205,11 @@ def _run_windows(
     timeout: float,
     output_limit: int | None,
 ) -> SupervisedResult:
+    # UNVERIFIED best-effort path: capture_output buffers the whole output in
+    # memory before truncation, so output_limit is NOT a memory bound here (it
+    # only trims the saved string, by characters). Windows is not a supported
+    # execution platform for adversarial output; output_limit_exceeded is left
+    # unset because overflow cannot be detected after the fact.
     try:
         completed = subprocess.run(
             args, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout, check=False
