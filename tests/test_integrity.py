@@ -7,17 +7,86 @@ from pathlib import Path
 import pytest
 
 from arena.benchmark.benchmark_runner import run_benchmark
-from arena.benchmark.case_loader import load_case
+from arena.benchmark.case_loader import load_case, load_cases
 from arena.core.errors import ValidationError
-from arena.core.models import CaseContext, Finding, ReviewerResponse, ReviewResult
+from arena.core.models import BenchmarkCase, CaseContext, Finding, ReviewerResponse, ReviewResult
 from arena.execution.integrity import (
     file_manifest,
     find_unsafe_files,
     manifest_changes,
     unsafe_entries,
 )
+from arena.execution.sandbox import materialized_case
 from arena.execution.test_executor import TestExecutionRequest, TestExecutor
 from arena.reviewers.base import BaseReviewer
+
+
+def _case_with_after_dir(case_dir: Path) -> BenchmarkCase:
+    case = BenchmarkCase.model_validate(
+        {
+            "id": "c",
+            "title": "t",
+            "category": "correctness",
+            "severity": "high",
+            "stack": ["python"],
+            "description": "d",
+            "input": {"after_dir": "after", "tests_dir": None},
+            "ground_truth": {
+                "bugs": [
+                    {
+                        "summary": "b",
+                        "files": [{"path": "app.py", "line_ranges": [{"start": 1, "end": 1}]}],
+                        "concepts": ["x"],
+                    }
+                ]
+            },
+        }
+    )
+    case.case_dir = case_dir
+    return case
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_load_cases_rejects_a_symlinked_benchmark_root(tmp_path):
+    real = tmp_path / "real_pack"
+    real.mkdir()
+    (real / "manifest.yaml").write_text("version: v\nname: n\ncases: []\n")
+    link = tmp_path / "linked_pack"
+    link.symlink_to(real, target_is_directory=True)
+    with pytest.raises(ValidationError, match="symlink"):
+        load_cases(link)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_load_cases_rejects_a_symlinked_case_directory(tmp_path):
+    # A valid case dir lives OUTSIDE the pack; a manifest entry points at it via a
+    # symlink. find_unsafe_files would follow the symlinked root, so loading must
+    # reject the symlinked case directory before reading anything.
+    outside = tmp_path / "outside_case"
+    (outside / "after").mkdir(parents=True)
+    (outside / "after" / "app.py").write_text("x = 1\n")
+    pack = tmp_path / "pack"
+    pack.mkdir()
+    (pack / "manifest.yaml").write_text("version: v\nname: n\ncases: [case_001]\n")
+    (pack / "case_001").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValidationError, match="symlink"):
+        load_cases(pack)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_materialized_case_refuses_a_symlink_that_slipped_into_the_workspace(tmp_path):
+    # Simulate a symlink that bypassed admission: copytree preserves it, and the
+    # workspace re-scan must refuse to execute rather than leave it for the test
+    # command to follow out of the workspace.
+    case_dir = tmp_path / "case"
+    after = case_dir / "after"
+    after.mkdir(parents=True)
+    (after / "app.py").write_text("x = 1\n")
+    (after / "link").symlink_to("/etc/hosts")
+    with pytest.raises(ValidationError, match="unsafe"):
+        with materialized_case(_case_with_after_dir(case_dir)):
+            pass
+
 
 TAMPER_PATCH = "--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-VALUE = 1\n+VALUE = 2\n"
 
