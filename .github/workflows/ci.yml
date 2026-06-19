@@ -138,3 +138,26 @@ jobs:
           cache-dependency-path: dashboard/package-lock.json
       - run: npm ci
       - run: npm run build
+
+  windows-safety:
+    name: Windows fail-closed
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -e ".[dev]"
+      # Pack-controlled command execution must fail closed on Windows (there is no
+      # process-tree kill or byte-bounded output here).
+      - name: Command execution fails closed
+        run: pytest tests/test_process_supervisor.py -k fails_closed -q
+      # Non-execution commands (validation, schema, pack hashing, listing) stay
+      # usable on Windows.
+      - name: Non-execution commands still work
+        run: |
+          arena validate benchmark_sets/v1
+          arena schema > schema.json
+          arena pack-hash benchmark_sets/v1
+          arena list-cases

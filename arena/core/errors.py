@@ -19,3 +19,7 @@ class InvalidReviewerOutput(ReviewerError):
 
 class StorageError(ArenaError):
     """Raised when the results database cannot be used safely."""
+
+
+class ExecutionError(ArenaError):
+    """Raised when a pack-controlled command cannot be run safely."""
