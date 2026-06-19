@@ -6,6 +6,7 @@ import json
 import platform
 import shutil
 import subprocess
+import warnings
 from datetime import datetime
 from pathlib import Path
 from time import monotonic
@@ -14,7 +15,12 @@ from typing import Literal
 from arena import __version__
 from arena.benchmark.case_loader import build_context, load_cases, load_manifest
 from arena.benchmark.pack_hash import pack_checksum, stored_checksum
-from arena.core.config import PROMPT_VERSION, database_path, runs_path
+from arena.core.config import (
+    PROMPT_VERSION,
+    database_path,
+    runs_path,
+    trusted_pack_hashes,
+)
 from arena.core.models import (
     RUN_SCHEMA_VERSION,
     BenchmarkCase,
@@ -478,6 +484,18 @@ def run_benchmark(
     manifest = load_manifest(benchmark_dir)
     checksum = pack_checksum(benchmark_dir)
     pinned = stored_checksum(benchmark_dir)
+    # Defense in depth: when an operator pins a trusted-hash allowlist, a pack
+    # not on it does not get host execution even if the caller passed the flag.
+    effective_allow_local = allow_local_execution
+    if allow_local_execution:
+        trusted = trusted_pack_hashes()
+        if trusted and checksum not in trusted:
+            effective_allow_local = False
+            warnings.warn(
+                f"local execution requested but pack checksum {checksum} is not in "
+                "ARENA_TRUSTED_PACK_HASHES; running without local execution.",
+                stacklevel=2,
+            )
     started = datetime.now()
     # Monotonic deadline makes max_wall_seconds a hard budget: each case's
     # execution timeout is clamped to the time left, not just checked between cases.
@@ -514,7 +532,7 @@ def run_benchmark(
                     run_id=run_id,
                     mode=mode,
                     selected_beta=selected_beta,
-                    allow_local_execution=allow_local_execution,
+                    allow_local_execution=effective_allow_local,
                     deadline=run_deadline,
                 )
             )

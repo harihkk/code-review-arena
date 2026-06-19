@@ -116,6 +116,42 @@ def test_full_run_is_invalid_when_no_execution_backend_is_available(tmp_path):
     assert leaderboard_eligible(run) is False
 
 
+def test_local_execution_requires_a_trusted_pack_hash(tmp_path, monkeypatch):
+    import warnings
+
+    from arena.benchmark.pack_hash import pack_checksum
+
+    # An allowlist that does not include this pack's checksum blocks host execution
+    # even though --allow-local-execution was passed: nothing runs, so the run is
+    # invalid rather than silently trusting an unlisted pack.
+    monkeypatch.setenv("ARENA_TRUSTED_PACK_HASHES", "0000deadbeef")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        blocked = run_benchmark(
+            V1,
+            ControlReviewer("perfect_patch"),
+            output_dir=tmp_path / "blocked",
+            persist=False,
+            mode="full",
+            allow_local_execution=True,
+        )
+    assert blocked.execution_backend == "none"
+    assert blocked.run_status == "invalid"
+
+    # The pack's real checksum on the allowlist permits local execution.
+    monkeypatch.setenv("ARENA_TRUSTED_PACK_HASHES", pack_checksum(V1))
+    allowed = run_benchmark(
+        V1,
+        ControlReviewer("perfect_patch"),
+        output_dir=tmp_path / "allowed",
+        persist=False,
+        mode="full",
+        allow_local_execution=True,
+    )
+    assert allowed.execution_backend == "trusted-local"
+    assert allowed.run_status == "complete"
+
+
 def test_complete_run_records_full_coverage(tmp_path):
     run = run_benchmark(V1, ControlReviewer("perfect"), output_dir=tmp_path / "runs", persist=False)
     assert run.schema_version == RUN_SCHEMA_VERSION

@@ -52,6 +52,20 @@ def benchmark_root() -> Path:
     return Path(value) if value else project_root() / "benchmark_sets"
 
 
+def trusted_pack_hashes() -> set[str]:
+    """Operator-allowlisted pack checksums permitted to run tests on the host.
+
+    Local execution runs fixture-owned test commands on the host (a convenience,
+    not a security boundary). When ARENA_TRUSTED_PACK_HASHES is set (a space- or
+    comma-separated list of pack sha256 values), local execution is restricted to
+    packs whose checksum is listed, so a single --allow-local-execution opt-in no
+    longer trusts every pack. An empty value (the default) keeps the prior
+    behavior where the flag alone permits local execution.
+    """
+    raw = os.getenv("ARENA_TRUSTED_PACK_HASHES", "")
+    return {token.strip() for token in raw.replace(",", " ").split() if token.strip()}
+
+
 def resolve_benchmark_set(name: str) -> Path | None:
     """Resolve a stored benchmark-set name to a directory under benchmark_root.
 
