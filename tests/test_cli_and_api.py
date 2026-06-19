@@ -96,6 +96,57 @@ def test_api_run_trace_contains_dashboard_evidence(monkeypatch, tmp_path):
     assert leaderboard[0]["deterministic_metrics"]["validated_f_beta"] == 0
 
 
+def test_api_leaderboard_requires_external_digest(monkeypatch, tmp_path):
+    # The API /leaderboard goes through RunRepository.leaderboard, so it must apply
+    # the same eligibility policy as the file leaderboard: a Docker run whose pack
+    # only matched its own (regenerable) pack.sha256 is not externally verified and
+    # must not appear on the default leaderboard.
+    from datetime import datetime
+
+    from arena.core.config import database_path
+    from arena.core.models import RunMetadata, RunResult
+    from arena.storage.repository import RunRepository
+
+    monkeypatch.setenv("ARENA_DB_PATH", str(tmp_path / "api.db"))
+
+    def _docker_run(run_id: str, model: str, *, externally_verified: bool) -> RunResult:
+        return RunResult(
+            run_id=run_id,
+            benchmark_set="v1",
+            reviewer="control",
+            model=model,
+            started_at=datetime.now(),
+            completed_at=datetime.now(),
+            metadata=RunMetadata(
+                prompt_version="v2",
+                benchmark_version="v1",
+                pack_digest_externally_verified=externally_verified,
+            ),
+            case_results=[],
+            total_score=0.0,
+            schema_version=2,
+            run_status="complete",
+            execution_backend="docker",
+            mode="full",
+            bugs_found=0,
+            correct_files=0,
+            correct_lines=0,
+            false_positives=0,
+            total_cost=0.0,
+            total_latency_ms=0,
+        )
+
+    repo = RunRepository(database_path())
+    repo.save(_docker_run("internal", "self-consistent", externally_verified=False))
+    repo.save(_docker_run("external", "externally-verified", externally_verified=True))
+
+    client = TestClient(server_app)
+    default = {row["model"] for row in client.get("/leaderboard").json()}
+    assert default == {"externally-verified"}
+    both = {row["model"] for row in client.get("/leaderboard?include_unverified=true").json()}
+    assert both == {"self-consistent", "externally-verified"}
+
+
 def test_api_audit_trace_uses_the_runs_benchmark_pack(monkeypatch, tmp_path):
     monkeypatch.setenv("ARENA_DB_PATH", str(tmp_path / "audit-api.db"))
     monkeypatch.setenv("ARENA_RUNS_DIR", str(tmp_path / "audit-runs"))

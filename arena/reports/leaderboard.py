@@ -32,30 +32,46 @@ def load_runs(runs_dir: Path) -> list[RunResult]:
     return [read_json_report(path) for path in paths]
 
 
-def leaderboard_eligible(run: RunResult, *, include_unverified: bool = False) -> bool:
-    """Only complete, verified v2 runs are comparable on the default leaderboard.
+def eligibility_from_fields(
+    *,
+    schema_version: int,
+    run_status: str,
+    execution_backend: str,
+    coverage_rate: float,
+    pack_digest_externally_verified: bool,
+    include_unverified: bool = False,
+) -> bool:
+    """The single leaderboard-eligibility policy, in terms of plain fields.
 
-    Pre-v2 runs (schema_version < 2) are legacy and excluded; partial, invalid,
-    failed, and cancelled runs are excluded because their numbers are not
-    comparable to a full run.
-
-    A verified run is one whose result can be trusted: it ran in Docker (not on
-    the host), covered every eligible case, and ran a pack whose content matched
-    a digest supplied out of band (--expected-pack-sha256). The pack's own
-    pack.sha256 is NOT sufficient: it lives inside the pack, so an edited pack
-    with a regenerated hash still has pack_checksum_verified True. Anything short
-    of an external digest match (trusted-local, no backend, partial coverage, or
-    only self-consistent) is inspectable only with include_unverified, never on
-    the default leaderboard.
+    Shared by the file/report leaderboard (RunResult objects) and the database
+    repository / API (stored run JSON), so they never drift. A verified run is
+    one whose result can be trusted: complete v2, run in Docker (not on the host),
+    full coverage, and a pack whose content matched a digest supplied out of band
+    (--expected-pack-sha256). The pack's own pack.sha256 is NOT sufficient -- it
+    lives inside the pack, so an edited pack with a regenerated hash still passes
+    self-consistency. Anything short of an external digest match is inspectable
+    only with include_unverified, never on the default leaderboard.
     """
-    if run.schema_version < 2 or run.run_status != "complete":
+    if schema_version < 2 or run_status != "complete":
         return False
     if include_unverified:
         return True
     return (
-        run.execution_backend == "docker"
-        and run.coverage_rate == 1.0
-        and run.metadata.pack_digest_externally_verified is True
+        execution_backend == "docker"
+        and coverage_rate == 1.0
+        and pack_digest_externally_verified is True
+    )
+
+
+def leaderboard_eligible(run: RunResult, *, include_unverified: bool = False) -> bool:
+    """Whether a RunResult is comparable on the default leaderboard."""
+    return eligibility_from_fields(
+        schema_version=run.schema_version,
+        run_status=run.run_status,
+        execution_backend=run.execution_backend,
+        coverage_rate=run.coverage_rate,
+        pack_digest_externally_verified=run.metadata.pack_digest_externally_verified,
+        include_unverified=include_unverified,
     )
 
 

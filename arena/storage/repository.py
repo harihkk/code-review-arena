@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from arena.core.models import RunResult
+from arena.reports.leaderboard import eligibility_from_fields
 from arena.storage.db import connect
 
 
@@ -188,13 +189,20 @@ class RunRepository:
         history: dict[tuple[str, str | None, str], int] = {}
         for row in rows:
             data: dict[str, Any] = json.loads(row["run_json"])
-            # Only complete, verified v2 runs are comparable; legacy, non-complete,
-            # and (unless opted in) trusted-local runs are preserved in storage but
-            # never ranked (mirrors leaderboard_rows / leaderboard_eligible).
-            is_v2 = data.get("schema_version", 1) >= 2
-            if not is_v2 or data.get("run_status", "complete") != "complete":
-                continue
-            if not include_unverified and data.get("execution_backend") == "trusted-local":
+            # Shared eligibility policy (same as leaderboard_rows / leaderboard_eligible):
+            # complete v2, Docker-backed, full coverage, externally verified pack. Runs
+            # that fall short are preserved in storage but never ranked by default.
+            metadata = data.get("metadata") or {}
+            if not eligibility_from_fields(
+                schema_version=data.get("schema_version", 1),
+                run_status=data.get("run_status", "complete"),
+                execution_backend=data.get("execution_backend", "none"),
+                coverage_rate=data.get("coverage_rate", 1.0),
+                pack_digest_externally_verified=bool(
+                    metadata.get("pack_digest_externally_verified", False)
+                ),
+                include_unverified=include_unverified,
+            ):
                 continue
             key = (data["reviewer"], data.get("model"), data.get("mode", "review"))
             history[key] = history.get(key, 0) + 1
