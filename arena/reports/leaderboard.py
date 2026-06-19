@@ -81,11 +81,14 @@ def leaderboard_rows(
     beta: float = 1.0,
     include_unverified: bool = False,
 ) -> list[LeaderboardRow]:
-    latest: dict[tuple[str, str | None, str], RunResult] = {}
+    latest: dict[tuple[str, str, str | None, str], RunResult] = {}
     for run in load_runs(runs_dir):
         if not leaderboard_eligible(run, include_unverified=include_unverified):
             continue
-        key = (run.reviewer, run.model, run.mode)
+        # The pack is part of the identity: the same reviewer/model/mode measured
+        # on different packs are different results and must not overwrite each
+        # other (audit_v1 vs audit_v2 are not comparable).
+        key = (run.benchmark_set, run.reviewer, run.model, run.mode)
         previous = latest.get(key)
         if previous is None or run.completed_at > previous.completed_at:
             latest[key] = run

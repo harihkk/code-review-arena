@@ -26,10 +26,11 @@ def _run(
     case_rate: float = 1.0,
     backend: str = "trusted-local",
     externally_verified: bool = False,
+    benchmark_set: str = "v1",
 ):
     return RunResult(
         run_id=run_id,
-        benchmark_set="v1",
+        benchmark_set=benchmark_set,
         reviewer="control",
         model=model,
         started_at=datetime.now(),
@@ -87,6 +88,37 @@ def test_repository_leaderboard_excludes_trusted_local_by_default(tmp_path):
     # Opt in to see unverified runs too.
     both = {row["model"] for row in repo.leaderboard(include_unverified=True)}
     assert both == {"docker-run", "local-run"}
+
+
+def test_repository_leaderboard_separates_runs_by_pack(tmp_path):
+    # The same reviewer/model/mode measured on different packs are distinct
+    # results and must each get their own leaderboard row and history count,
+    # rather than one pack's run overwriting the other's.
+    repo = RunRepository(tmp_path / "arena.db")
+    repo.save(
+        _run(
+            "a1",
+            "perfect",
+            status="complete",
+            backend="docker",
+            externally_verified=True,
+            benchmark_set="audit_v1",
+        )
+    )
+    repo.save(
+        _run(
+            "a2",
+            "perfect",
+            status="complete",
+            backend="docker",
+            externally_verified=True,
+            benchmark_set="audit_v2",
+        )
+    )
+    board = repo.leaderboard()
+    assert {row["benchmark_set"] for row in board} == {"audit_v1", "audit_v2"}
+    assert len(board) == 2
+    assert all(row["history_count"] == 1 for row in board)
 
 
 def test_repository_leaderboard_requires_external_digest(tmp_path):

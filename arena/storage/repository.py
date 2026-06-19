@@ -185,8 +185,8 @@ class RunRepository:
         # stays responsive with hundreds of runs.
         with connect(self.db_path) as db:
             rows = db.execute("SELECT run_json FROM runs ORDER BY completed_at DESC").fetchall()
-        latest: dict[tuple[str, str | None, str], dict[str, Any]] = {}
-        history: dict[tuple[str, str | None, str], int] = {}
+        latest: dict[tuple[str, str, str | None, str], dict[str, Any]] = {}
+        history: dict[tuple[str, str, str | None, str], int] = {}
         for row in rows:
             data: dict[str, Any] = json.loads(row["run_json"])
             # Shared eligibility policy (same as leaderboard_rows / leaderboard_eligible):
@@ -204,7 +204,14 @@ class RunRepository:
                 include_unverified=include_unverified,
             ):
                 continue
-            key = (data["reviewer"], data.get("model"), data.get("mode", "review"))
+            # Include the pack: the same reviewer/model/mode on different packs are
+            # distinct results and must not overwrite each other.
+            key = (
+                data["benchmark_set"],
+                data["reviewer"],
+                data.get("model"),
+                data.get("mode", "review"),
+            )
             history[key] = history.get(key, 0) + 1
             latest.setdefault(key, data)
 
