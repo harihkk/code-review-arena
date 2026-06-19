@@ -31,7 +31,7 @@ export default function AuditV1ReportPage() {
           <CodeBlock
             compact
           >{`arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
-arena audit-report runs/ --output docs/reports/audit-v1-results.md`}</CodeBlock>
+arena audit-report runs/ --output docs/reports/audit-v1-results.md --json-output dashboard/public/reports/audit-v1.json`}</CodeBlock>
         </section>
       </>
     );
