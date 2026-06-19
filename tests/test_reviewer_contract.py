@@ -7,11 +7,51 @@ from typer.testing import CliRunner
 
 from arena.benchmark.case_loader import build_context, load_cases
 from arena.cli.main import app
-from arena.reviewers.custom_command import CustomCommandReviewer
+from arena.core.registry import create_reviewer
+from arena.reviewers.custom_command import CustomCommandReviewer, serialize_reviewer_case
 from arena.reviewers.response_parser import naive_repair, parse_review_response
 
 runner = CliRunner()
 FIXTURES = Path("tests/fixtures/fake_reviewers")
+
+# A blind reviewer payload is exactly these keys (context_truncated only when the
+# file budget was hit). Anything else is ground truth that must not leak.
+_BLIND_KEYS = {"case_id", "stack", "pr_diff", "relevant_files", "context_truncated"}
+_LEAKY_TEST_OUTPUT = "exit_code=1\nAssertionError: net charge expected 21, got 18"
+
+
+def _context_with_test_output():
+    case = load_cases(Path("benchmark_sets/audit_v1"))[0]
+    return build_context(
+        case,
+        test_output=_LEAKY_TEST_OUTPUT,
+        static_analysis_output="pricing.py:3: incorrect rounding",
+    )
+
+
+def test_default_reviewer_payload_is_blind():
+    payload = serialize_reviewer_case(_context_with_test_output())
+    assert {"case_id", "stack", "pr_diff", "relevant_files"} <= set(payload)
+    assert set(payload) <= _BLIND_KEYS
+    # The failing-test expected value must never reach the reviewer by default.
+    assert "test_output" not in payload
+    assert "static_analysis_output" not in payload
+    assert "21" not in json.dumps(payload)
+
+
+def test_reveal_test_output_is_an_explicit_opt_in():
+    payload = serialize_reviewer_case(_context_with_test_output(), reveal_test_output=True)
+    assert payload["test_output"] == _LEAKY_TEST_OUTPUT
+    assert "static_analysis_output" in payload
+
+
+def test_model_facing_reviewers_default_to_blind():
+    from arena.reviewers.http import HttpReviewer
+
+    http = create_reviewer("openai:http://127.0.0.1:11434/v1")
+    custom = create_reviewer("custom-command", command="echo {}")
+    assert isinstance(http, HttpReviewer) and http.reveal_test_output is False
+    assert isinstance(custom, CustomCommandReviewer) and custom.reveal_test_output is False
 
 
 def test_schema_command_emits_versioned_review_schema():

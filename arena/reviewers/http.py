@@ -10,7 +10,8 @@ styles are supported:
   as ReviewResult JSON.
 
 The reviewer never receives ground truth: it only ever sends the blinded
-serialize_reviewer_case() payload, exactly like the command reviewer.
+serialize_reviewer_case() payload, exactly like the command reviewer. Pre-patch
+test output is excluded unless the caller opts into the test-assisted mode.
 """
 
 from __future__ import annotations
@@ -56,6 +57,7 @@ class HttpReviewer(BaseReviewer):
         timeout_seconds: int = 120,
         reveal_metadata: bool = False,
         enable_repair: bool = False,
+        reveal_test_output: bool = False,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self.url = url.rstrip("/")
@@ -67,6 +69,7 @@ class HttpReviewer(BaseReviewer):
         self.timeout_seconds = timeout_seconds
         self.reveal_metadata = reveal_metadata
         self.enable_repair = enable_repair
+        self.reveal_test_output = reveal_test_output
         self._transport = transport
 
     def safe_config(self) -> dict[str, object]:
@@ -78,6 +81,7 @@ class HttpReviewer(BaseReviewer):
             "timeout_seconds": self.timeout_seconds,
             "reveal_metadata": self.reveal_metadata,
             "enable_repair": self.enable_repair,
+            "reveal_test_output": self.reveal_test_output,
         }
 
     def _headers(self) -> dict[str, str]:
@@ -112,7 +116,11 @@ class HttpReviewer(BaseReviewer):
 
     def review(self, context: CaseContext) -> ReviewerResponse:
         started = time.perf_counter()
-        payload = serialize_reviewer_case(context, reveal_metadata=self.reveal_metadata)
+        payload = serialize_reviewer_case(
+            context,
+            reveal_metadata=self.reveal_metadata,
+            reveal_test_output=self.reveal_test_output,
+        )
         try:
             with httpx.Client(timeout=self.timeout_seconds, transport=self._transport) as client:
                 response = client.post(

@@ -22,6 +22,7 @@ def create_reviewer(
     reviewer_timeout_seconds: int = 120,
     reveal_metadata: bool = False,
     enable_repair: bool = False,
+    reveal_test_output: bool = False,
 ) -> BaseReviewer:
     if spec in {"reference-patch", "control:reference_patch"}:
         return ReferencePatchReviewer()
@@ -42,6 +43,7 @@ def create_reviewer(
             timeout_seconds=reviewer_timeout_seconds,
             reveal_metadata=reveal_metadata,
             enable_repair=enable_repair,
+            reveal_test_output=reveal_test_output,
         )
     if spec.startswith("control"):
         mode = spec.partition(":")[2] or "perfect"
@@ -58,7 +60,11 @@ def create_reviewer(
         if not command:
             raise ReviewerError("--command is required for the custom-command reviewer.")
         return CustomCommandReviewer(
-            command, reviewer_timeout_seconds, reveal_metadata, enable_repair
+            command,
+            reviewer_timeout_seconds,
+            reveal_metadata,
+            enable_repair,
+            reveal_test_output=reveal_test_output,
         )
     raise ReviewerError(
         f"Unknown reviewer: {spec}. "

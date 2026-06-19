@@ -17,13 +17,20 @@ from arena.reviewers.response_parser import naive_repair, parse_review_response
 
 
 def serialize_reviewer_case(
-    context: CaseContext, *, reveal_metadata: bool = False
+    context: CaseContext,
+    *,
+    reveal_metadata: bool = False,
+    reveal_test_output: bool = False,
 ) -> dict[str, object]:
-    """Blind reviewer payload: code and diff only, never ground truth.
+    """Blind reviewer payload: case id, stack, diff, and relevant files only.
 
-    Case title/description/category/severity frequently paraphrase the seeded
-    bug, so they are excluded unless reveal_metadata is set (debugging only;
-    scored runs should stay blind).
+    Nothing derived from ground truth is included by default. Case
+    title/description/category/severity paraphrase the seeded bug, and the
+    pre-patch test/static-analysis output reveals the failing assertion's
+    expected values (which localize the bug and disclose correct behavior), so
+    both are gated behind explicit opt-in flags. A scored blind run leaves them
+    off; reveal_metadata is for debugging and reveal_test_output is an openly
+    test-assisted mode that the run records and reports separately.
     """
     payload: dict[str, object] = {
         "case_id": context.case.id,
@@ -38,10 +45,11 @@ def serialize_reviewer_case(
         payload["category"] = context.case.category
         payload["severity"] = context.case.severity
         payload["description"] = context.case.description
-    if context.test_output:
-        payload["test_output"] = context.test_output
-    if context.static_analysis_output:
-        payload["static_analysis_output"] = context.static_analysis_output
+    if reveal_test_output:
+        if context.test_output:
+            payload["test_output"] = context.test_output
+        if context.static_analysis_output:
+            payload["static_analysis_output"] = context.static_analysis_output
     return payload
 
 
@@ -81,11 +89,13 @@ class CustomCommandReviewer(BaseReviewer):
         timeout_seconds: int = 120,
         reveal_metadata: bool = False,
         enable_repair: bool = False,
+        reveal_test_output: bool = False,
     ) -> None:
         self.command_template = command_template
         self.timeout_seconds = timeout_seconds
         self.reveal_metadata = reveal_metadata
         self.enable_repair = enable_repair
+        self.reveal_test_output = reveal_test_output
 
     def safe_config(self) -> dict[str, object]:
         return {
@@ -93,6 +103,7 @@ class CustomCommandReviewer(BaseReviewer):
             "timeout_seconds": self.timeout_seconds,
             "reveal_metadata": self.reveal_metadata,
             "enable_repair": self.enable_repair,
+            "reveal_test_output": self.reveal_test_output,
         }
 
     def review(self, context: CaseContext) -> ReviewerResponse:
@@ -105,7 +116,11 @@ class CustomCommandReviewer(BaseReviewer):
             diff_file = temp_dir / "pr.diff"
             case_json.write_text(
                 json.dumps(
-                    serialize_reviewer_case(context, reveal_metadata=self.reveal_metadata),
+                    serialize_reviewer_case(
+                        context,
+                        reveal_metadata=self.reveal_metadata,
+                        reveal_test_output=self.reveal_test_output,
+                    ),
                     indent=2,
                 ),
                 encoding="utf-8",
