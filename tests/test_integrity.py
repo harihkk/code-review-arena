@@ -1,5 +1,6 @@
 """Tamper detection: content manifests catch changes to hidden tests/oracles."""
 
+import os
 import sys
 from pathlib import Path
 
@@ -184,6 +185,54 @@ def test_load_case_rejects_a_symlinked_pack(tmp_path):
     )
     with pytest.raises(ValidationError, match="unsafe"):
         load_case(case)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_admission_flags_symlink_named_like_a_cache_dir(tmp_path):
+    # The bypass: a symlink named .pytest_cache was skipped before the symlink
+    # check, so admission missed it and copytree would follow it out of the tree.
+    (tmp_path / "ok.py").write_text("x = 1\n")
+    (tmp_path / ".pytest_cache").symlink_to("/etc", target_is_directory=True)
+    assert ".pytest_cache" in find_unsafe_files(tmp_path)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_admission_flags_symlink_inside_a_cache_dir(tmp_path):
+    cache = tmp_path / ".pytest_cache"
+    cache.mkdir()
+    (cache / "escape").symlink_to("/etc/hosts")
+    assert ".pytest_cache/escape" in find_unsafe_files(tmp_path)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_admission_flags_pycache_symlink(tmp_path):
+    (tmp_path / "__pycache__").symlink_to("/tmp", target_is_directory=True)
+    assert "__pycache__" in find_unsafe_files(tmp_path)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX FIFOs")
+def test_admission_flags_fifo_inside_a_cache_dir(tmp_path):
+    cache = tmp_path / "__pycache__"
+    cache.mkdir()
+    os.mkfifo(cache / "pipe")
+    assert "__pycache__/pipe" in find_unsafe_files(tmp_path)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_materializer_copy_does_not_follow_symlinks(tmp_path):
+    from arena.execution.sandbox import _copytree_resilient
+
+    secret = tmp_path / "secret.txt"
+    secret.write_text("host-only data\n")
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "app.py").write_text("x = 1\n")
+    (src / "link").symlink_to(secret)
+    dst = tmp_path / "dst"
+    _copytree_resilient(src, dst)
+    # The link is preserved as a link, not resolved into a regular file holding the
+    # host file's contents (which is what follow-symlinks copying would have done).
+    assert (dst / "link").is_symlink()
 
 
 def test_tampering_during_execution_is_detected(tmp_path):

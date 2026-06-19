@@ -55,7 +55,9 @@ class PatchApplier:
             assert_safe_delete_target(workspaces_root, workspace)
             shutil.rmtree(workspace)
         workspace.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(request.source_dir, workspace)
+        # symlinks=True copies links as links rather than following them into host
+        # data; admission already rejects symlinks, this is defense in depth.
+        shutil.copytree(request.source_dir, workspace, symlinks=True)
         paths = touched_files(request.patch_text or "")
         if not request.patch_text.strip():
             return self._result(request, workspace, False, "no_patch_provided", paths, started)
