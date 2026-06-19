@@ -34,7 +34,7 @@ def test_run_supervised_kills_descendants_on_timeout(tmp_path):
     assert not marker.exists()
 
 
-def test_run_supervised_truncates_output(tmp_path):
+def test_run_supervised_caps_output_at_the_byte_limit(tmp_path):
     result = run_supervised(
         [sys.executable, "-c", "print('x' * 5000)"],
         cwd=tmp_path,
@@ -43,8 +43,8 @@ def test_run_supervised_truncates_output(tmp_path):
         output_limit=100,
     )
     assert result.timed_out is False
-    assert "truncated" in result.stdout
-    assert len(result.stdout) < 5000
+    assert result.output_limit_exceeded is True
+    assert len(result.stdout.encode("utf-8")) <= 100
 
 
 @posix_only
