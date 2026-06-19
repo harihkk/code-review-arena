@@ -20,7 +20,12 @@ LOCALIZED_QUALITIES: frozenset[str] = frozenset({"full", "partial"})
 
 
 def normalize_path(path: str) -> str:
-    normalized = path.replace("\\", "/").lstrip("./")
+    normalized = path.replace("\\", "/")
+    # Strip a single leading "./" prefix. Not lstrip("./"), which treats the
+    # argument as a character set and would eat the leading dots of "../escape"
+    # or ".github/...", making distinct paths compare equal.
+    if normalized.startswith("./"):
+        normalized = normalized[2:]
     if normalized.startswith("a/") or normalized.startswith("b/"):
         normalized = normalized[2:]
     return PurePosixPath(normalized).as_posix()
