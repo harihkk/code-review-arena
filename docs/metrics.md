@@ -54,6 +54,20 @@ Per case, `case_status` records the outcome (for example `complete_repair`,
 `detected_but_unrepaired`, `partial_repair`, `tampering`), and `repair_confidence`
 (`basic` / `strong` / `unvalidated`) records how deeply the repair was validated.
 
+`validated_case_rate` is computed only over validation-eligible cases (those with an
+executable gate). A case with no runnable test or structural validator cannot confirm a
+repair, so it is excluded rather than counted as a pass; a no-op patch therefore cannot
+earn credit on it.
+
+## Sample size and confidence
+
+The packs are small (10 cases each), so a point estimate is not a reliable ranking. A
+single case flipping moves a per-pack rate by 10 points, and the Wilson 95% confidence
+interval for, say, 7/10 is roughly [0.40, 0.89]. `validated_case_rate` therefore carries a
+Wilson interval (`validated_case_rate_ci_low/high`), which the leaderboard renders as a
+bracketed range. Treat two reviewers whose intervals overlap as statistically tied rather
+than ranked; the point estimate alone does not separate them at this sample size.
+
 ## Execution Outcomes
 
 | Metric | Definition |

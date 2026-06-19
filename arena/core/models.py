@@ -335,6 +335,11 @@ class DeterministicMetrics(BaseModel):
     # eligible cases (numerically equal to deterministic_pass_rate, which stays
     # as a legacy alias). This is the default leaderboard sort.
     validated_case_rate: float = 0.0
+    # Wilson 95% confidence interval for validated_case_rate. Wide at the small
+    # pack sizes here (10 cases), so overlapping intervals mean two reviewers are
+    # not reliably ranked. None when there are no validation-eligible cases.
+    validated_case_rate_ci_low: float | None = None
+    validated_case_rate_ci_high: float | None = None
     # Evidence-derived dimensions (see docs/metrics.md, "Evidence dimensions"):
     # Repair Success -- cases the patch fully repaired (case unit).
     complete_repair_rate: float = 0.0

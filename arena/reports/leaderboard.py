@@ -22,6 +22,8 @@ class LeaderboardRow(TypedDict):
     mode: str
     completed_at: str
     metric_value: float | None
+    # Wilson 95% CI, present only for validated_case_rate / deterministic_pass_rate.
+    metric_ci: tuple[float, float] | None
     pack: str
 
 
@@ -72,6 +74,7 @@ def leaderboard_rows(
             "mode": run.mode,
             "completed_at": run.completed_at.isoformat(),
             "metric_value": _metric(run, metric, beta),
+            "metric_ci": _metric_ci(run, metric),
             "pack": _pack_label(run),
         }
         for run in latest.values()
@@ -85,6 +88,15 @@ def leaderboard_rows(
         rows,
         key=lambda item: _sort_key(item["metric_value"], descending),
     )
+
+
+def _metric_ci(run: RunResult, metric: str) -> tuple[float, float] | None:
+    """The validated_case_rate confidence interval, for the case-rate metrics only."""
+    metrics = run.deterministic_metrics
+    if metrics is None or metric not in {"validated_case_rate", "deterministic_pass_rate"}:
+        return None
+    low, high = metrics.validated_case_rate_ci_low, metrics.validated_case_rate_ci_high
+    return (low, high) if low is not None and high is not None else None
 
 
 def _pack_label(run: RunResult) -> str:
