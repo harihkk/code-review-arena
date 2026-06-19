@@ -22,6 +22,7 @@ from arena.core.config import (
     runs_path,
     trusted_pack_hashes,
 )
+from arena.core.errors import ValidationError
 from arena.core.models import (
     RUN_SCHEMA_VERSION,
     BenchmarkCase,
@@ -503,15 +504,25 @@ def run_benchmark(
     allow_local_execution: bool = False,
     max_wall_seconds: float | None = None,
     max_cost: float | None = None,
+    expected_pack_sha256: str | None = None,
 ) -> RunResult:
     # Validation is a precondition: a partially valid or tampered pack must abort
     # before any run directory or side effect is created.
     cases = load_and_validate_pack(benchmark_dir)
+    checksum = pack_checksum(benchmark_dir)
+    # External trust anchor: pack.sha256 lives inside the pack, so on its own it
+    # cannot prove the pack was not tampered with and its hash regenerated. When a
+    # caller pins the expected digest out of band (a signed release, CI), a pack
+    # whose content does not match aborts before any run directory is created.
+    if expected_pack_sha256 is not None and checksum != expected_pack_sha256:
+        raise ValidationError(
+            f"pack checksum {checksum} does not match the expected {expected_pack_sha256}; "
+            "refusing to run a pack that does not match its pinned digest"
+        )
     root = output_dir or runs_path()
     root.mkdir(parents=True, exist_ok=True)
     run_id, run_dir = _reserve_run_dir(root)
     manifest = load_manifest(benchmark_dir)
-    checksum = pack_checksum(benchmark_dir)
     pinned = stored_checksum(benchmark_dir)
     # Defense in depth: when an operator pins a trusted-hash allowlist, a pack
     # not on it does not get host execution even if the caller passed the flag.

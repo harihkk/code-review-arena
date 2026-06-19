@@ -37,14 +37,23 @@ def leaderboard_eligible(run: RunResult, *, include_unverified: bool = False) ->
 
     Pre-v2 runs (schema_version < 2) are legacy and excluded; partial, invalid,
     failed, and cancelled runs are excluded because their numbers are not
-    comparable to a full run. Trusted-local runs executed outside Docker are
-    unverified and excluded unless include_unverified is set.
+    comparable to a full run.
+
+    A verified run is one whose result can be trusted: it ran in Docker (not on
+    the host), covered every eligible case, and ran a pack whose content matched
+    a pinned pack.sha256. Anything short of that (trusted-local, no backend, a
+    pack that was never pinned, or partial coverage) is inspectable only with
+    include_unverified, never on the default leaderboard.
     """
     if run.schema_version < 2 or run.run_status != "complete":
         return False
-    if not include_unverified and run.execution_backend == "trusted-local":
-        return False
-    return True
+    if include_unverified:
+        return True
+    return (
+        run.execution_backend == "docker"
+        and run.coverage_rate == 1.0
+        and run.metadata.pack_checksum_verified is True
+    )
 
 
 def leaderboard_rows(

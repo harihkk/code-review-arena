@@ -26,6 +26,7 @@ def run(
     max_wall_seconds: float | None = None,
     max_cost: float | None = None,
     model: str | None = None,
+    expected_pack_sha256: str | None = None,
 ) -> None:
     try:
         reviewer = create_reviewer(
@@ -45,6 +46,7 @@ def run(
             allow_local_execution=allow_local_execution,
             max_wall_seconds=max_wall_seconds,
             max_cost=max_cost,
+            expected_pack_sha256=expected_pack_sha256,
         )
     except ArenaError as exc:
         Console(stderr=True).print(f"[red]ERROR[/red] {exc}")

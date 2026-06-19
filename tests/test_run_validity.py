@@ -4,7 +4,11 @@ from datetime import datetime
 from pathlib import Path
 from time import monotonic
 
+import pytest
+
 from arena.benchmark.benchmark_runner import _effective_timeout, _run_status, run_benchmark
+from arena.benchmark.pack_hash import pack_checksum
+from arena.core.errors import ValidationError
 from arena.core.models import RUN_SCHEMA_VERSION, RunMetadata, RunResult
 from arena.reports.leaderboard import leaderboard_eligible, leaderboard_rows
 from arena.reviewers.controls import ControlReviewer
@@ -171,18 +175,68 @@ def test_leaderboard_includes_complete_and_excludes_partial(tmp_path):
     )
     assert complete.run_status == "complete"
     assert partial.run_status == "partial"
-    run_ids = {row["run_id"] for row in leaderboard_rows(runs_dir)}
+    # These are unverified review runs (no Docker), so query with include_unverified;
+    # the point here is that a complete run is listed and a partial one is not.
+    run_ids = {row["run_id"] for row in leaderboard_rows(runs_dir, include_unverified=True)}
     assert complete.run_id in run_ids
     assert partial.run_id not in run_ids
 
 
+def _verified_run(**overrides) -> RunResult:
+    """A run that meets every default-leaderboard requirement."""
+    base = dict(
+        schema_version=2,
+        run_status="complete",
+        execution_backend="docker",
+        coverage_rate=1.0,
+        metadata=RunMetadata(
+            prompt_version="v2", benchmark_version="v1", pack_checksum_verified=True
+        ),
+    )
+    base.update(overrides)
+    return _minimal_run(**base)
+
+
 def test_leaderboard_eligibility_rules():
-    assert leaderboard_eligible(_minimal_run(schema_version=2, run_status="complete")) is True
-    # Pre-v2 runs are legacy even when complete.
-    assert leaderboard_eligible(_minimal_run(schema_version=1, run_status="complete")) is False
+    # Default eligibility now requires a verified run: docker-backed, full
+    # coverage, and a pack whose checksum matched a pinned pack.sha256.
+    assert leaderboard_eligible(_verified_run()) is True
+    # Pre-v2 and non-complete runs are excluded regardless of verification.
+    assert leaderboard_eligible(_verified_run(schema_version=1)) is False
     for status in ("partial", "invalid", "failed", "cancelled", "legacy"):
-        assert leaderboard_eligible(_minimal_run(schema_version=2, run_status=status)) is False
-    # Trusted-local runs are unverified: excluded by default, included on opt-in.
+        assert leaderboard_eligible(_verified_run(run_status=status)) is False
+    # A docker run on a pack that was never pinned (pack_checksum_verified is None)
+    # is unverified: excluded by default, inspectable with include_unverified.
+    unpinned = _verified_run(metadata=RunMetadata(prompt_version="v2", benchmark_version="v1"))
+    assert leaderboard_eligible(unpinned) is False
+    assert leaderboard_eligible(unpinned, include_unverified=True) is True
+    # Trusted-local runs are unverified too: excluded by default, included on opt-in.
     local = _minimal_run(schema_version=2, run_status="complete", execution_backend="trusted-local")
     assert leaderboard_eligible(local) is False
     assert leaderboard_eligible(local, include_unverified=True) is True
+
+
+def test_expected_pack_sha256_mismatch_aborts_before_run_dir(tmp_path):
+    runs = tmp_path / "runs"
+    with pytest.raises(ValidationError):
+        run_benchmark(
+            V1,
+            ControlReviewer("perfect"),
+            output_dir=runs,
+            persist=False,
+            mode="review",
+            expected_pack_sha256="0" * 64,
+        )
+    assert not runs.exists()  # aborted before any run directory was created
+
+
+def test_expected_pack_sha256_match_runs(tmp_path):
+    run = run_benchmark(
+        V1,
+        ControlReviewer("perfect"),
+        output_dir=tmp_path / "runs",
+        persist=False,
+        mode="review",
+        expected_pack_sha256=pack_checksum(V1),
+    )
+    assert run.run_status == "complete"  # matching digest: the run proceeds

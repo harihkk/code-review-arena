@@ -74,6 +74,12 @@ def run(
         min=0,
         help="Stop scheduling new cases once estimated reviewer cost reaches this budget.",
     ),
+    expected_pack_sha256: str | None = typer.Option(
+        None,
+        "--expected-pack-sha256",
+        help="Abort unless the pack's content checksum equals this digest. Pin it from "
+        "an out-of-band source (a signed release) since pack.sha256 lives inside the pack.",
+    ),
 ) -> None:
     run_command(
         resolve_benchmark_path(benchmark_set),
@@ -90,6 +96,7 @@ def run(
         max_wall_seconds=max_wall_seconds,
         max_cost=max_cost,
         model=model,
+        expected_pack_sha256=expected_pack_sha256,
     )
 
 
