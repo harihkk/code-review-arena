@@ -1,7 +1,19 @@
 from arena.benchmark.case_loader import build_context, load_cases
 from arena.reviewers.controls import ControlReviewer
+from arena.scoring.concept_matcher import mentions
 from arena.scoring.line_matcher import normalize_path, path_matches
 from arena.scoring.scorer import score_case
+
+
+def test_concept_matching_is_word_bounded_and_ordered():
+    # Legit phrases still match.
+    assert mentions("this is a clear race condition", "race condition")
+    assert mentions("guard the balance with a lock", "lock")
+    assert mentions("scope it by tenant_id", "tenant_id")
+    # Vocabulary stuffing must not: an unordered token bag does not earn a phrase,
+    # and a substring inside another word does not match.
+    assert not mentions("controls who can access the record", "access control")
+    assert not mentions("the request was blocked", "lock")
 
 
 def _case(benchmark_dir):
