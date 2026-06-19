@@ -1,13 +1,20 @@
 """Deterministic lexical concept matching.
 
-This baseline is intentionally lexical: case-folded substring and whole-token
-matching against the curated `must_mention`/`concepts` phrases of a bug. It is
-not semantic similarity; paraphrases that avoid every curated token are
-under-credited. Semantic backends (embedding or judge based) can be layered on
-top, but the deterministic baseline must stay reproducible without models.
+This baseline is intentionally lexical: it matches each curated phrase as a
+contiguous, word-bounded token sequence in the finding text. It is not semantic
+similarity; paraphrases that avoid every curated token are under-credited.
+Semantic backends (embedding or judge based) can be layered on top, but the
+deterministic baseline must stay reproducible without models.
+
+Matching is deliberately not a bare substring or an unordered token bag: "lock"
+must not match "blocked", and "access control" must not be earned by an
+unordered "controls who can access". Otherwise a reviewer could top the concept
+dimension by dumping the vocabulary in any order.
 """
 
 from __future__ import annotations
+
+import re
 
 from arena.core.models import Finding, GroundTruthBug
 
@@ -19,9 +26,12 @@ _TOTAL_SHARE = _CATEGORY_SHARE + _MUST_MENTION_SHARE + _CONCEPTS_SHARE
 
 
 def mentions(text: str, phrase: str) -> bool:
-    normalized = text.casefold()
-    phrase = phrase.casefold()
-    return phrase in normalized or all(token in normalized for token in phrase.split())
+    tokens = phrase.casefold().split()
+    if not tokens:
+        return False
+    # The phrase must appear as a contiguous, word-bounded token sequence.
+    pattern = r"\b" + r"\s+".join(re.escape(token) for token in tokens) + r"\b"
+    return re.search(pattern, text.casefold()) is not None
 
 
 def finding_text(finding: Finding) -> str:
