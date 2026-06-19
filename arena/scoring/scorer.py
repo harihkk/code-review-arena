@@ -83,26 +83,62 @@ def _pair_components(
     )
 
 
-# Cap on branch-and-bound nodes before falling back to greedy. Comfortably covers
-# realistic cases (few bugs, few eligible findings each); the cap exists only so a
-# pathological pack (many declared bugs) plus a reviewer spamming findings cannot
-# turn matching into a denial-of-service.
-_MATCHING_STEP_BUDGET = 200_000
-# Recursion is one level per bug; cap it so an absurd bug count cannot hit Python's
-# recursion limit. Beyond this the exact search is hopeless anyway, so use greedy.
-_MATCHING_MAX_BUGS = 64
+# Sentinel cost for a forbidden (ineligible) bug/finding pair. Larger than any real
+# total (weights are bounded by the per-case scoring weights, which sum to 100), so
+# a min-cost assignment never chooses a forbidden pair when an unmatched slot exists.
+_FORBIDDEN_COST = 1e9
 
 
-def _greedy_matching(weights: dict[tuple[int, int], float], num_bugs: int) -> dict[int, int]:
-    """Highest-weight pair first; the bounded fallback for oversized inputs."""
-    assigned: dict[int, int] = {}
-    used: set[int] = set()
-    for (bug, finding), _weight in sorted(weights.items(), key=lambda kv: (-kv[1], kv[0])):
-        if bug in assigned or finding in used:
-            continue
-        assigned[bug] = finding
-        used.add(finding)
-    return assigned
+def _hungarian_min_cost(cost: list[list[float]], rows: int, cols: int) -> list[int]:
+    """Assignment-problem solver: assign each row a distinct column, min total cost.
+
+    Standard O(rows^2 * cols) Hungarian (Kuhn-Munkres with potentials); requires
+    rows <= cols. Returns assignment[row] = column. Deterministic for a given
+    matrix (columns are scanned in ascending order, so ties resolve to the lowest
+    column index).
+    """
+    inf = float("inf")
+    u = [0.0] * (rows + 1)
+    v = [0.0] * (cols + 1)
+    p = [0] * (cols + 1)  # p[col] = row matched to col (1-indexed; 0 = none)
+    way = [0] * (cols + 1)
+    for i in range(1, rows + 1):
+        p[0] = i
+        j0 = 0
+        minv = [inf] * (cols + 1)
+        used = [False] * (cols + 1)
+        while True:
+            used[j0] = True
+            i0 = p[j0]
+            delta = inf
+            j1 = -1
+            for j in range(1, cols + 1):
+                if not used[j]:
+                    cur = cost[i0 - 1][j - 1] - u[i0] - v[j]
+                    if cur < minv[j]:
+                        minv[j] = cur
+                        way[j] = j0
+                    if minv[j] < delta:
+                        delta = minv[j]
+                        j1 = j
+            for j in range(cols + 1):
+                if used[j]:
+                    u[p[j]] += delta
+                    v[j] -= delta
+                else:
+                    minv[j] -= delta
+            j0 = j1
+            if p[j0] == 0:
+                break
+        while j0:
+            j1 = way[j0]
+            p[j0] = p[j1]
+            j0 = j1
+    assignment = [-1] * rows
+    for j in range(1, cols + 1):
+        if p[j] > 0:
+            assignment[p[j] - 1] = j - 1
+    return assignment
 
 
 def _max_weight_matching(weights: dict[tuple[int, int], float], num_bugs: int) -> dict[int, int]:
@@ -111,55 +147,33 @@ def _max_weight_matching(weights: dict[tuple[int, int], float], num_bugs: int) -
     Greedy assignment (take the single highest-weight pair, repeat) can be
     globally suboptimal: a finding that is the best match for two bugs hogs one
     and leaves the other unmatched even when a different pairing scores higher in
-    total. This returns an assignment with the maximum total weight via
-    branch-and-bound over bugs. Ties resolve deterministically (skip a bug before
-    assigning it, lower finding indices first), so the result never depends on
-    dict ordering.
+    total. This returns the exact maximum-weight matching with no approximation.
 
-    Complexity: time is worst case O(product over bugs of (1 + eligible findings
-    per bug)), exponential in the number of bugs; memory is O(bugs) recursion
-    depth. Realistic cases are tiny (typically one bug). To stay safe on
-    adversarial input the search is capped at _MATCHING_STEP_BUDGET nodes; beyond
-    that it returns the greedy assignment (O(pairs log pairs)) rather than running
-    unbounded.
+    It reduces to a square assignment problem solved by the Hungarian algorithm:
+    bugs are rows; columns are the eligible findings plus one zero-cost dummy per
+    bug (so a bug can stay unmatched). Eligible pairs cost their negated weight
+    (minimizing cost maximizes weight); ineligible pairs are forbidden. Time is
+    polynomial -- O(bugs^2 * (findings + bugs)) -- and the input is bounded by the
+    MAX_BUGS_PER_CASE / MAX_FINDINGS_PER_RESPONSE schema caps, so it cannot be
+    driven into a denial of service. Ties resolve to the lowest finding index.
     """
-    if num_bugs > _MATCHING_MAX_BUGS:
-        return _greedy_matching(weights, num_bugs)
-    options = {
-        bug: sorted(finding for (b, finding) in weights if b == bug) for bug in range(num_bugs)
-    }
-    best_total = -1.0
-    best_assign: dict[int, int] = {}
-    steps = 0
-    overflowed = False
-
-    def recurse(bug: int, used: frozenset[int], total: float, current: dict[int, int]) -> None:
-        nonlocal best_total, best_assign, steps, overflowed
-        if overflowed:
-            return
-        steps += 1
-        if steps > _MATCHING_STEP_BUDGET:
-            overflowed = True
-            return
-        if bug == num_bugs:
-            if total > best_total:
-                best_total = total
-                best_assign = dict(current)
-            return
-        recurse(bug + 1, used, total, current)  # leave this bug unmatched
-        for finding in options[bug]:
-            if overflowed:
-                return
-            if finding in used:
-                continue
-            current[bug] = finding
-            recurse(bug + 1, used | {finding}, total + weights[(bug, finding)], current)
-            del current[bug]
-
-    recurse(0, frozenset(), 0.0, {})
-    if overflowed:
-        return _greedy_matching(weights, num_bugs)
-    return best_assign
+    if num_bugs == 0 or not weights:
+        return {}
+    finding_ids = sorted({finding for (_bug, finding) in weights})
+    real_cols = len(finding_ids)
+    total_cols = real_cols + num_bugs  # one dummy "unmatched" column per bug
+    cost = [[0.0] * total_cols for _ in range(num_bugs)]
+    for bug in range(num_bugs):
+        for index in range(real_cols):
+            weight = weights.get((bug, finding_ids[index]))
+            cost[bug][index] = -weight if weight is not None else _FORBIDDEN_COST
+        # dummy columns already 0.0: matching a bug to one means "unmatched".
+    assignment = _hungarian_min_cost(cost, num_bugs, total_cols)
+    result: dict[int, int] = {}
+    for bug, column in enumerate(assignment):
+        if 0 <= column < real_cols and (bug, finding_ids[column]) in weights:
+            result[bug] = finding_ids[column]
+    return result
 
 
 def _assign_findings_to_bugs(
