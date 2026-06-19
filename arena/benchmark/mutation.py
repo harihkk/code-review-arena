@@ -32,6 +32,10 @@ _COMPARE_SWAP: dict[type, type] = {
     ast.LtE: ast.Gt,
     ast.Is: ast.IsNot,
     ast.IsNot: ast.Is,
+    # Membership checks drive dedup/allowlist/citation-validation fixes; flipping
+    # them is exactly the lookalike a sharp test suite must reject.
+    ast.In: ast.NotIn,
+    ast.NotIn: ast.In,
 }
 _BOOLOP_SWAP: dict[type, type] = {ast.And: ast.Or, ast.Or: ast.And}
 _ARITH_SWAP: dict[type, type] = {
