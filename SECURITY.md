@@ -33,6 +33,12 @@ the supported configuration. Local test execution is opt-in
 because it runs fixture-owned commands on the host; prefer the Docker backend for
 untrusted packs.
 
+For defense in depth, set `ARENA_TRUSTED_PACK_HASHES` (a space- or comma-separated
+list of pack `sha256` values, as printed by `arena pack-hash`) to restrict local
+execution to specific trusted packs. When it is set, a pack whose checksum is not
+listed will not run on the host even if `--allow-local-execution` is passed, so a
+single opt-in no longer trusts every pack.
+
 ## Supported versions
 
 The project has not cut a tagged release yet. Until it does, only the latest
