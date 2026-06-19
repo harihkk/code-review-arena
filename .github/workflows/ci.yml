@@ -52,9 +52,13 @@ jobs:
         run: arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
       - name: Reference-patch full run (audit_v2)
         run: arena run benchmark_sets/audit_v2 --reviewer reference-patch --mode full --allow-local-execution
-      # audit_v2 is authored to be fully certified; fail the build if a case regresses.
-      - name: Certify audit_v2
-        run: arena certify-pack benchmark_sets/audit_v2 --allow-local-execution --strict certified
+      # Every shipped pack must stay fully certified (baseline fails, reference
+      # passes, mutants killed); fail the build if any case regresses.
+      - name: Certify shipped packs
+        run: |
+          arena certify-pack benchmark_sets/v1 --allow-local-execution --strict certified
+          arena certify-pack benchmark_sets/audit_v1 --allow-local-execution --strict certified
+          arena certify-pack benchmark_sets/audit_v2 --allow-local-execution --strict certified
       # Cheat-resistance: the keyword-stuffing control must detect everything
       # and validate nothing.
       - name: Keyword-gamer control run (audit_v1)
