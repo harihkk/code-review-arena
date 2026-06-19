@@ -21,6 +21,7 @@ FAILURE_REASON_LABELS = (
     "patch_apply_failed",
     "structural_validation_failed",
     "tests_failed",
+    "no_execution_evidence",
     "localization_failed",
     "detection_failed",
     "incomplete_bug_detection",
