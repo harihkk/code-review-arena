@@ -39,6 +39,30 @@ def test_valid_patch_applies_without_mutating_fixture(benchmark_dir, tmp_path, m
     assert (source / "app/routes/admin.py").read_text(encoding="utf-8") == original
 
 
+def test_materialized_case_retries_an_interrupted_copy(benchmark_dir, monkeypatch):
+    # A real model run lost three cases to EINTR raised mid-copytree under load;
+    # the materializer must retry rather than drop the case.
+    from arena.execution import sandbox
+
+    case = _case(benchmark_dir)
+    real_copytree = sandbox.shutil.copytree
+    calls = {"n": 0}
+
+    def flaky_copytree(src, dst, *args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise InterruptedError(4, "Interrupted system call", str(src))
+        return real_copytree(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(sandbox.shutil, "copytree", flaky_copytree)
+    monkeypatch.setattr(sandbox.time, "sleep", lambda _seconds: None)
+
+    with sandbox.materialized_case(case) as root:
+        assert root.is_dir()
+        assert any(root.rglob("*.py"))
+    assert calls["n"] >= 2  # first attempt raised EINTR, a retry recovered it
+
+
 def test_malformed_patch_fails_and_normalizes_paths(benchmark_dir, tmp_path):
     case = _case(benchmark_dir)
     result = PatchApplier(tmp_path / "runs").apply(
