@@ -1,6 +1,7 @@
 """Reviewer output contract: schema export, verify-reviewer, repair path."""
 
 import json
+import sys
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -154,3 +155,14 @@ def test_verify_reviewer_explains_contract_violations():
     )
     assert result.exit_code == 1
     assert "INVALID" in result.stdout
+
+
+def test_custom_command_reviewer_fails_closed_on_windows(monkeypatch):
+    # The custom-command reviewer goes through the supervisor, so on Windows it
+    # fails closed (returns invalid output) instead of running unbounded.
+    case = load_cases(Path("benchmark_sets/audit_v1"))[0]
+    context = build_context(case)
+    monkeypatch.setattr(sys, "platform", "win32")
+    response = CustomCommandReviewer("echo {}", timeout_seconds=5).review(context)
+    assert response.invalid_output is True
+    assert "Windows" in response.raw_response

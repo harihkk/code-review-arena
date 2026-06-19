@@ -153,10 +153,11 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: python -m pip install -e ".[dev]"
-      # Pack-controlled command execution must fail closed on Windows (there is no
-      # process-tree kill or byte-bounded output here).
+      # Every pack-controlled command path must fail closed on Windows (no
+      # process-tree kill or byte-bounded output here): run_supervised, static
+      # analysis via run_command, and the custom-command reviewer.
       - name: Command execution fails closed
-        run: pytest tests/test_process_supervisor.py -k fails_closed -q
+        run: pytest -k fails_closed -q
       # Non-execution commands (validation, schema, pack hashing, listing) stay
       # usable on Windows.
       - name: Non-execution commands still work

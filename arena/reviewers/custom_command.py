@@ -3,17 +3,22 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
 import shutil
-import subprocess
 import tempfile
 import time
 from pathlib import Path
 
+from arena.core.errors import ExecutionError
 from arena.core.models import CaseContext, ReviewerResponse, ReviewResult
+from arena.execution.process import run_supervised
 from arena.reviewers.base import BaseReviewer
 from arena.reviewers.response_parser import naive_repair, parse_review_response
+
+# Bound the wrapper's output so a runaway reviewer cannot exhaust parent memory.
+_OUTPUT_LIMIT_BYTES = 512_000
 
 
 def serialize_reviewer_case(
@@ -137,14 +142,39 @@ class CustomCommandReviewer(BaseReviewer):
                 case_id=context.case.id,
                 workspace=workspace,
             )
-            completed = subprocess.run(
-                args,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_seconds,
-                shell=False,
-                check=False,
-            )
+            # Through the supervisor: process-tree cleanup, a byte-bounded output
+            # cap, and the Windows-fail-closed boundary, not a bare subprocess.run.
+            try:
+                completed = run_supervised(
+                    args,
+                    # Inherit the caller's working directory (as the old
+                    # subprocess.run did) so a relative wrapper path still
+                    # resolves; the case files in args are absolute paths.
+                    cwd=Path.cwd(),
+                    env=dict(os.environ),
+                    timeout=self.timeout_seconds,
+                    output_limit=_OUTPUT_LIMIT_BYTES,
+                )
+            except ExecutionError as exc:
+                raw = json.dumps({"error": str(exc)})
+                parsed, attempts = parse_review_response(raw)
+                return ReviewerResponse(
+                    raw_response=raw,
+                    parsed_response=parsed,
+                    invalid_output=True,
+                    parse_attempts=attempts,
+                    latency_ms=int((time.perf_counter() - started) * 1000),
+                )
+            if completed.timed_out:
+                raw = json.dumps({"error": f"command timed out after {self.timeout_seconds}s"})
+                parsed, attempts = parse_review_response(raw)
+                return ReviewerResponse(
+                    raw_response=raw,
+                    parsed_response=parsed,
+                    invalid_output=True,
+                    parse_attempts=attempts,
+                    latency_ms=int((time.perf_counter() - started) * 1000),
+                )
             raw = completed.stdout.strip() or completed.stderr.strip()
             error_notes: list[str] = []
             if completed.returncode != 0:
@@ -167,16 +197,6 @@ class CustomCommandReviewer(BaseReviewer):
                 raw_response=raw or json.dumps({"error": error_notes}),
                 parsed_response=parsed,
                 invalid_output=invalid,
-                parse_attempts=attempts,
-                latency_ms=int((time.perf_counter() - started) * 1000),
-            )
-        except subprocess.TimeoutExpired:
-            raw = json.dumps({"error": f"command timed out after {self.timeout_seconds}s"})
-            parsed, attempts = parse_review_response(raw)
-            return ReviewerResponse(
-                raw_response=raw,
-                parsed_response=parsed,
-                invalid_output=True,
                 parse_attempts=attempts,
                 latency_ms=int((time.perf_counter() - started) * 1000),
             )

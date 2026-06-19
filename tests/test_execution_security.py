@@ -1,13 +1,82 @@
 """Execution security: env allowlist, resource limits, pack checksums, path validation."""
 
 import os
+import shutil
 import sys
 from pathlib import Path
 
+import pytest
+import yaml
+
+from arena.benchmark.benchmark_runner import run_benchmark
+from arena.benchmark.case_loader import load_cases
 from arena.benchmark.pack_hash import pack_checksum, stored_checksum, write_checksum
 from arena.core.config import resolve_benchmark_set
+from arena.core.errors import ExecutionError
+from arena.core.registry import create_reviewer
 from arena.execution.hardening import sandbox_env, sandboxed_home_env
+from arena.execution.subprocess_runner import run_command
 from arena.execution.test_executor import TestExecutionRequest, TestExecutor
+
+AUDIT_V1 = Path("benchmark_sets/audit_v1")
+
+
+def _pack_with_static_command(tmp_path: Path, marker: Path) -> Path:
+    """Copy audit_v1 and add a pack-controlled static-analysis command to one case."""
+    pack = tmp_path / "pack"
+    shutil.copytree(AUDIT_V1, pack)
+    case_id = load_cases(pack)[0].id
+    case_yaml = pack / case_id / "case.yaml"
+    data = yaml.safe_load(case_yaml.read_text(encoding="utf-8"))
+    data.setdefault("execution", {})
+    data["execution"]["run_static_analysis"] = True
+    data["execution"]["static_analysis_command"] = (
+        f"{sys.executable} -c \"import pathlib; pathlib.Path(r'{marker}').write_text('ran')\""
+    )
+    case_yaml.write_text(yaml.safe_dump(data), encoding="utf-8")
+    write_checksum(pack)
+    return pack
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX local execution")
+def test_static_analysis_does_not_run_without_local_execution(tmp_path):
+    # A pack-controlled static command is host code execution; it must not run
+    # unless local execution is explicitly enabled.
+    marker = tmp_path / "static_ran.txt"
+    pack = _pack_with_static_command(tmp_path, marker)
+    run_benchmark(
+        pack,
+        create_reviewer("reference-patch"),
+        output_dir=tmp_path / "off",
+        persist=False,
+        mode="review",
+        allow_local_execution=False,
+    )
+    assert not marker.exists()  # gated off: the command never ran
+    run_benchmark(
+        pack,
+        create_reviewer("reference-patch"),
+        output_dir=tmp_path / "on",
+        persist=False,
+        mode="review",
+        allow_local_execution=True,
+    )
+    assert marker.exists()  # opted in: now it runs (proving the gate controls it)
+
+
+def test_run_command_fails_closed_on_windows(monkeypatch):
+    # Static analysis runs through run_command, so it must fail closed on Windows.
+    monkeypatch.setattr(sys, "platform", "win32")
+    with pytest.raises(ExecutionError):
+        run_command("echo hi", cwd=Path("."), timeout_seconds=5)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX bounded reader")
+def test_run_command_bounds_output(tmp_path):
+    result = run_command(
+        f"{sys.executable} -c \"print('x' * 2000000)\"", cwd=tmp_path, timeout_seconds=15
+    )
+    assert len(result.output.encode("utf-8")) <= 512_000 + 65536  # cap + one read chunk
 
 
 def test_sandbox_env_does_not_inherit_parent_environment(monkeypatch):
