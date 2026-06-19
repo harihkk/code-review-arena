@@ -429,6 +429,13 @@ class RunMetadata(BaseModel):
     benchmark_version: str
     temperature: float = 0.0
     git_commit: str | None = None
+    # True when the working tree had uncommitted changes at run time, so the
+    # recorded git_commit does not fully describe the code that ran; None when
+    # the state could not be determined (no git).
+    git_dirty: bool | None = None
+    # True when the reviewer was given pre-patch test/static-analysis output
+    # (an openly test-assisted run, not a blind code review).
+    test_assisted: bool = False
     pack_checksum: str | None = None
     # True/False when the pack ships a pack.sha256 to compare against; None otherwise.
     pack_checksum_verified: bool | None = None

@@ -72,6 +72,25 @@ def _git_commit() -> str | None:
         return None
 
 
+def _git_dirty() -> bool | None:
+    """True if the working tree has uncommitted changes; None if git is absent.
+
+    A clean recorded git_commit is meaningless if the tree was dirty, so the run
+    records this explicitly rather than implying the commit fully describes the
+    code that ran.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    return bool(result.stdout.strip())
+
+
 def _run_status(
     *,
     results: int,
@@ -577,6 +596,8 @@ def run_benchmark(
             prompt_version=PROMPT_VERSION,
             benchmark_version=manifest.version,
             git_commit=_git_commit(),
+            git_dirty=_git_dirty(),
+            test_assisted=bool(getattr(reviewer, "reveal_test_output", False)),
             pack_checksum=checksum,
             pack_checksum_verified=checksum_verified,
         ),
@@ -649,6 +670,8 @@ def _write_run_manifest(
     payload = {
         "harness_version": __version__,
         "harness_git_commit": run.metadata.git_commit,
+        "harness_git_dirty": run.metadata.git_dirty,
+        "test_assisted": run.metadata.test_assisted,
         "run_id": run.run_id,
         "benchmark_set": run.benchmark_set,
         "benchmark_dir": str(benchmark_dir),
