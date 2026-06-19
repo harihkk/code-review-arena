@@ -40,6 +40,9 @@ def _case() -> BenchmarkCase:
                     },
                 ]
             },
+            # An executable case: it has a validation gate, so it is eligible for
+            # validated_case_rate (the _deterministic helper supplies test results).
+            "validation": {"tests_required": True},
         }
     )
 
@@ -81,6 +84,41 @@ def _deterministic(case, review, *, tests_passed: bool):
 def test_bug_ids_are_auto_assigned():
     case = _case()
     assert [bug.id for bug in case.ground_truth.bugs] == ["bug-1", "bug-2"]
+
+
+def test_patch_required_case_without_an_executable_gate_is_not_validated():
+    # A case requiring a patch but with no tests and no structural validators
+    # cannot confirm a repair. A clean patch apply alone must not count as
+    # validated, and the case is not eligible for validated_case_rate.
+    case = BenchmarkCase.model_validate(
+        {
+            "id": "no_gate",
+            "title": "t",
+            "category": "correctness",
+            "severity": "high",
+            "stack": ["python"],
+            "description": "d",
+            "input": {},
+            "ground_truth": {
+                "bugs": [
+                    {
+                        "summary": "b",
+                        "files": [{"path": "a.py", "line_ranges": [{"start": 1, "end": 1}]}],
+                        "concepts": ["x"],
+                    }
+                ]
+            },
+            "validation": {"patch_required": True},
+        }
+    )
+    review = score_case(case, _response([]))
+    patch = PatchApplyResult(
+        case_id=case.id, applied=True, workspace_path="ws", patch_text="x", duration_ms=1
+    )
+    det = score_deterministic_case(case, review, patch, None, [], beta=1.0)
+    assert det.validation_eligible is False
+    assert "no_execution_evidence" in det.failure_reasons
+    assert det.deterministic_pass is False
 
 
 def test_complete_repair_when_all_detected_and_validated():

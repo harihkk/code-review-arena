@@ -350,6 +350,7 @@ def _evaluate_case(
         "tests_failed",
         "structural_validation_failed",
         "test_integrity_violation",
+        "no_execution_evidence",
     }
     execution_validated = deterministic.patch_applied and not (
         blocking & set(deterministic.failure_reasons)
@@ -440,6 +441,11 @@ def _failed_case_result(
             execution_score=0.0,
             structural_score=0.0,
             deterministic_pass=False,
+            validation_eligible=(
+                case.execution.run_tests
+                or case.validation.tests_required
+                or bool(case.validation.structural_validators)
+            ),
             failure_reasons=reasons,
         )
     return CaseResult(

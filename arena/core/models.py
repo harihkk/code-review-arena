@@ -307,6 +307,10 @@ class DeterministicCaseScore(BaseModel):
     execution_score: float
     structural_score: float
     deterministic_pass: bool
+    # Whether this case has an executable validation gate (tests and/or structural
+    # validators configured). Cases with no gate cannot confirm a repair, so they
+    # are excluded from validated_case_rate rather than counted as passes.
+    validation_eligible: bool = False
     failure_reasons: list[str] = Field(default_factory=list)
 
 

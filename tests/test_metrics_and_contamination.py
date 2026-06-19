@@ -53,6 +53,7 @@ def _scored_case(
         execution_score=1.0 if tests_passed else 0.0,
         structural_score=1.0 if structural_passed else 0.0,
         deterministic_pass=deterministic_pass,
+        validation_eligible=True,
         failure_reasons=[],
     )
     return CaseResult(

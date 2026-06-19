@@ -139,7 +139,7 @@ def test_validated_metrics_distinguish_detection_from_a_valid_fix(benchmark_dir,
     assert perfect.deterministic_metrics.validated_f_beta == 1
     assert bad.deterministic_metrics.detection_f_beta == 1
     assert bad.deterministic_metrics.validated_f_beta < 1
-    assert bad.deterministic_metrics.deterministic_pass_rate == 0.1
+    assert bad.deterministic_metrics.deterministic_pass_rate == 0.0
     assert missing.deterministic_metrics.detection_f_beta == 1
     assert missing.deterministic_metrics.validated_f_beta == 0
     assert malformed.deterministic_metrics.detection_f_beta == 1

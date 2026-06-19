@@ -59,6 +59,13 @@ def score_deterministic_case(
         reasons.append("structural_validation_failed")
     if false_positives > case.validation.max_false_positives:
         reasons.append("false_positive")
+    # A repair can only be a validated pass if an executable gate (tests or a
+    # structural validator) actually checks it. A patch-required case with no
+    # such gate cannot confirm a repair, so a clean patch apply alone must never
+    # count as validated (a no-op patch would otherwise pass).
+    validation_eligible = tests_required or bool(case.validation.structural_validators)
+    if case.validation.patch_required and not validation_eligible:
+        reasons.append("no_execution_evidence")
 
     return DeterministicCaseScore(
         case_id=case.id,
@@ -81,6 +88,7 @@ def score_deterministic_case(
         execution_score=1.0 if not tests_required or tests_passed else 0.0,
         structural_score=1.0 if not validators or structural_passed else 0.0,
         deterministic_pass=not reasons,
+        validation_eligible=validation_eligible,
         failure_reasons=reasons,
     )
 
@@ -101,8 +109,21 @@ def aggregate_deterministic_metrics(
     detection_recall = recall(detection_tp, detection_fn)
     detected_cases = sum(score.detected_bug for score in scores)
     localized_cases = sum(score.detected_bug and score.localized_correctly for score in scores)
-    validated_tp = sum(score.deterministic_pass for score in scores)
-    validated_fn = case_count - validated_tp
+    # validated_case_rate is computed only over cases that HAVE an executable
+    # validation gate. A case with no gate cannot confirm a repair, so it is
+    # excluded rather than counted as a pass (which a no-op patch could earn) or
+    # as a uniform failure for every reviewer.
+    validatable = [
+        case
+        for case in eligible
+        if case.deterministic_case_score and case.deterministic_case_score.validation_eligible
+    ]
+    validatable_count = len(validatable)
+    validated_tp = sum(
+        bool(case.deterministic_case_score and case.deterministic_case_score.deterministic_pass)
+        for case in validatable
+    )
+    validated_fn = validatable_count - validated_tp
     validated_precision = precision(validated_tp, fp)
     validated_recall = recall(validated_tp, validated_fn)
     patch_provided = sum(score.patch_provided for score in scores)
@@ -111,8 +132,9 @@ def aggregate_deterministic_metrics(
     tests_passed = sum(score.tests_passed is True for score in scores)
     validation_ran = sum(score.structural_validation_ran for score in scores)
     validation_passed = sum(score.structural_validation_passed is True for score in scores)
-    # Evidence-derived dimensions, read from the per-case attribution.
-    complete_repairs = sum(case.case_status == "complete_repair" for case in eligible)
+    # Evidence-derived dimensions, read from the per-case attribution. Repair
+    # success, like validated_case_rate, is over validatable cases.
+    complete_repairs = sum(case.case_status == "complete_repair" for case in validatable)
     bug_complete = sum(
         bool(case.bug_repairs) and all(repair.detected for repair in case.bug_repairs)
         for case in eligible
@@ -131,11 +153,17 @@ def aggregate_deterministic_metrics(
         validated_f1=round(f_beta_score(validated_precision, validated_recall), 6),
         validated_f_beta=round(f_beta_score(validated_precision, validated_recall, beta), 6),
         beta=beta,
-        deterministic_pass_rate=round(validated_tp / case_count, 6) if case_count else 0.0,
+        deterministic_pass_rate=(
+            round(validated_tp / validatable_count, 6) if validatable_count else 0.0
+        ),
         # Unit-coherent case-level repair rate (see DeterministicMetrics). Equal
         # to deterministic_pass_rate; named for the leaderboard/product surface.
-        validated_case_rate=round(validated_tp / case_count, 6) if case_count else 0.0,
-        complete_repair_rate=round(complete_repairs / case_count, 6) if case_count else 0.0,
+        validated_case_rate=(
+            round(validated_tp / validatable_count, 6) if validatable_count else 0.0
+        ),
+        complete_repair_rate=(
+            round(complete_repairs / validatable_count, 6) if validatable_count else 0.0
+        ),
         bug_completeness_rate=round(bug_complete / case_count, 6) if case_count else 0.0,
         supported_claim_rate=(
             round(supported / len(judged_findings), 6) if judged_findings else None

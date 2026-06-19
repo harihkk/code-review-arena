@@ -4,6 +4,7 @@ const labels: Record<string, string> = {
   patch_required_but_missing: "Patch required but missing",
   patch_apply_failed: "Patch did not apply cleanly",
   tests_failed: "Regression tests did not pass",
+  no_execution_evidence: "No executable gate could confirm the repair",
   structural_validation_failed: "Structural validation failed",
   false_positive: "Unmatched finding exceeded the allowed threshold",
 };
@@ -16,6 +17,7 @@ const shortLabels: Record<string, string> = {
   patch_required_but_missing: "Patch missing",
   patch_apply_failed: "Patch apply failed",
   tests_failed: "Tests failed",
+  no_execution_evidence: "No execution evidence",
   structural_validation_failed: "Structural validation failed",
   false_positive: "False positive",
 };
