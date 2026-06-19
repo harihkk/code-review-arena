@@ -205,6 +205,16 @@ def certify_pack(
             "Pass --allow-local-execution, or build the pack's docker image "
             "(scripts/build_bench_image.sh) and set default_docker_image."
         )
+    # Mutation evidence is the cheat-resistance signal, but it only applies to
+    # cases whose fix is a Python logic-operator change. Report coverage honestly
+    # so a pack that leans on baseline-fails + reference-passes is visible.
+    executed_cases = [case for case in report.cases if case.executable and case.executed]
+    with_mutants = [case for case in executed_cases if case.mutant_total > 0]
+    if executed_cases:
+        console.print(
+            f"Mutation evidence: {len(with_mutants)}/{len(executed_cases)} executed case(s) "
+            "had viable mutants (others rest on baseline-fails + reference-passes)."
+        )
     console.print(f"\nPack '{report.pack}' level: {report.level}")
     if strict and LEVELS.index(report.level) < LEVELS.index(strict):
         raise typer.Exit(code=1)
