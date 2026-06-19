@@ -77,6 +77,15 @@ def test_control_spec_and_deprecated_mock_alias(capsys):
     assert legacy.identifier == "control:keyword_gamer"
     assert "DEPRECATED" in capsys.readouterr().err
     assert create_reviewer("control:reference_patch").name == "reference-patch"
+    assert create_reviewer("reference-patch").name == "reference-patch"
+
+
+def test_shallow_patch_spec_resolves_under_both_aliases():
+    from arena.core.registry import create_reviewer
+    from arena.reviewers.shallow_patch import ShallowPatchReviewer
+
+    assert isinstance(create_reviewer("shallow-patch"), ShallowPatchReviewer)
+    assert isinstance(create_reviewer("control:shallow_patch"), ShallowPatchReviewer)
 
 
 def test_verify_reviewer_accepts_valid_wrapper():
