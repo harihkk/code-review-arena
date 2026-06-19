@@ -42,6 +42,19 @@ def _sample_run(run_id: str, validated: float, detection: float) -> RunResult:
     )
 
 
+def test_audit_report_markdown_renders_populated_sections():
+    from arena.reports.audit_report import build_audit_report_data, render_audit_report_markdown
+
+    # A reviewer that detects everything but validates nothing is the canonical
+    # detection-versus-validation gap; render its populated report.
+    detector = _sample_run("detect-only", validated=0.0, detection=1.0)
+    markdown = render_audit_report_markdown(build_audit_report_data([detector]))
+    assert "Reviewer Comparison" in markdown
+    assert "Validated Case Rate" in markdown  # the table leads with the primary metric
+    assert "Detection vs Validation Gap" in markdown
+    assert "`validated_case_rate` is the primary" in markdown
+
+
 def test_audit_report_empty_state(tmp_path: Path):
     data = build_audit_report_data([])
     assert data["empty"] is True
