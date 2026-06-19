@@ -1,4 +1,4 @@
-"""Aggregate audit_v1 runs into a shareable Markdown and JSON report."""
+"""Aggregate a benchmark pack's runs into a shareable Markdown and JSON report."""
 
 from __future__ import annotations
 
@@ -57,6 +57,20 @@ def _reviewer_label(run: RunResult) -> str:
     return f"{run.reviewer}:{run.model}" if run.model else run.reviewer
 
 
+def _pack_case_count(benchmark_set: str) -> int:
+    """Best-effort case count for a pack, for the empty-state summary; 0 if unknown."""
+    from arena.benchmark.case_loader import load_manifest
+    from arena.core.config import resolve_benchmark_set
+
+    pack_dir = resolve_benchmark_set(benchmark_set)
+    if pack_dir is None:
+        return 0
+    try:
+        return len(load_manifest(pack_dir).cases)
+    except Exception:  # noqa: BLE001 - a missing/invalid manifest just means unknown.
+        return 0
+
+
 def build_audit_report_data(
     runs: list[RunResult],
     *,
@@ -74,7 +88,7 @@ def build_audit_report_data(
             "summary": {
                 "benchmark_pack": benchmark_set,
                 "run_count": 0,
-                "case_count": 10,
+                "case_count": _pack_case_count(benchmark_set),
                 "reviewers_tested": [],
                 "biggest_detection_validation_gap": None,
             },

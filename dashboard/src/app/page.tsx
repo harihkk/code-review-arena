@@ -200,8 +200,8 @@ function BenchmarkArtifactPanel({ rows }: { rows: LeaderboardRow[] }) {
   return (
     <aside className="artifact-panel">
       <div className="artifact-header">
-        <p>Audit Pack v1</p>
-        <strong>10 patch-required cases</strong>
+        <p>Audit packs</p>
+        <strong>patch-required, certified cases</strong>
       </div>
       <dl>
         <div>

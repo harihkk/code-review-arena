@@ -8,6 +8,7 @@ const pages = [
   ["Getting Started", "/docs/getting-started"],
   ["Metrics", "/docs/metrics"],
   ["Audit Pack v1", "/docs/audit-pack-v1"],
+  ["Audit Pack v2", "/docs/audit-pack-v2"],
   ["Reference Patches", "/docs/reference-patches"],
   ["Custom Command Reviewer", "/docs/custom-command-reviewer"],
   ["Validators", "/docs/validators"],

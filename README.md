@@ -27,7 +27,8 @@ there:
 diff + files  ->  reviewer  ->  patch  ->  apply in workspace  ->  tests  ->  validators  ->  score
 ```
 
-Every run produces two numbers:
+Every full run produces two headline numbers (the report also breaks repair down
+into review-accuracy, repair-success, and trustworthiness dimensions):
 
 | Metric | What it measures |
 |---|---|
@@ -134,8 +135,9 @@ npm install
 npm run dev            # dashboard at http://localhost:3000
 ```
 
-Main dashboard routes are `/leaderboard`, `/reports/audit-v1`, `/cases`, `/methodology`,
-and `/docs`. For a full walk-through from a fresh clone, see [docs/DEMO.md](docs/DEMO.md).
+Main dashboard routes are `/leaderboard`, `/reports/audit-v1`, `/reports/audit-v2`, `/cases`,
+`/methodology`, and `/docs`. For a full walk-through from a fresh clone, see
+[docs/DEMO.md](docs/DEMO.md).
 
 ## Reference
 
@@ -145,6 +147,7 @@ Benchmark packs:
 |---|---:|---|---|
 | `benchmark_sets/v1` | 10 | Baseline harness cases | review scoring + validation |
 | `benchmark_sets/audit_v1` | 10 | Patch-required audit cases | patch apply + tests + validators |
+| `benchmark_sets/audit_v2` | 10 | Certified logic-defect cases | patch apply + tests + validators |
 
 Metrics:
 
