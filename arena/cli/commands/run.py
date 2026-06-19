@@ -71,8 +71,20 @@ def run(
             f"[yellow]WARNING[/yellow] {unavailable} case(s) could not execute (no available "
             f"backend); run_status={result.run_status}. Repair was not judged: {hint}."
         )
+    # A run that produced no results, or needed execution it never got, is not a
+    # trustworthy measurement; exit nonzero so scripted callers do not read it as a
+    # clean pass (matching certify-pack / verify-run / pack-hash).
+    invalid_run = result.run_status in {"invalid", "failed"}
+    if invalid_run and not unavailable:
+        Console(stderr=True).print(
+            f"[red]ERROR[/red] run_status={result.run_status}: this run is not a "
+            "trustworthy measurement."
+        )
+
     if as_json:
         typer.echo(result.model_dump_json(indent=2))
+        if invalid_run:
+            raise typer.Exit(code=1)
         return
 
     Console().print(
@@ -105,6 +117,8 @@ def run(
             f"unvalidated={confidence['unvalidated']}"
         )
     Console().print(f"Reports: {runs_path() / result.run_id}/")
+    if invalid_run:
+        raise typer.Exit(code=1)
 
 
 def _format_rate(value: float | None) -> str:
