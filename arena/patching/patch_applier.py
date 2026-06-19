@@ -8,7 +8,11 @@ import time
 from pathlib import Path, PurePosixPath
 
 from arena.patching.patch_models import PatchApplyRequest, PatchApplyResult
-from arena.patching.patch_parser import touched_files, unsafe_patch_paths
+from arena.patching.patch_parser import (
+    touched_files,
+    unsafe_patch_modes,
+    unsafe_patch_paths,
+)
 
 # Files that influence test collection or execution regardless of location;
 # a patch may never create or modify them.
@@ -46,7 +50,7 @@ class PatchApplier:
         if not request.patch_text.strip():
             return self._result(request, workspace, False, "no_patch_provided", paths, started)
 
-        unsafe = unsafe_patch_paths(request.patch_text)
+        unsafe = unsafe_patch_paths(request.patch_text) + unsafe_patch_modes(request.patch_text)
         if unsafe:
             return self._result(
                 request,

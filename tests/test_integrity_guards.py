@@ -80,6 +80,23 @@ def test_unsafe_paths_cover_renames():
     assert unsafe_patch_paths(diff) == ["../../b.py"]
 
 
+def test_patch_creating_a_symlink_is_rejected(tmp_path, source_dir):
+    # A mode-120000 diff makes git apply create a symlink, which could point
+    # outside the workspace; the path-string guard alone would miss it.
+    hostile = (
+        "diff --git a/app/link b/app/link\n"
+        "new file mode 120000\n"
+        "--- /dev/null\n"
+        "+++ b/app/link\n"
+        "@@ -0,0 +1 @@\n"
+        "+/etc/passwd\n"
+    )
+    result = _apply(tmp_path, source_dir, hostile)
+    assert result.applied is False
+    assert "patch_unsafe_paths" in (result.error or "")
+    assert any("120000" in entry for entry in result.unsafe_paths)
+
+
 def test_protected_path_rules():
     assert is_protected_path("tests/test_x.py", ["tests"]) is True
     assert is_protected_path("conftest.py", []) is True

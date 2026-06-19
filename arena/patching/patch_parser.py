@@ -53,3 +53,20 @@ def unsafe_patch_paths(patch_text: str) -> list[str]:
         if pure.is_absolute() or windows_drive or ".." in pure.parts:
             unsafe.append(path)
     return unsafe
+
+
+# Git file modes that are not regular files: a patch must not introduce a symlink
+# (which could point outside the workspace) or a gitlink/submodule.
+_UNSAFE_MODES = ("120000", "160000")
+
+
+def unsafe_patch_modes(patch_text: str) -> list[str]:
+    """Mode declarations in the diff that would create a symlink or gitlink."""
+    found: list[str] = []
+    for line in patch_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(("new file mode ", "new mode ", "old mode ", "deleted file mode ")):
+            mode = stripped.rsplit(" ", 1)[-1]
+            if mode in _UNSAFE_MODES:
+                found.append(stripped)
+    return found

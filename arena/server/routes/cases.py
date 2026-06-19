@@ -4,13 +4,19 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 
 from arena.benchmark.case_loader import build_context, load_cases
+from arena.core.config import resolve_benchmark_set
 
 router = APIRouter(prefix="/cases", tags=["cases"])
 BenchmarkSet = Literal["v1", "audit_v1", "audit_v2"]
 
 
 def _benchmark_path(benchmark_set: BenchmarkSet) -> Path:
-    return Path("benchmark_sets") / benchmark_set
+    # Resolve against the configured benchmark root (not the process cwd) so the
+    # server works wherever it is launched from; 404 on an unknown pack.
+    path = resolve_benchmark_set(benchmark_set)
+    if path is None:
+        raise HTTPException(status_code=404, detail=f"Unknown benchmark set: {benchmark_set}")
+    return path
 
 
 @router.get("")
