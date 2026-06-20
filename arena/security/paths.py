@@ -40,6 +40,10 @@ from arena.core.errors import ValidationError
 _ALLOWED_COMPONENT_CHARS = re.compile(r"\A[A-Za-z0-9_.-]+\Z")
 _MAX_PATH_LENGTH = 1024
 _MAX_COMPONENT_LENGTH = 255
+# A case id becomes a directory name, so it is the strictest: a single component
+# that begins with an ASCII alphanumeric (no leading '.', '_' or '-', which would
+# read as a hidden or option-like directory), bounded to this length.
+_MAX_CASE_ID_LENGTH = 128
 # Windows reserved device names (case-insensitive), reserved even with an
 # extension such as NUL.txt; the stem before the first dot is what matters.
 _WINDOWS_RESERVED = frozenset(
@@ -57,6 +61,11 @@ def _component_error(component: object) -> str | None:
         return f"component longer than {_MAX_COMPONENT_LENGTH} characters"
     if component in {".", ".."}:
         return "'.' and '..' are not valid components"
+    # A dot-prefixed component is excluded by the current pack checksum, so content
+    # under it would not be covered by the pack digest. Reject it until snapshot
+    # hashing (Phase 1C) covers every regular file.
+    if component.startswith("."):
+        return "a component may not start with a dot (it is omitted from the pack checksum)"
     if not _ALLOWED_COMPONENT_CHARS.match(component):
         return "only ASCII letters, digits, '_', '-', and '.' are allowed"
     if component.endswith(".") or component.endswith(" "):
@@ -97,11 +106,17 @@ def _check_case_id(value: str) -> str:
 
     It becomes a physical directory name, so it goes through the same component
     policy as a path segment (ASCII profile, no separators, no reserved device
-    names even with an extension, no trailing dot or space, bounded length).
+    names even with an extension, no trailing dot or space, no leading dot) and is
+    additionally required to start with an ASCII alphanumeric and stay within the
+    case-id length bound.
     """
     error = _component_error(value)
     if error is not None:
         raise ValueError(f"unsafe case id {value!r}: {error}")
+    if len(value) > _MAX_CASE_ID_LENGTH:
+        raise ValueError(f"unsafe case id {value!r}: longer than {_MAX_CASE_ID_LENGTH} characters")
+    if not (value[0].isascii() and value[0].isalnum()):
+        raise ValueError(f"unsafe case id {value!r}: must start with an ASCII letter or digit")
     return value
 
 

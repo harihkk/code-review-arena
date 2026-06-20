@@ -61,6 +61,14 @@ UNSAFE_RELATIVE_PATHS = [
     ("windows_com1", "COM1"),
     ("windows_reserved_nested", "src/aux/x.py"),
     ("too_long_component", "a" * 256),
+    # Dot-prefixed components are omitted by the current pack checksum, so they
+    # are rejected until Phase 1C snapshot hashing covers every regular file.
+    ("dot_hidden", ".hidden"),
+    ("dot_hidden_file", ".hidden/file.py"),
+    ("nested_dot_hidden", "src/.hidden"),
+    ("nested_dot_hidden_file", "src/.hidden/file.py"),
+    ("bare_dot", "."),
+    ("bare_dotdot", ".."),
 ]
 
 VALID_CASE = {
@@ -112,7 +120,6 @@ def test_safe_relative_path_accepts_legitimate_paths():
         "pr.diff",
         "tests/test_x.py",
         "a-b/c_d.py",
-        ".hidden",
     ]:
         assert validate_relative_path(value) == value
         assert _gt(value).path == value
@@ -214,6 +221,7 @@ def _valid_component(text: str) -> bool:
     return (
         bool(text)
         and text not in {".", ".."}
+        and not text.startswith(".")
         and not text.endswith((".", " "))
         and text.split(".")[0].upper() not in _WINDOWS_RESERVED
         and len(text) <= 255
@@ -280,8 +288,11 @@ def test_valid_case_id_accepted():
         "CoN",
         "case.",
         "case ",
-        "café",
+        "caf\u00e9",
         "a" * 256,
+        ".hidden_case",
+        "-case",
+        "_case",
     ],
 )
 def test_unsafe_case_ids_rejected(value):
@@ -398,3 +409,36 @@ def test_load_cases_rejects_duplicate_manifest_ids(tmp_path):
     )
     with pytest.raises(ValidationError):
         load_cases(pack)
+
+
+# -- pack-level: fail closed on content the checksum cannot see ----------------
+
+
+def test_load_and_validate_pack_fails_closed_on_unhashable_content(tmp_path):
+    import shutil
+
+    from arena.benchmark.dataset_validator import load_and_validate_pack
+
+    pack = tmp_path / "pack"
+    shutil.copytree("benchmark_sets/audit_v2", pack)
+    # The clean copy admits.
+    load_and_validate_pack(pack)
+    # A hidden regular file under a case is invisible to pack_checksum, so it
+    # could be swapped without changing the digest: admission must fail closed.
+    (pack / "money_discount_rounding_001" / ".secret.py").write_text("X = 1\n")
+    with pytest.raises(ValidationError, match="checksum"):
+        load_and_validate_pack(pack)
+
+
+def test_load_and_validate_pack_fails_closed_on_pycache(tmp_path):
+    import shutil
+
+    from arena.benchmark.dataset_validator import load_and_validate_pack
+
+    pack = tmp_path / "pack"
+    shutil.copytree("benchmark_sets/audit_v2", pack)
+    cache = pack / "money_discount_rounding_001" / "__pycache__"
+    cache.mkdir()
+    (cache / "x.cpython-311.pyc").write_bytes(b"\x00\x01")
+    with pytest.raises(ValidationError, match="checksum"):
+        load_and_validate_pack(pack)

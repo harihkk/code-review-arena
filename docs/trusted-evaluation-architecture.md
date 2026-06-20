@@ -156,9 +156,20 @@ location (e.g. `input.after_dir`, `ground_truth.bugs.0.files.0.path`,
   property-based (hypothesis) suite + TypeAdapter/JSON/YAML/round-trip/schema/optional/
   default tests + loader identity/collision regressions. Packs load and validate,
   contamination clean, full gate green (333 passed, 4 skipped).
-  Total-path-length policy: 1024 chars total, 255 per component. These are
-  feasibility bounds, not the final word: Phase 1C re-checks case-insensitive and
-  Unicode-normalization COLLISIONS and real filesystem feasibility on the snapshot.
+  Total-path-length policy: 1024 chars total, 255 per component (128 for a case id).
+  These are feasibility bounds, not the final word: Phase 1C re-checks case-insensitive
+  and Unicode-normalization COLLISIONS and real filesystem feasibility on the snapshot.
+
+  Checksum-coverage invariant (added): the pack checksum currently excludes
+  dot-prefixed components and `__pycache__`, so content there is not covered by the
+  digest and could be swapped silently. Until Phase 1C snapshot hashing covers every
+  regular file, (a) no path component or case id may start with a dot, and a case id
+  must additionally start with an ASCII alphanumeric (no leading `_`/`-`); and (b)
+  `validate_dataset`/`load_and_validate_pack` FAIL CLOSED on any file the checksum omits
+  (`pack_hash.unhashable_content`). The four vestigial `.gitkeep` placeholders in `v1`
+  (empty `tests/` dirs of `run_tests: false` cases) were removed to satisfy this; they
+  were already outside the digest, so the checksum is unchanged. This admission guard is
+  removed in Phase 1C once snapshot hashing includes every file.
 - 1B strict external schemas (extra=forbid + size/count limits): pending. The strict base
   must set `validate_default=True`. Apply strict forbid to pack and API-request models.
   Reviewer-output models (Finding/ReviewResult) also use `extra="forbid"`, but an unknown
