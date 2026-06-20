@@ -7,8 +7,64 @@ fix applied on top of it, and the hidden tests pin the correct behavior.
 from pathlib import Path
 
 from arena.benchmark.case_loader import load_cases
-from arena.benchmark.certify import _check_determinism, certify_pack
+from arena.benchmark.certify import (
+    _baseline_fails,
+    _check_determinism,
+    _is_pytest_command,
+    certify_pack,
+)
 from arena.execution.test_executor import TestExecutionResult
+
+
+def _baseline_result(**overrides) -> TestExecutionResult:
+    base = {"case_id": "c", "ran": True, "passed": False, "exit_code": 1, "execution_mode": "local"}
+    base.update(overrides)
+    return TestExecutionResult(**base)
+
+
+def test_pytest_baseline_requires_a_genuine_test_failure():
+    # Exit 1: a test ran and failed because of the seeded bug -- a valid baseline.
+    assert _baseline_fails(_baseline_result(exit_code=1), pytest_command=True) is True
+    # A passing baseline is not a failure.
+    assert _baseline_fails(_baseline_result(passed=True, exit_code=0), pytest_command=True) is False
+    # Collection/import error (2), internal (3), usage (4), and no-tests (5) mean
+    # the tests never ran-and-failed on the bug: a broken pytest case must NOT certify.
+    for code in (2, 3, 4, 5):
+        assert _baseline_fails(_baseline_result(exit_code=code), pytest_command=True) is False
+    # A timeout or a never-ran result is not a genuine failure either.
+    assert (
+        _baseline_fails(_baseline_result(exit_code=None, timed_out=True), pytest_command=True)
+        is False
+    )
+    assert (
+        _baseline_fails(_baseline_result(ran=False, exit_code=None), pytest_command=True) is False
+    )
+    assert _baseline_fails(None, pytest_command=True) is False
+
+
+def test_non_pytest_baseline_accepts_any_genuine_nonzero_failure():
+    # Other runners use their own codes (cargo test exits 101 on failure); the
+    # pytest exit-code filter must NOT apply, or a Rust/Go case could never certify.
+    assert _baseline_fails(_baseline_result(exit_code=101), pytest_command=False) is True
+    assert _baseline_fails(_baseline_result(exit_code=2), pytest_command=False) is True
+    # A passing or timed-out baseline still does not count as a failure.
+    assert (
+        _baseline_fails(_baseline_result(passed=True, exit_code=0), pytest_command=False) is False
+    )
+    assert (
+        _baseline_fails(_baseline_result(exit_code=None, timed_out=True), pytest_command=False)
+        is False
+    )
+
+
+def test_is_pytest_command_detects_pytest_only():
+    assert _is_pytest_command("pytest -q tests") is True
+    assert _is_pytest_command("python -m pytest tests") is True
+    assert _is_pytest_command([["python", "-m", "pytest"]]) is True
+    assert _is_pytest_command("cargo test") is False
+    assert _is_pytest_command("go test ./...") is False
+    assert _is_pytest_command(None) is False
+
 
 # A bug file with a tightly tested fix plus an untested helper. The helper's
 # comparison and boolean mutants survive (no test exercises them), dragging the
@@ -120,8 +176,14 @@ class _ScriptedExecutor:
         else:
             index = (self.calls - self.runs - 1) % len(self.reference_pattern)
             passed = self.reference_pattern[index]
+        # A failing baseline must look like a genuine test failure (pytest exit 1),
+        # not a collection error, for the baseline-fails gate to accept it.
         return TestExecutionResult(
-            case_id=request.case_id, ran=True, passed=passed, execution_mode="local"
+            case_id=request.case_id,
+            ran=True,
+            passed=passed,
+            exit_code=0 if passed else 1,
+            execution_mode="local",
         )
 
 
