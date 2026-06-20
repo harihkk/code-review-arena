@@ -1,19 +1,32 @@
 version: 2
+# Monthly, grouped updates: one batched pull request per ecosystem per month
+# instead of an individual PR per dependency every week. Keeps dependencies
+# current for supply-chain hygiene without the weekly noise. Security updates
+# (vulnerability alerts) are a separate repository setting and are unaffected.
 updates:
   - package-ecosystem: pip
     directory: "/"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      python:
+        patterns: ["*"]
 
   - package-ecosystem: npm
     directory: "/dashboard"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      dashboard:
+        patterns: ["*"]
 
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns: ["*"]
