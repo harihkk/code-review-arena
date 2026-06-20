@@ -166,7 +166,9 @@ location (e.g. `input.after_dir`, `ground_truth.bugs.0.files.0.path`,
   regular file, (a) no path component or case id may start with a dot, and a case id
   must additionally start with an ASCII alphanumeric (no leading `_`/`-`); and (b)
   `validate_dataset`/`load_and_validate_pack` FAIL CLOSED on any file the checksum omits
-  (`pack_hash.unhashable_content`). The four vestigial `.gitkeep` placeholders in `v1`
+  (`pack_hash.unhashable_content`). The checksum exclusion is the root artifact only
+  (`relative == pack.sha256`): a nested `<case>/after/pack.sha256` is ordinary pack
+  content and is covered by the digest. The four vestigial `.gitkeep` placeholders in `v1`
   (empty `tests/` dirs of `run_tests: false` cases) were removed to satisfy this; they
   were already outside the digest, so the checksum is unchanged. This admission guard is
   removed in Phase 1C once snapshot hashing includes every file.

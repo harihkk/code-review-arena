@@ -442,3 +442,47 @@ def test_load_and_validate_pack_fails_closed_on_pycache(tmp_path):
     (cache / "x.cpython-311.pyc").write_bytes(b"\x00\x01")
     with pytest.raises(ValidationError, match="checksum"):
         load_and_validate_pack(pack)
+
+
+# -- checksum exclusion is limited to the root artifact ------------------------
+
+
+def test_checksum_excludes_only_the_root_artifact(tmp_path):
+    from arena.benchmark.pack_hash import pack_checksum, unhashable_content
+
+    pack = tmp_path / "p"
+    (pack / "after").mkdir(parents=True)
+    (pack / "after" / "code.py").write_text("X = 1\n")
+    base = pack_checksum(pack)
+    # (1) the ROOT pack.sha256 is excluded: writing or changing it never moves the digest.
+    (pack / "pack.sha256").write_text("deadbeef\n")
+    assert pack_checksum(pack) == base
+    (pack / "pack.sha256").write_text("changed\n")
+    assert pack_checksum(pack) == base
+    # (2) a NESTED pack.sha256 is ordinary content: it changes the digest...
+    (pack / "after" / "pack.sha256").write_text("v1\n")
+    with_nested = pack_checksum(pack)
+    assert with_nested != base
+    (pack / "after" / "pack.sha256").write_text("v2\n")  # ...and its bytes are covered.
+    assert pack_checksum(pack) != with_nested
+    # (3) the nested file is hashable, so it is not reported as omitted content.
+    assert "after/pack.sha256" not in unhashable_content(pack)
+    assert unhashable_content(pack) == []
+
+
+def test_load_and_validate_pack_accepts_a_nested_checksum_file(tmp_path):
+    import shutil
+
+    from arena.benchmark.dataset_validator import load_and_validate_pack
+    from arena.benchmark.pack_hash import pack_checksum
+
+    pack = tmp_path / "pack"
+    shutil.copytree("benchmark_sets/audit_v2", pack)
+    nested = pack / "money_discount_rounding_001" / "after" / "pack.sha256"
+    nested.write_text("not-the-root-artifact\n")
+    # (4) a normal nested pack.sha256 is accepted (not flagged), and the digest
+    # covers its bytes (changing it changes the checksum).
+    load_and_validate_pack(pack)
+    before = pack_checksum(pack)
+    nested.write_text("different-bytes\n")
+    assert pack_checksum(pack) != before

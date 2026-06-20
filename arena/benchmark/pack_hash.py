@@ -20,7 +20,7 @@ def _content_files(benchmark_dir: Path) -> list[Path]:
         if not path.is_file():
             continue
         relative = path.relative_to(benchmark_dir)
-        if relative.name == PACK_CHECKSUM_FILENAME:
+        if relative == Path(PACK_CHECKSUM_FILENAME):  # only the root checksum artifact
             continue
         if any(part.startswith(".") or part == "__pycache__" for part in relative.parts):
             continue
@@ -42,7 +42,7 @@ def unhashable_content(benchmark_dir: Path) -> list[str]:
         if not path.is_file():
             continue
         relative = path.relative_to(benchmark_dir)
-        if relative.name == PACK_CHECKSUM_FILENAME:
+        if relative == Path(PACK_CHECKSUM_FILENAME):  # only the root checksum artifact
             continue
         if any(part.startswith(".") or part == "__pycache__" for part in relative.parts):
             omitted.append(relative.as_posix())
