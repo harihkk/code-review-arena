@@ -22,12 +22,14 @@ from __future__ import annotations
 import shutil
 import tempfile
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from arena.benchmark.dataset_validator import load_and_validate_pack
 from arena.benchmark.mutation import run_mutation_test
 from arena.benchmark.solution import fixed_solution
+from arena.core.errors import ValidationError
 from arena.core.models import BenchmarkCase
+from arena.execution.commands import parse_test_commands
 from arena.execution.test_executor import TestExecutionRequest, TestExecutionResult, TestExecutor
 
 # A certified case's tests must kill at least this fraction of viable mutants:
@@ -128,8 +130,47 @@ def _run_tests_in(
         )
 
 
-def _baseline_fails(result: TestExecutionResult | None) -> bool:
-    return bool(result and result.ran and not result.passed)
+# For a pytest baseline, exit codes distinguish a real test failure from an
+# inability to run the tests: 0 = all passed, 1 = tests ran and at least one
+# failed, 2 = collection/interrupted, 3 = internal error, 4 = usage error,
+# 5 = no tests collected. Only exit 1 is the seeded bug making a test fail; the
+# rest would certify a broken case (one that cannot import/collect, or has no
+# tests) rather than the bug. This filter is pytest-specific and must not be
+# applied to other runners, which use their own codes (cargo test exits 101 on
+# failure), so a non-pytest baseline keeps generic nonzero-failure handling.
+_PYTEST_GENUINE_FAILURE_EXIT_CODE = 1
+
+
+def _is_pytest_command(test_command: str | list[str] | list[list[str]] | None) -> bool:
+    """True if the case runs its tests through pytest (directly or python -m pytest)."""
+    if test_command is None:
+        return False
+    try:
+        commands = parse_test_commands(test_command)
+    except ValidationError:
+        return False
+    for argv in commands:
+        if not argv:
+            continue
+        program = PurePosixPath(argv[0]).name
+        if program == "pytest":
+            return True
+        if program in {"python", "python3"} and "-m" in argv:
+            index = argv.index("-m")
+            if index + 1 < len(argv) and argv[index + 1] == "pytest":
+                return True
+    return False
+
+
+def _baseline_fails(result: TestExecutionResult | None, *, pytest_command: bool) -> bool:
+    if not (result and result.ran and not result.timed_out and not result.passed):
+        return False
+    # Only pytest baselines get the exit-code filter; any other runner that
+    # genuinely failed (nonzero, not a timeout) is accepted, since we cannot
+    # portably tell its collection error from its test failure.
+    if pytest_command:
+        return result.exit_code == _PYTEST_GENUINE_FAILURE_EXIT_CODE
+    return True
 
 
 def _reference_passes(result: TestExecutionResult | None) -> bool:
@@ -152,11 +193,12 @@ def _check_determinism(
     """
     assert case.case_dir is not None
     after_dir = case.case_dir / case.input.after_dir
+    pytest_command = _is_pytest_command(case.execution.test_command)
     for _ in range(runs):
         baseline = _run_tests_in(
             case, after_dir, executor=executor, allow_local_execution=allow_local_execution
         )
-        if not _baseline_fails(baseline):
+        if not _baseline_fails(baseline, pytest_command=pytest_command):
             return False
     with fixed_solution(case) as fixed:
         for _ in range(runs):
@@ -204,7 +246,9 @@ def certify_case(
     certification = CaseCertification(
         case_id=case.id,
         executable=True,
-        baseline_fails=_baseline_fails(baseline),
+        baseline_fails=_baseline_fails(
+            baseline, pytest_command=_is_pytest_command(case.execution.test_command)
+        ),
         reference_passes=_reference_passes(reference),
         mutant_total=mutation.total,
         mutant_kill_rate=mutation.kill_rate,
