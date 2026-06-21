@@ -4,10 +4,19 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
+from arena.core import limits
 from arena.security.paths import SafeCaseId, SafeRelativePath
 
 Severity = Literal["critical", "high", "medium", "low"]
@@ -22,13 +31,34 @@ RUN_SCHEMA_VERSION = 2
 # pathological size by an adversarial pack or a reviewer spamming findings. They
 # are generous relative to any real case or review, and rejection is at the
 # schema layer (a response/pack exceeding them is invalid, not silently truncated).
-MAX_BUGS_PER_CASE = 50
-MAX_FINDINGS_PER_RESPONSE = 200
+MAX_BUGS_PER_CASE = limits.BUGS_PER_CASE
+MAX_FINDINGS_PER_RESPONSE = limits.FINDINGS_PER_RESPONSE
 
 
-class LineRange(BaseModel):
-    start: int = Field(ge=1)
-    end: int = Field(ge=1)
+class _StrictExternal(BaseModel):
+    """Base for attacker-controlled input (pack files, reviewer output, API).
+
+    Forbids unknown fields, disables type coercion (strict), validates defaults,
+    and rejects NaN/inf. Strictness does NOT propagate to nested models in
+    Pydantic, so every nested external model must inherit this base explicitly.
+    Internally generated and persisted models keep plain BaseModel so legacy run
+    JSON, reports, and database hydration continue to load.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid", strict=True, validate_default=True, allow_inf_nan=False
+    )
+
+
+# Bounded string element types for list fields (per-element length caps).
+BoundedConcept = Annotated[str, StringConstraints(min_length=1, max_length=limits.CONCEPT_LEN)]
+BoundedPhrase = Annotated[str, StringConstraints(min_length=1, max_length=limits.PHRASE_LEN)]
+BoundedName = Annotated[str, StringConstraints(min_length=1, max_length=limits.IDENTIFIER_LEN)]
+
+
+class LineRange(_StrictExternal):
+    start: int = Field(ge=1, le=limits.LINE_NUMBER_MAX)
+    end: int = Field(ge=1, le=limits.LINE_NUMBER_MAX)
 
     @field_validator("end")
     @classmethod
@@ -39,36 +69,42 @@ class LineRange(BaseModel):
         return value
 
 
-class GroundTruthFile(BaseModel):
+class GroundTruthFile(_StrictExternal):
     path: SafeRelativePath
-    line_ranges: list[LineRange]
+    line_ranges: list[LineRange] = Field(min_length=1, max_length=limits.LINE_RANGES_PER_FILE)
 
 
-class GroundTruthBug(BaseModel):
+class GroundTruthBug(_StrictExternal):
     # Stable identifier used to attribute repairs to specific bugs. Auto-assigned
     # as bug-1, bug-2, ... by GroundTruth when a case does not declare one.
-    id: str = ""
-    summary: str
-    files: list[GroundTruthFile]
-    concepts: list[str]
-    must_mention: list[str] = Field(default_factory=list)
-    acceptable_fix_keywords: list[str] = Field(default_factory=list)
+    id: str = Field(default="", max_length=limits.IDENTIFIER_LEN)
+    summary: Annotated[str, StringConstraints(min_length=1, max_length=limits.SUMMARY_LEN)]
+    files: list[GroundTruthFile] = Field(min_length=1, max_length=limits.FILES_PER_BUG)
+    concepts: list[BoundedConcept] = Field(min_length=1, max_length=limits.CONCEPTS_PER_BUG)
+    must_mention: list[BoundedPhrase] = Field(
+        default_factory=list, max_length=limits.MUST_MENTION_PER_BUG
+    )
+    acceptable_fix_keywords: list[BoundedPhrase] = Field(
+        default_factory=list, max_length=limits.FIX_KEYWORDS_PER_BUG
+    )
 
 
 # Back-compat alias: cases authored against the single-bug model import PrimaryBug.
 PrimaryBug = GroundTruthBug
 
 
-class AcceptableFinding(BaseModel):
+class AcceptableFinding(_StrictExternal):
     """A known-good extra finding that is scored neutral, not as a false positive."""
 
     path: SafeRelativePath | None = None
-    concepts: list[str] = Field(min_length=1)
+    concepts: list[BoundedConcept] = Field(min_length=1, max_length=limits.CONCEPTS_PER_BUG)
 
 
-class GroundTruth(BaseModel):
+class GroundTruth(_StrictExternal):
     bugs: list[GroundTruthBug] = Field(min_length=1, max_length=MAX_BUGS_PER_CASE)
-    acceptable_findings: list[AcceptableFinding] = Field(default_factory=list)
+    acceptable_findings: list[AcceptableFinding] = Field(
+        default_factory=list, max_length=limits.ACCEPTABLE_FINDINGS_PER_CASE
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -98,67 +134,90 @@ class GroundTruth(BaseModel):
         return self.bugs[0]
 
 
-class CaseInput(BaseModel):
+class CaseInput(_StrictExternal):
     diff: SafeRelativePath = "pr.diff"
     before_dir: SafeRelativePath = "before"
     after_dir: SafeRelativePath = "after"
     tests_dir: SafeRelativePath | None = "tests"
 
 
-class ScoreWeights(BaseModel):
-    concept_match: float = 35
-    file_match: float = 20
-    line_overlap: float = 15
-    severity_match: float = 10
-    fix_quality: float = 15
-    no_false_positives: float = 5
+# A pack-controlled command string (test_command / static_analysis_command). A
+# bounded length and no separate regex: the executor tokenizes and runs without a
+# shell, and an incomplete homemade grammar would be less safe than a length cap.
+_BoundedCommand = Annotated[str, StringConstraints(max_length=limits.COMMAND_STRING_LEN)]
+_CommandToken = Annotated[str, StringConstraints(max_length=limits.TOKEN_LEN)]
+
+
+class ScoreWeights(_StrictExternal):
+    concept_match: float = Field(default=35, ge=0)
+    file_match: float = Field(default=20, ge=0)
+    line_overlap: float = Field(default=15, ge=0)
+    severity_match: float = Field(default=10, ge=0)
+    fix_quality: float = Field(default=15, ge=0)
+    no_false_positives: float = Field(default=5, ge=0)
 
     def total(self) -> float:
         return float(sum(self.model_dump().values()))
 
 
-class ScoringConfig(BaseModel):
+class ScoringConfig(_StrictExternal):
     weights: ScoreWeights = Field(default_factory=ScoreWeights)
-    false_positive_penalty: float = 5
+    false_positive_penalty: float = Field(default=5, ge=0)
     false_positive_penalty_cap: float = Field(default=15, ge=0)
-    invalid_json_penalty: float = 20
+    invalid_json_penalty: float = Field(default=20, ge=0)
 
 
-class ExecutionConfig(BaseModel):
+class ExecutionConfig(_StrictExternal):
     run_tests: bool = False
     # One command string, one argv list, or a list of argv lists run in order.
-    test_command: str | list[str] | list[list[str]] | None = None
-    timeout_seconds: int = Field(default=30, ge=1)
-    docker_image: str | None = None
+    test_command: _BoundedCommand | list[_CommandToken] | list[list[_CommandToken]] | None = Field(
+        default=None
+    )
+    timeout_seconds: int = Field(default=30, ge=1, le=limits.LINE_NUMBER_MAX)
+    docker_image: (
+        Annotated[str, StringConstraints(max_length=limits.DOCKER_IMAGE_REF_LEN)] | None
+    ) = None
     run_static_analysis: bool = False
-    static_analysis_command: str | None = None
+    static_analysis_command: _BoundedCommand | None = None
 
 
-class ValidationConfig(BaseModel):
+class ValidationConfig(_StrictExternal):
     patch_required: bool = False
     tests_required: bool = False
-    structural_validators: list[str] = Field(default_factory=list)
-    max_false_positives: int = Field(default=0, ge=0)
-    protected_paths: list[SafeRelativePath] = Field(default_factory=list)
+    structural_validators: list[BoundedName] = Field(
+        default_factory=list, max_length=limits.STRUCTURAL_VALIDATORS_PER_CASE
+    )
+    max_false_positives: int = Field(default=0, ge=0, le=limits.FINDINGS_PER_RESPONSE)
+    protected_paths: list[SafeRelativePath] = Field(
+        default_factory=list, max_length=limits.PROTECTED_PATHS_PER_CASE
+    )
     # Detection completeness required for a deterministic pass. Defaults to
     # all_bugs: for single-bug cases this is identical to at_least_one, and for
     # multi-bug cases it correctly requires every seeded bug to be found.
     detection_requirement: Literal["all_bugs", "at_least_one"] = "all_bugs"
 
+    @model_validator(mode="after")
+    def _reject_duplicate_collections(self) -> ValidationConfig:
+        for label, items in (
+            ("structural_validators", self.structural_validators),
+            ("protected_paths", self.protected_paths),
+        ):
+            if len(items) != len(set(items)):
+                raise ValueError(f"duplicate entries in {label}")
+        return self
 
-class MetricsConfig(BaseModel):
-    beta: float = Field(default=1.0, gt=0)
+
+class MetricsConfig(_StrictExternal):
+    beta: float = Field(default=1.0, gt=0, le=limits.LINE_NUMBER_MAX)
 
 
-class BenchmarkCase(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class BenchmarkCase(_StrictExternal):
     id: SafeCaseId
-    title: str
-    category: str
+    title: Annotated[str, StringConstraints(min_length=1, max_length=limits.TITLE_LEN)]
+    category: Annotated[str, StringConstraints(min_length=1, max_length=limits.CATEGORY_LEN)]
     severity: Severity
-    stack: list[str]
-    description: str
+    stack: list[BoundedName] = Field(min_length=1, max_length=limits.STACK_ENTRIES)
+    description: Annotated[str, StringConstraints(max_length=limits.DESCRIPTION_LEN)]
     input: CaseInput
     ground_truth: GroundTruth
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
@@ -168,14 +227,16 @@ class BenchmarkCase(BaseModel):
     case_dir: Path | None = Field(default=None, exclude=True)
 
 
-class CaseManifest(BaseModel):
-    version: str
-    name: str
-    cases: list[SafeCaseId]
+class CaseManifest(_StrictExternal):
+    version: Annotated[str, StringConstraints(min_length=1, max_length=limits.IDENTIFIER_LEN)]
+    name: Annotated[str, StringConstraints(min_length=1, max_length=limits.TITLE_LEN)]
+    cases: list[SafeCaseId] = Field(max_length=limits.CASES_PER_MANIFEST)
     # Execution image applied to every case that does not set its own
     # docker_image. Lets a pack target one sandbox image in a single place
     # instead of repeating it across every case.yaml.
-    default_docker_image: str | None = None
+    default_docker_image: (
+        Annotated[str, StringConstraints(max_length=limits.DOCKER_IMAGE_REF_LEN)] | None
+    ) = None
 
     @model_validator(mode="after")
     def _reject_duplicate_case_ids(self) -> CaseManifest:
@@ -187,18 +248,25 @@ class CaseManifest(BaseModel):
         return self
 
 
-class Finding(BaseModel):
-    title: str
-    summary: str
-    category: str
+class Finding(_StrictExternal):
+    title: Annotated[str, StringConstraints(max_length=limits.FINDING_TITLE_LEN)]
+    summary: Annotated[str, StringConstraints(max_length=limits.FINDING_SUMMARY_LEN)]
+    category: Annotated[str, StringConstraints(max_length=limits.CATEGORY_LEN)]
     severity: Severity
-    file: str
-    line_start: int = Field(ge=1)
-    line_end: int = Field(ge=1)
-    evidence: str
-    suggested_fix: str | None = None
-    suggested_patch: str | None = None
-    replacement_code: str | None = None
+    # Reviewer-controlled path. Bounded here; the reviewer-path containment
+    # contract (prefix handling, traversal rejection) lives in the scorer's
+    # normalization, which is the single place paths are interpreted.
+    file: Annotated[str, StringConstraints(max_length=limits.IDENTIFIER_LEN * 8)]
+    line_start: int = Field(ge=1, le=limits.LINE_NUMBER_MAX)
+    line_end: int = Field(ge=1, le=limits.LINE_NUMBER_MAX)
+    evidence: Annotated[str, StringConstraints(max_length=limits.EVIDENCE_LEN)]
+    suggested_fix: Annotated[str, StringConstraints(max_length=limits.SUGGESTED_FIX_LEN)] | None = (
+        None
+    )
+    suggested_patch: Annotated[str, StringConstraints(max_length=limits.PATCH_LEN)] | None = None
+    replacement_code: (
+        Annotated[str, StringConstraints(max_length=limits.REPLACEMENT_CODE_LEN)] | None
+    ) = None
     patch_confidence: float | None = Field(default=None, ge=0, le=1)
     confidence: float = Field(ge=0, le=1)
 
@@ -211,14 +279,14 @@ class Finding(BaseModel):
         return value
 
 
-class ReviewResult(BaseModel):
+class ReviewResult(_StrictExternal):
     findings: list[Finding] = Field(max_length=MAX_FINDINGS_PER_RESPONSE)
     # The reviewer's single complete repair for the whole case. This is the only
     # patch Arena applies; per-finding ``suggested_patch`` is advisory and never
     # applied (combining finding patches has ambiguous order/overlap semantics).
-    proposed_patch: str | None = None
+    proposed_patch: Annotated[str, StringConstraints(max_length=limits.PATCH_LEN)] | None = None
     overall_risk: Risk
-    review_summary: str
+    review_summary: Annotated[str, StringConstraints(max_length=limits.REVIEW_SUMMARY_LEN)]
 
 
 class ReviewerCaseMetadata(BaseModel):
