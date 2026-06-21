@@ -23,10 +23,15 @@ from typing import Any, Literal
 
 import httpx
 
+from arena.core import limits
 from arena.core.models import CaseContext, ReviewerResponse, ReviewResult
 from arena.reviewers.base import BaseReviewer
 from arena.reviewers.custom_command import serialize_reviewer_case
 from arena.reviewers.response_parser import naive_repair, parse_review_response
+
+# Bound for the message recorded on an invalid HTTP reviewer response (well under
+# the strict ReviewResult.review_summary cap, and never includes request headers).
+_INVALID_MESSAGE_LEN = 4096
 
 SYSTEM_PROMPT = (
     "You are a code reviewer under evaluation. Inspect the pull request diff and "
@@ -114,6 +119,36 @@ class HttpReviewer(BaseReviewer):
             raise TypeError("chat completion message content is not a string")
         return content
 
+    def _post_bounded(self, payload: dict[str, object]) -> tuple[bytes, int, bool]:
+        """Stream the response, returning (body, status, too_large).
+
+        The body is read in chunks and capped at ``RAW_RESPONSE_BYTES + 1`` so a
+        huge or never-ending response is never fully materialized. ``iter_bytes``
+        yields content-decoded bytes, so the cap holds after decompression and a
+        compressed bomb cannot bypass it. Content-Length is only used for an early
+        reject; the streamed count is authoritative against an absent or understated
+        length. On overflow the stream context closes the response immediately.
+        """
+        limit = limits.RAW_RESPONSE_BYTES
+        with httpx.Client(timeout=self.timeout_seconds, transport=self._transport) as client:
+            with client.stream(
+                "POST",
+                self._endpoint(),
+                json=self._request_body(payload),
+                headers=self._headers(),
+            ) as response:
+                declared = response.headers.get("Content-Length")
+                if declared is not None and declared.isdigit() and int(declared) > limit:
+                    return b"", response.status_code, True
+                chunks: list[bytes] = []
+                total = 0
+                for chunk in response.iter_bytes():
+                    total += len(chunk)
+                    if total > limit:
+                        return b"", response.status_code, True
+                    chunks.append(chunk)
+                return b"".join(chunks), response.status_code, False
+
     def review(self, context: CaseContext) -> ReviewerResponse:
         started = time.perf_counter()
         payload = serialize_reviewer_case(
@@ -122,19 +157,20 @@ class HttpReviewer(BaseReviewer):
             reveal_test_output=self.reveal_test_output,
         )
         try:
-            with httpx.Client(timeout=self.timeout_seconds, transport=self._transport) as client:
-                response = client.post(
-                    self._endpoint(),
-                    json=self._request_body(payload),
-                    headers=self._headers(),
-                )
-            response.raise_for_status()
-            raw = (
-                self._extract_openai_content(response.json())
-                if self.style == "openai"
-                else response.text
+            body, status, too_large = self._post_bounded(payload)
+        except httpx.HTTPError as exc:
+            return self._error_response(exc, started)
+        if too_large:
+            return self._invalid("reviewer_output_too_large", started)
+        if status >= 400:
+            snippet = body.decode("utf-8", errors="replace")[:512]
+            return self._invalid(
+                f"http reviewer request failed with status {status}: {snippet}", started
             )
-        except (httpx.HTTPError, KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+        text = body.decode("utf-8", errors="replace")
+        try:
+            raw = self._extract_openai_content(json.loads(text)) if self.style == "openai" else text
+        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
             return self._error_response(exc, started)
         parsed, attempts = parse_review_response(
             raw or "{}", repair=naive_repair if self.enable_repair else None
@@ -148,10 +184,15 @@ class HttpReviewer(BaseReviewer):
         )
 
     def _error_response(self, exc: Exception, started: float) -> ReviewerResponse:
-        message = f"http reviewer request failed: {type(exc).__name__}: {exc}"
+        return self._invalid(f"http reviewer request failed: {type(exc).__name__}: {exc}", started)
+
+    def _invalid(self, message: str, started: float) -> ReviewerResponse:
+        # The recorded message is bounded and derived only from status/exception
+        # type and body text, never from request headers, so no secret is persisted.
+        bounded = message[:_INVALID_MESSAGE_LEN]
         return ReviewerResponse(
-            raw_response=json.dumps({"error": message}),
-            parsed_response=ReviewResult(findings=[], overall_risk="none", review_summary=message),
+            raw_response=json.dumps({"error": bounded}),
+            parsed_response=ReviewResult(findings=[], overall_risk="none", review_summary=bounded),
             invalid_output=True,
             parse_attempts=1,
             latency_ms=int((time.perf_counter() - started) * 1000),

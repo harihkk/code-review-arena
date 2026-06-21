@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from arena.benchmark.solution import fixed_solution
+from arena.core.bounded_io import read_text_bounded
+from arena.core.limits import PACK_FILE_BYTES
 from arena.core.models import BenchmarkCase
 from arena.execution.test_executor import TestExecutionRequest, TestExecutor
 
@@ -151,7 +153,10 @@ def run_mutation_test(
     with fixed_solution(case) as fixed:
         if fixed is None or not (fixed / bug_path).is_file():
             return MutationResult(total=0, killed=0)
-        mutants = generate_mutants((fixed / bug_path).read_text(encoding="utf-8"), limit=limit)
+        mutants = generate_mutants(
+            read_text_bounded(fixed / bug_path, PACK_FILE_BYTES, label="solution file"),
+            limit=limit,
+        )
         for mutant in mutants:
             with tempfile.TemporaryDirectory(prefix=f"arena-mut-{case.id}-") as directory:
                 workspace = Path(directory)

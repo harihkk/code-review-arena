@@ -16,6 +16,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from arena.benchmark.artifacts import load_reference_patch
 from arena.core.models import BenchmarkCase
 from arena.reviewers.reference_patch import REFERENCE_PATCH_FILENAME
 
@@ -36,7 +37,7 @@ def fixed_solution(case: BenchmarkCase) -> Iterator[Path | None]:
         shutil.copytree(after_dir, workspace, dirs_exist_ok=True)
         if reference.is_file():
             patch_file = workspace / ".arena-reference.patch"
-            patch_file.write_text(reference.read_text(encoding="utf-8"), encoding="utf-8")
+            patch_file.write_text(load_reference_patch(reference), encoding="utf-8")
             applied = subprocess.run(
                 ["git", "apply", "--whitespace=nowarn", str(patch_file.resolve())],
                 cwd=workspace,

@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from arena.benchmark.artifacts import load_reference_patch
 from arena.benchmark.case_loader import load_cases, load_manifest
 from arena.benchmark.diff_loader import load_diff, parse_added_lines
 from arena.benchmark.pack_hash import unhashable_content
+from arena.core.bounded_io import read_text_bounded
 from arena.core.errors import ValidationError
+from arena.core.limits import PACK_FILE_BYTES
 from arena.core.models import BenchmarkCase
 from arena.execution.commands import parse_test_commands
 from arena.reviewers.reference_patch import REFERENCE_PATCH_FILENAME
@@ -39,11 +42,19 @@ def validate_case(case: BenchmarkCase) -> list[str]:
             errors.append(f"{case.id}: {exc}")
     if case.validation.patch_required:
         patch_path = case.case_dir / REFERENCE_PATCH_FILENAME
-        if not patch_path.is_file() or not patch_path.read_text(encoding="utf-8").strip():
-            errors.append(
-                f"{case.id}: patch_required is set but {REFERENCE_PATCH_FILENAME} "
-                "is missing or empty"
-            )
+        missing_or_empty = (
+            f"{case.id}: patch_required is set but {REFERENCE_PATCH_FILENAME} is missing or empty"
+        )
+        if not patch_path.is_file():
+            errors.append(missing_or_empty)
+        else:
+            try:
+                patch_text = load_reference_patch(patch_path)
+            except ValidationError as exc:
+                errors.append(f"{case.id}: {exc}")
+            else:
+                if not patch_text.strip():
+                    errors.append(missing_or_empty)
     for bug_index, bug in enumerate(case.ground_truth.bugs):
         for expected_file in bug.files:
             path = after_dir / expected_file.path
@@ -53,7 +64,13 @@ def validate_case(case: BenchmarkCase) -> list[str]:
                     f"(bugs[{bug_index}]): {expected_file.path}"
                 )
                 continue
-            line_count = len(path.read_text(encoding="utf-8").splitlines())
+            try:
+                line_count = len(
+                    read_text_bounded(path, PACK_FILE_BYTES, label="ground truth file").splitlines()
+                )
+            except ValidationError as exc:
+                errors.append(f"{case.id}: {exc}")
+                continue
             for line_range in expected_file.line_ranges:
                 if line_range.end > line_count:
                     errors.append(

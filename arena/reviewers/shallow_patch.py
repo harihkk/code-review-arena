@@ -16,6 +16,7 @@ import difflib
 import json
 import time
 
+from arena.benchmark.artifacts import load_reference_patch
 from arena.core.models import CaseContext, Finding, ReviewerResponse, ReviewResult
 from arena.patching.patch_parser import touched_files
 from arena.reviewers.base import BaseReviewer
@@ -32,7 +33,7 @@ class ShallowPatchReviewer(BaseReviewer):
         if context.case_dir is not None:
             reference = context.case_dir / REFERENCE_PATCH_FILENAME
             if reference.is_file():
-                touched = touched_files(reference.read_text(encoding="utf-8"))
+                touched = touched_files(load_reference_patch(reference))
                 if touched:
                     return touched[0]
         return next(iter(context.relevant_files), None)

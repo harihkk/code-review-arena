@@ -11,6 +11,9 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+from arena.core.bounded_io import read_bytes_bounded, read_text_bounded
+from arena.core.limits import CHECKSUM_FILE_BYTES, PACK_FILE_BYTES
+
 PACK_CHECKSUM_FILENAME = "pack.sha256"
 
 
@@ -55,7 +58,7 @@ def pack_checksum(benchmark_dir: Path) -> str:
     for path in _content_files(benchmark_dir):
         digest.update(path.relative_to(benchmark_dir).as_posix().encode("utf-8"))
         digest.update(b"\0")
-        digest.update(path.read_bytes())
+        digest.update(read_bytes_bounded(path, PACK_FILE_BYTES, label="pack file"))
         digest.update(b"\0")
     return digest.hexdigest()
 
@@ -64,7 +67,9 @@ def stored_checksum(benchmark_dir: Path) -> str | None:
     path = benchmark_dir / PACK_CHECKSUM_FILENAME
     if not path.is_file():
         return None
-    return path.read_text(encoding="utf-8").strip() or None
+    return (
+        read_text_bounded(path, CHECKSUM_FILE_BYTES, label=PACK_CHECKSUM_FILENAME).strip() or None
+    )
 
 
 def write_checksum(benchmark_dir: Path) -> str:

@@ -9,9 +9,13 @@ local command execution.
 from fastapi import FastAPI
 
 from arena import __version__
+from arena.core import limits
+from arena.server.middleware import BodySizeLimitMiddleware
 from arena.server.routes import cases, leaderboard, runs
 
 app = FastAPI(title="CodeReview Arena API", version=__version__)
+# Bound request-body bytes before Starlette buffers/parses them (pre-parse memory cap).
+app.add_middleware(BodySizeLimitMiddleware, max_bytes=limits.API_REQUEST_BODY_BYTES)
 app.include_router(cases.router)
 app.include_router(runs.router)
 app.include_router(leaderboard.router)

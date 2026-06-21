@@ -11,14 +11,12 @@ import tempfile
 import time
 from pathlib import Path
 
+from arena.core import limits
 from arena.core.errors import ExecutionError
 from arena.core.models import CaseContext, ReviewerResponse, ReviewResult
 from arena.execution.process import run_supervised
 from arena.reviewers.base import BaseReviewer
 from arena.reviewers.response_parser import naive_repair, parse_review_response
-
-# Bound the wrapper's output so a runaway reviewer cannot exhaust parent memory.
-_OUTPUT_LIMIT_BYTES = 512_000
 
 
 def serialize_reviewer_case(
@@ -153,7 +151,8 @@ class CustomCommandReviewer(BaseReviewer):
                     cwd=Path.cwd(),
                     env=dict(os.environ),
                     timeout=self.timeout_seconds,
-                    output_limit=_OUTPUT_LIMIT_BYTES,
+                    # Share the centralized reviewer-output byte cap with the HTTP reviewer.
+                    output_limit=limits.RAW_RESPONSE_BYTES,
                 )
             except ExecutionError as exc:
                 raw = json.dumps({"error": str(exc)})
@@ -173,6 +172,23 @@ class CustomCommandReviewer(BaseReviewer):
                     parsed_response=parsed,
                     invalid_output=True,
                     parse_attempts=attempts,
+                    latency_ms=int((time.perf_counter() - started) * 1000),
+                )
+            if completed.output_limit_exceeded:
+                # The child flooded past the output cap and was reaped, so the captured
+                # stdout/stderr are truncated. A valid JSON prefix followed by a flood
+                # must NOT pass: report a stable too-large error and never parse the
+                # truncated output as ordinary malformed JSON.
+                raw = json.dumps({"error": "reviewer_output_too_large"})
+                return ReviewerResponse(
+                    raw_response=raw,
+                    parsed_response=ReviewResult(
+                        findings=[],
+                        overall_risk="none",
+                        review_summary="reviewer_output_too_large",
+                    ),
+                    invalid_output=True,
+                    parse_attempts=1,
                     latency_ms=int((time.perf_counter() - started) * 1000),
                 )
             raw = completed.stdout.strip() or completed.stderr.strip()

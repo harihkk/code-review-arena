@@ -24,6 +24,12 @@ CASE_YAML_BYTES = 512 * 1024
 DIFF_BYTES = 4 * 1024 * 1024
 PATCH_BYTES = 4 * 1024 * 1024
 
+# An individual pack source / test / ground-truth file (read to hash, count
+# lines, scan for contamination, or build reviewer context). Generous, but finite.
+PACK_FILE_BYTES = 8 * 1024 * 1024
+# pack.sha256 is a single hex digest line.
+CHECKSUM_FILE_BYTES = 256
+
 # --- Pack structure counts ---
 CASES_PER_MANIFEST = 1024
 BUGS_PER_CASE = 50  # also the finding-to-bug matching cap (MAX_BUGS_PER_CASE)
