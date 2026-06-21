@@ -29,6 +29,21 @@ ExecutionBackend = Literal["docker", "trusted-local", "none"]
 # `invalid` is a reviewer-contract failure that still scores; `tolerant`/`repaired`
 # are development-only salvage that make a run non-comparable by default.
 ParseStatus = Literal["exact", "tolerant", "repaired", "invalid"]
+# The fixed salvage-action vocabulary. Newly generated reviewer responses may only
+# record these; arbitrary external action strings are rejected (legacy responses
+# that predate the field carry none and load through the compatibility path).
+PARSE_ACTIONS: frozenset[str] = frozenset(
+    {
+        "strip_markdown_fence",
+        "extract_json_object",
+        "remove_trailing_commas",
+        "wrap_findings_list",
+        "default_overall_risk",
+        "default_review_summary",
+        "drop_invalid_findings",
+    }
+)
+_ParseAction = Annotated[str, StringConstraints(max_length=limits.PARSE_ACTION_LEN)]
 # Bumped when the run JSON shape changes in a way that breaks comparability.
 RUN_SCHEMA_VERSION = 2
 # Hard caps that bound finding-to-bug matching so it cannot be driven into a
@@ -382,28 +397,42 @@ class ReviewerResponse(BaseModel):
     parsed_response: ReviewResult | None = None
     invalid_output: bool = False
     parse_attempts: int = 1
-    # Persisted parse evidence (commit 3). parse_status is the comparable contract
-    # signal; parse_actions / dropped_finding_count / parse_error_summary record any
+    # Persisted parse evidence (commit 3+). parse_status is the comparable contract
+    # signal; parse_actions / finding counts / parse_error_summary record any
     # development-only salvage. Bounded and inspectable; raw_response is always kept.
+    # Counts are None when no valid findings list was established (invalid output)
+    # or on old responses that predate the fields (unknown, never fabricated).
     parse_status: ParseStatus = "exact"
-    parse_actions: list[str] = Field(default_factory=list)
-    dropped_finding_count: int = 0
-    parse_error_summary: str | None = None
+    parse_actions: list[_ParseAction] = Field(
+        default_factory=list, max_length=limits.PARSE_ACTIONS_MAX
+    )
+    input_finding_count: int | None = Field(default=None, ge=0, le=limits.JSON_MAX_NODES)
+    retained_finding_count: int | None = Field(default=None, ge=0, le=limits.JSON_MAX_NODES)
+    dropped_finding_count: int = Field(default=0, ge=0, le=limits.JSON_MAX_NODES)
+    parse_error_summary: (
+        Annotated[str, StringConstraints(max_length=limits.PARSE_ERROR_SUMMARY_LEN)] | None
+    ) = None
     latency_ms: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
     estimated_cost: float = 0.0
     tool_usage: list[str] = Field(default_factory=list)
+    # True only for responses loaded from pre-parse-status saved JSON; lets the
+    # invariant check below skip historical data while still fully validating any
+    # newly produced response. Never serialized.
+    derived_from_legacy: bool = Field(default=False, exclude=True, repr=False)
 
     @model_validator(mode="before")
     @classmethod
     def _derive_parse_status(cls, value: Any) -> Any:
         # Old saved responses predate parse_status: derive it so they keep loading
-        # without rewriting any file. invalid_output -> invalid; otherwise by the
-        # legacy attempt count (1 exact, 2 tolerant, >=3 repaired).
+        # without rewriting any file, and mark them legacy so the invariant check
+        # tolerates their missing action/count evidence. invalid_output -> invalid;
+        # otherwise by the legacy attempt count (1 exact, 2 tolerant, >=3 repaired).
         if not isinstance(value, dict) or "parse_status" in value:
             return value
         converted = dict(value)
+        converted["derived_from_legacy"] = True
         if value.get("invalid_output"):
             converted["parse_status"] = "invalid"
         else:
@@ -415,6 +444,42 @@ class ReviewerResponse(BaseModel):
             else:
                 converted["parse_status"] = "repaired"
         return converted
+
+    @model_validator(mode="after")
+    def _check_evidence_invariants(self) -> ReviewerResponse:
+        # Legacy responses load as-is; full invariants apply only to new responses.
+        if self.derived_from_legacy:
+            return self
+        if set(self.parse_actions) - PARSE_ACTIONS:
+            raise ValueError("parse_actions contains an action outside the fixed vocabulary")
+        if self.parse_status == "invalid":
+            if not self.invalid_output:
+                raise ValueError("invalid parse_status requires invalid_output=True")
+            if self.parsed_response is not None:
+                raise ValueError("invalid response must not carry a parsed_response")
+            if self.retained_finding_count:
+                raise ValueError("invalid response cannot retain findings")
+            return self
+        if self.invalid_output or self.parsed_response is None:
+            raise ValueError(f"{self.parse_status} response must be valid with a parsed_response")
+        parsed_count = len(self.parsed_response.findings)
+        if self.parse_status == "exact":
+            if self.parse_attempts != 1 or self.parse_actions or self.dropped_finding_count:
+                raise ValueError("exact response must have attempts=1, no actions, no drops")
+        elif self.parse_status == "tolerant":
+            if not self.parse_actions or self.dropped_finding_count:
+                raise ValueError("tolerant response must record actions and drop nothing")
+        elif self.parse_status == "repaired" and not self.parse_actions:
+            raise ValueError("repaired response must record at least one action")
+        if self.retained_finding_count is not None and self.retained_finding_count != parsed_count:
+            raise ValueError("retained_finding_count must match the parsed findings")
+        if (
+            self.input_finding_count is not None
+            and self.retained_finding_count is not None
+            and self.input_finding_count != self.retained_finding_count + self.dropped_finding_count
+        ):
+            raise ValueError("input_finding_count must equal retained + dropped")
+        return self
 
 
 class ScoreBreakdown(BaseModel):
@@ -672,3 +737,27 @@ class RunResult(BaseModel):
     @property
     def case_count(self) -> int:
         return len(self.case_results)
+
+    @model_validator(mode="after")
+    def _check_parse_evidence_consistency(self) -> RunResult:
+        # Old runs (non_exact_output_used is None) are legacy/unknown and bypass this.
+        # New runs must have parse-status counts that agree with their case results.
+        if self.metadata.non_exact_output_used is None:
+            return self
+        actual: dict[str, int] = {}
+        for case in self.case_results:
+            status = case.response.parse_status
+            actual[status] = actual.get(status, 0) + 1
+        recorded = self.metadata.reviewer_parse_status_counts
+        if set(recorded) - {"exact", "tolerant", "repaired", "invalid"}:
+            raise ValueError("reviewer_parse_status_counts has an unknown status key")
+        if any(count < 0 for count in recorded.values()):
+            raise ValueError("reviewer_parse_status_counts has a negative count")
+        if {k: v for k, v in recorded.items() if v} != {k: v for k, v in actual.items() if v}:
+            raise ValueError("reviewer_parse_status_counts disagree with case_results")
+        if sum(recorded.values()) != len(self.case_results):
+            raise ValueError("reviewer_parse_status_counts total must equal case count")
+        expected_non_exact = any(status in {"tolerant", "repaired"} for status in actual)
+        if self.metadata.non_exact_output_used != expected_non_exact:
+            raise ValueError("non_exact_output_used disagrees with case parse statuses")
+        return self

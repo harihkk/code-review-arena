@@ -61,8 +61,9 @@ def verify_reviewer(
     response = reviewer.review(build_context(case))
     console.print(
         f"status={response.parse_status} attempts={response.parse_attempts} "
-        f"actions={response.parse_actions} dropped_findings={response.dropped_finding_count} "
-        f"latency={response.latency_ms}ms"
+        f"actions={response.parse_actions} "
+        f"findings(input={response.input_finding_count} retained={response.retained_finding_count} "
+        f"dropped={response.dropped_finding_count}) latency={response.latency_ms}ms"
     )
     parsed = response.parsed_response
     if response.parse_status == "exact" and parsed is not None:

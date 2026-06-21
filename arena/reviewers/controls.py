@@ -667,6 +667,8 @@ def build_prompt(
         )
         # A built-in control emits a known-valid ReviewResult: record it as exact
         # without round-tripping through text salvage.
+        # A built-in control emits a known-valid ReviewResult: record it as exact
+        # without round-tripping through text salvage.
         raw = json.dumps(result.model_dump())
         return ReviewerResponse(
             raw_response=raw,
@@ -674,6 +676,8 @@ def build_prompt(
             invalid_output=False,
             parse_attempts=1,
             parse_status="exact",
+            input_finding_count=len(result.findings),
+            retained_finding_count=len(result.findings),
             latency_ms=int((time.perf_counter() - started) * 1000),
             output_tokens=max(1, len(raw) // 4),
         )

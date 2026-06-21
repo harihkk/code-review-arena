@@ -16,7 +16,11 @@ from arena.core.errors import ExecutionError
 from arena.core.models import CaseContext, ReviewerResponse
 from arena.execution.process import run_supervised
 from arena.reviewers.base import BaseReviewer
-from arena.reviewers.response_parser import parse_reviewer_output, response_from_outcome
+from arena.reviewers.response_parser import (
+    known_paths_from_context,
+    parse_reviewer_output,
+    response_from_outcome,
+)
 
 
 def _elapsed_ms(started: float) -> int:
@@ -24,14 +28,19 @@ def _elapsed_ms(started: float) -> int:
 
 
 def _invalid_response(raw: str, summary: str, latency_ms: int) -> ReviewerResponse:
-    """An invalid custom-command response: parse_status=invalid, raw preserved."""
+    """An invalid custom-command response: parse_status=invalid, raw preserved.
+
+    Counts are None: no valid findings list was ever established.
+    """
     return ReviewerResponse(
         raw_response=raw,
         parsed_response=None,
         invalid_output=True,
         parse_attempts=1,
         parse_status="invalid",
-        parse_error_summary=summary[:512],
+        input_finding_count=None,
+        retained_finding_count=None,
+        parse_error_summary=summary[: limits.PARSE_ERROR_SUMMARY_LEN],
         latency_ms=latency_ms,
     )
 
@@ -200,7 +209,11 @@ class CustomCommandReviewer(BaseReviewer):
                 return _invalid_response(
                     json.dumps({"error": "no output"}), "no reviewer output", _elapsed_ms(started)
                 )
-            outcome = parse_reviewer_output(raw, enable_repair=self.enable_repair)
+            outcome = parse_reviewer_output(
+                raw,
+                enable_repair=self.enable_repair,
+                known_paths=known_paths_from_context(context),
+            )
             return response_from_outcome(outcome, raw=raw, latency_ms=_elapsed_ms(started))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)

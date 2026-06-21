@@ -52,6 +52,11 @@ YAML_MAX_NODES = 100_000
 JSON_MAX_DEPTH = 64
 JSON_MAX_NODES = 200_000
 
+# --- Persisted reviewer parse-evidence caps ---
+PARSE_ACTIONS_MAX = 16  # recorded salvage actions per response (fixed vocabulary)
+PARSE_ACTION_LEN = 64  # one action identifier
+PARSE_ERROR_SUMMARY_LEN = 512  # bounded failure reason; never the full reviewer output
+
 # --- Pack structure counts ---
 CASES_PER_MANIFEST = 1024
 BUGS_PER_CASE = 50  # also the finding-to-bug matching cap (MAX_BUGS_PER_CASE)

@@ -482,7 +482,7 @@ def _failed_case_result(
         category=case.category,
         severity=case.severity,
         ground_truth_summary=case.ground_truth.primary_bug.summary,
-        response=ReviewerResponse(raw_response="", invalid_output=True),
+        response=ReviewerResponse(raw_response="", invalid_output=True, parse_status="invalid"),
         scored_findings=[],
         breakdown=ScoreBreakdown(),
         score=0.0,

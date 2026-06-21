@@ -295,5 +295,7 @@ class ReferencePatchReviewer(BaseReviewer):
             invalid_output=False,
             parse_attempts=1,
             parse_status="exact",
+            input_finding_count=len(result.findings),
+            retained_finding_count=len(result.findings),
             latency_ms=int((time.perf_counter() - started) * 1000),
         )

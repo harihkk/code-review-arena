@@ -198,27 +198,75 @@ def test_legacy_reviewer_response_derives_parse_status(attempts, invalid, expect
 
 
 def test_new_reviewer_response_keeps_explicit_parse_status():
-    response = ReviewerResponse(raw_response="{}", parse_attempts=1, parse_status="repaired")
-    assert response.parse_status == "repaired"
+    # An explicit parse_status is preserved (not overwritten by the legacy-derive).
+    response = ReviewerResponse(
+        raw_response="{}", parse_attempts=1, parse_status="invalid", invalid_output=True
+    )
+    assert response.parse_status == "invalid"
 
 
 # --------------------------------------------------------------------------- #
-# Reviewer-path admission                                                      #
+# Reviewer-path admission (context-aware Git-prefix resolution)                #
 # --------------------------------------------------------------------------- #
+
+
+def test_admit_path_without_prefix_or_with_dot_needs_no_context():
+    assert admit_reviewer_path("app/a.py") == "app/a.py"
+    assert admit_reviewer_path("./app/a.py") == "app/a.py"
+    assert admit_reviewer_path("src/pkg/mod.py") == "src/pkg/mod.py"
+
+
+def test_admit_path_never_strips_prefix_without_context():
+    # No known-path context: a/ and b/ are preserved (could be real directories).
+    assert admit_reviewer_path("a/service.py") == "a/service.py"
+    assert admit_reviewer_path("b/config.yaml") == "b/config.yaml"
 
 
 @pytest.mark.parametrize(
-    "raw,canonical",
+    "raw,known,expected",
     [
-        ("app/a.py", "app/a.py"),
-        ("a/app/a.py", "app/a.py"),
-        ("b/app/a.py", "app/a.py"),
-        ("./app/a.py", "app/a.py"),
-        ("src/pkg/mod.py", "src/pkg/mod.py"),
+        ("a/service.py", {"service.py"}, "service.py"),  # normal Git prefix (relevant files)
+        ("b/config.yaml", {"config.yaml"}, "config.yaml"),  # normal Git b/ prefix
+        ("a/service.py", {"a/service.py"}, "a/service.py"),  # real top-level a/ directory
+        ("b/config.yaml", {"b/config.yaml"}, "b/config.yaml"),  # real top-level b/ directory
+        ("a/a/service.py", {"a/service.py"}, "a/service.py"),  # Git prefix over a real a/ path
+        ("a/service.py", {"other.py"}, "a/service.py"),  # neither form known -> keep complete
     ],
 )
-def test_admit_reviewer_path_accepts_canonical_forms(raw, canonical):
-    assert admit_reviewer_path(raw) == canonical
+def test_admit_path_resolves_prefix_against_known_paths(raw, known, expected):
+    assert admit_reviewer_path(raw, frozenset(known)) == expected
+
+
+def test_admit_path_ambiguous_when_both_forms_known():
+    with pytest.raises(ValueError):
+        admit_reviewer_path("a/service.py", frozenset({"a/service.py", "service.py"}))
+
+
+def test_admit_path_uses_diff_only_and_relevant_only_context():
+    from arena.core.models import CaseContext, ReviewerCaseMetadata
+    from arena.reviewers.response_parser import known_paths_from_context
+
+    # Known only from relevant files.
+    ctx_files = CaseContext(
+        case=ReviewerCaseMetadata(
+            id="c", title="t", category="x", severity="high", stack=["py"], description="d"
+        ),
+        diff="",
+        relevant_files={"service.py": "x\n"},
+    )
+    known = known_paths_from_context(ctx_files)
+    assert admit_reviewer_path("a/service.py", known) == "service.py"
+
+    # Known only from the diff (no relevant files).
+    ctx_diff = CaseContext(
+        case=ReviewerCaseMetadata(
+            id="c", title="t", category="x", severity="high", stack=["py"], description="d"
+        ),
+        diff="--- a/service.py\n+++ b/service.py\n@@ -1 +1 @@\n-x\n+y\n",
+        relevant_files={},
+    )
+    known = known_paths_from_context(ctx_diff)
+    assert admit_reviewer_path("b/service.py", known) == "service.py"
 
 
 @pytest.mark.parametrize(
@@ -242,7 +290,7 @@ def test_admit_reviewer_path_accepts_canonical_forms(raw, canonical):
 )
 def test_admit_reviewer_path_rejects_unsafe_forms(raw):
     with pytest.raises(ValueError):
-        admit_reviewer_path(raw)
+        admit_reviewer_path(raw, frozenset({"anything.py"}))
 
 
 # --------------------------------------------------------------------------- #

@@ -27,7 +27,11 @@ from arena.core import limits
 from arena.core.models import CaseContext, ReviewerResponse
 from arena.reviewers.base import BaseReviewer
 from arena.reviewers.custom_command import serialize_reviewer_case
-from arena.reviewers.response_parser import parse_reviewer_output, response_from_outcome
+from arena.reviewers.response_parser import (
+    known_paths_from_context,
+    parse_reviewer_output,
+    response_from_outcome,
+)
 from arena.reviewers.strict_json import StrictJSONError, strict_loads
 
 # Bound for the message recorded on an invalid HTTP reviewer response (well under
@@ -185,7 +189,11 @@ class HttpReviewer(BaseReviewer):
                 return self._invalid(f"malformed OpenAI envelope: {type(exc).__name__}", started)
         else:
             content = text
-        outcome = parse_reviewer_output(content, enable_repair=self.enable_repair)
+        outcome = parse_reviewer_output(
+            content,
+            enable_repair=self.enable_repair,
+            known_paths=known_paths_from_context(context),
+        )
         return response_from_outcome(
             outcome, raw=content, latency_ms=int((time.perf_counter() - started) * 1000)
         )

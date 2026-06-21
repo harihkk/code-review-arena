@@ -101,33 +101,48 @@ def _check_relative_path(value: str) -> str:
 SafeRelativePath = Annotated[str, AfterValidator(_check_relative_path)]
 
 
-def admit_reviewer_path(value: object) -> str:
+def admit_reviewer_path(value: object, known_paths: frozenset[str] | None = None) -> str:
     """Admit a reviewer-supplied finding path to a canonical pack-relative path.
 
-    ``Finding.file`` is reviewer-controlled. Reviewers conventionally prefix paths
-    with a diff-style ``a/`` or ``b/`` or a leading ``./``; exactly one such
-    presentation prefix is removed, then the remainder must satisfy the SAME
-    portable relative-path policy as pack paths (ASCII profile, no traversal, no
-    absolute/UNC/drive/backslash/control/dot-prefixed components). Returns the
-    canonical pack-relative path, or raises ``ValueError`` so the parser can treat
-    a bad path as an invalid finding. The raw value is preserved separately in the
-    reviewer's raw_response for audit; this never normalizes an arbitrary malformed
-    path into a valid identity.
+    ``Finding.file`` is reviewer-controlled. A leading ``./`` is always removed and
+    the complete remaining path must satisfy the SAME portable relative-path policy
+    as pack paths (ASCII profile, no traversal, no absolute/UNC/drive/backslash/
+    control/dot-prefixed components, not ``dev/null``).
+
+    A Git-style ``a/`` or ``b/`` prefix is only resolved against ``known_paths`` --
+    the reviewer-visible repository paths (relevant-files keys plus diff-referenced
+    paths) -- so a real top-level ``a/`` or ``b/`` directory is not corrupted:
+
+        complete known, stripped unknown -> keep complete
+        complete unknown, stripped known -> use stripped
+        both known                       -> reject as ambiguous
+        neither known                    -> keep complete
+
+    With no ``known_paths`` context, the prefix is never stripped. Raises
+    ``ValueError`` so the parser can treat a bad or ambiguous path as an invalid
+    finding; the raw value is preserved in the reviewer's raw_response for audit.
     """
     if not isinstance(value, str):
         raise ValueError("finding path must be a string")
-    candidate = value
-    if candidate.startswith("./"):
-        candidate = candidate[2:]
-    elif candidate.startswith(("a/", "b/")):
-        candidate = candidate[2:]
-    # "/dev/null" is caught by the leading-"/" rule; "dev/null" is a valid relative
-    # path under the policy but is the conventional "no file" sentinel, not a target.
+    candidate = value[2:] if value.startswith("./") else value
     if candidate == "dev/null":
         raise ValueError(f"unsafe finding path {value!r}: 'dev/null' is not a real file")
     error = _relative_path_error(candidate)
     if error is not None:
         raise ValueError(f"unsafe finding path {value!r}: {error}")
+    if known_paths is None or not candidate.startswith(("a/", "b/")):
+        return candidate
+    stripped = candidate[2:]
+    complete_known = candidate in known_paths
+    stripped_known = (
+        bool(stripped) and _relative_path_error(stripped) is None and stripped in known_paths
+    )
+    if complete_known and stripped_known:
+        raise ValueError(
+            f"ambiguous finding path {value!r}: both prefixed and stripped forms exist"
+        )
+    if stripped_known and not complete_known:
+        return stripped
     return candidate
 
 
