@@ -13,7 +13,16 @@ Observed maxima at the time of writing (benchmark_sets/v1, audit_v1, audit_v2):
 manifest 451 B, case.yaml 1291 B, pr.diff 1071 B, reference.patch 1021 B,
 10 cases/manifest, 1 bug/case, 1 file/bug, 1 line-range/file, 4 concepts,
 5 fix keywords, 4 stack entries, title 75, description 201, category 19,
-case id 45, concept 26, test_command string 15. Limits below sit well above these.
+case id 45, concept 26, test_command string 15, YAML depth 9, YAML nodes 104,
+test timeout 30 s, beta 1.0, score weights summing to 100, penalties 5/15/20.
+Limits below sit well above these.
+
+Scope: these bound individual input byte sizes and (after the YAML structure caps
+below) parsed YAML structure. They do NOT bound total filesystem entry count or
+provide immutable traversal, name-collision handling, or time-of-check/time-of-use
+protection for pack trees; that comprehensive enforcement remains Phase 1C. So
+these limits reduce, but do not by themselves eliminate, every adversarial pack's
+ability to cause pathological memory or compute.
 """
 
 from __future__ import annotations
@@ -29,6 +38,12 @@ PATCH_BYTES = 4 * 1024 * 1024
 PACK_FILE_BYTES = 8 * 1024 * 1024
 # pack.sha256 is a single hex digest line.
 CHECKSUM_FILE_BYTES = 256
+
+# --- Parsed-YAML structure caps (checked during parsing, after the byte cap) ---
+# Bound parser amplification that a byte cap alone misses (deep nesting, huge node
+# counts). Observed: depth 9, nodes 104 across the shipped packs; these are far above.
+YAML_MAX_DEPTH = 64
+YAML_MAX_NODES = 100_000
 
 # --- Pack structure counts ---
 CASES_PER_MANIFEST = 1024
@@ -57,6 +72,17 @@ TOKEN_LEN = 4096  # one argv token
 COMMAND_STRING_LEN = 16 * 1024  # a test_command / static_analysis_command string
 DOCKER_IMAGE_REF_LEN = 512
 LINE_NUMBER_MAX = 10_000_000  # bound line-number magnitude (start/end)
+
+# --- Numeric domain limits (domain-meaningful safety bounds, not correctness) ---
+# Each is chosen for its own domain rather than reusing an unrelated magnitude cap.
+# Observed shipped values: timeout <= 30 s, beta 1.0, weights sum to 100, penalties
+# 5/15/20. External input outside a range is rejected, never clamped.
+TEST_TIMEOUT_SECONDS_MAX = 86_400  # 24 h ceiling on a single test command
+API_WALL_SECONDS_MAX = 86_400  # 24 h ceiling on a run wall-clock budget
+API_COST_MAX = 1_000_000  # USD ceiling on a run cost budget
+SCORE_WEIGHT_MAX = 100  # one score weight (the six weights sum to 100)
+PENALTY_MAX = 100  # a scoring penalty and the false-positive penalty cap
+BETA_MAX = 100  # F-beta beta
 
 # --- Reviewer-visible input (mirrors ContextLimits; see arena/benchmark/case_loader) ---
 RELEVANT_FILE_COUNT = 40

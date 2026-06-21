@@ -124,10 +124,11 @@ class HttpReviewer(BaseReviewer):
 
         The body is read in chunks and capped at ``RAW_RESPONSE_BYTES + 1`` so a
         huge or never-ending response is never fully materialized. ``iter_bytes``
-        yields content-decoded bytes, so the cap holds after decompression and a
-        compressed bomb cannot bypass it. Content-Length is only used for an early
-        reject; the streamed count is authoritative against an absent or understated
-        length. On overflow the stream context closes the response immediately.
+        yields content-decoded bytes, so the cap is enforced on the DECODED body
+        that will actually be parsed and a compressed bomb cannot bypass it.
+        Content-Length is NOT consulted: it describes the transferred (encoded)
+        representation and can be absent or false, so the streamed decoded-byte
+        count is authoritative. On overflow the stream context closes the response.
         """
         limit = limits.RAW_RESPONSE_BYTES
         with httpx.Client(timeout=self.timeout_seconds, transport=self._transport) as client:
@@ -137,9 +138,6 @@ class HttpReviewer(BaseReviewer):
                 json=self._request_body(payload),
                 headers=self._headers(),
             ) as response:
-                declared = response.headers.get("Content-Length")
-                if declared is not None and declared.isdigit() and int(declared) > limit:
-                    return b"", response.status_code, True
                 chunks: list[bytes] = []
                 total = 0
                 for chunk in response.iter_bytes():
@@ -163,18 +161,35 @@ class HttpReviewer(BaseReviewer):
         if too_large:
             return self._invalid("reviewer_output_too_large", started)
         if status >= 400:
+            # A non-2xx body is only a diagnostic snippet, never parsed as reviewer
+            # JSON, so bounded replacement decoding is acceptable here.
             snippet = body.decode("utf-8", errors="replace")[:512]
             return self._invalid(
                 f"http reviewer request failed with status {status}: {snippet}", started
             )
-        text = body.decode("utf-8", errors="replace")
+        # A successful body is decoded STRICTLY: invalid UTF-8 cannot be silently
+        # repaired with replacement characters into a parseable review.
+        try:
+            text = body.decode("utf-8")
+        except UnicodeDecodeError:
+            return self._invalid("http reviewer response was not valid UTF-8", started)
+        # Contain parser-controlled failures (malformed envelope, bad shape, deeply
+        # nested JSON) as typed invalid output instead of crashing the run. The set
+        # is narrow on purpose: never BaseException, KeyboardInterrupt, or SystemExit.
         try:
             raw = self._extract_openai_content(json.loads(text)) if self.style == "openai" else text
-        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+            parsed, attempts = parse_review_response(
+                raw or "{}", repair=naive_repair if self.enable_repair else None
+            )
+        except (
+            KeyError,
+            IndexError,
+            TypeError,
+            ValueError,
+            UnicodeDecodeError,
+            RecursionError,
+        ) as exc:
             return self._error_response(exc, started)
-        parsed, attempts = parse_review_response(
-            raw or "{}", repair=naive_repair if self.enable_repair else None
-        )
         return ReviewerResponse(
             raw_response=raw or "",
             parsed_response=parsed,

@@ -9,6 +9,7 @@ safety bounds, not correctness claims.
 from __future__ import annotations
 
 import asyncio
+import gzip
 import json
 import os
 import stat
@@ -471,3 +472,153 @@ def test_app_health_unaffected_and_oversized_rejected_and_malformed_422():
     # malformed JSON within the limit -> FastAPI's normal 422, not 413
     bad = client.post("/runs", content=b"{", headers={"content-type": "application/json"})
     assert bad.status_code == 422
+
+
+# --------------------------------------------------------------------------- #
+# YAML structure hardening: duplicate keys, depth, node count                 #
+# --------------------------------------------------------------------------- #
+
+
+def test_yaml_small_valid_document_accepted(tmp_path):
+    path = tmp_path / "ok.yaml"
+    path.write_text("a: 1\nb:\n  c: 2\n")
+    assert read_yaml_mapping_bounded(path, 1000, label="case.yaml") == {"a": 1, "b": {"c": 2}}
+
+
+def test_yaml_duplicate_top_level_key_rejected(tmp_path):
+    path = tmp_path / "dup.yaml"
+    path.write_text("a: 1\na: 2\n")
+    with pytest.raises(ValidationError):
+        read_yaml_mapping_bounded(path, 1000, label="case.yaml")
+
+
+def test_yaml_duplicate_nested_key_rejected(tmp_path):
+    path = tmp_path / "nested.yaml"
+    path.write_text("outer:\n  k: 1\n  k: 2\n")
+    with pytest.raises(ValidationError):
+        read_yaml_mapping_bounded(path, 1000, label="case.yaml")
+
+
+def test_yaml_error_does_not_leak_input_content(tmp_path):
+    path = tmp_path / "secret.yaml"
+    path.write_text("supersecretkey: 1\nsupersecretkey: 2\n")
+    with pytest.raises(ValidationError) as exc:
+        read_yaml_mapping_bounded(path, 1000, label="case.yaml")
+    assert "supersecretkey" not in str(exc.value)
+
+
+def test_yaml_node_count_boundary(tmp_path, monkeypatch):
+    monkeypatch.setattr(limits, "YAML_MAX_NODES", 10)
+    # {"root": [k ints]} composes to k + 3 nodes (map, key, list, k scalars).
+    at_limit = tmp_path / "ok.yaml"
+    at_limit.write_text("root: [" + ", ".join(["0"] * 7) + "]\n")  # 10 nodes
+    read_yaml_mapping_bounded(at_limit, 100_000, label="case.yaml")
+    over = tmp_path / "over.yaml"
+    over.write_text("root: [" + ", ".join(["0"] * 8) + "]\n")  # 11 nodes
+    with pytest.raises(ValidationError):
+        read_yaml_mapping_bounded(over, 100_000, label="case.yaml")
+
+
+def test_yaml_depth_boundary(tmp_path, monkeypatch):
+    monkeypatch.setattr(limits, "YAML_MAX_DEPTH", 8)
+    # "root: [[...]]" with b nested flow lists composes to depth b + 2 at the scalar.
+    at_limit = tmp_path / "ok.yaml"
+    at_limit.write_text("root: " + "[" * 6 + "0" + "]" * 6 + "\n")  # depth 8
+    read_yaml_mapping_bounded(at_limit, 100_000, label="case.yaml")
+    over = tmp_path / "over.yaml"
+    over.write_text("root: " + "[" * 7 + "0" + "]" * 7 + "\n")  # depth 9
+    with pytest.raises(ValidationError):
+        read_yaml_mapping_bounded(over, 100_000, label="case.yaml")
+
+
+def test_yaml_deep_nesting_raises_typed_error_not_recursionerror(tmp_path):
+    # Far past the default depth cap: the depth guard fires a typed ValidationError
+    # before any parser-driven RecursionError could escape.
+    path = tmp_path / "deep.yaml"
+    path.write_text("root: " + "[" * 5000 + "0" + "]" * 5000 + "\n")
+    with pytest.raises(ValidationError):
+        read_yaml_mapping_bounded(path, 1_000_000, label="case.yaml")
+
+
+# --------------------------------------------------------------------------- #
+# HTTP reviewer: decoded-byte authority, strict UTF-8, JSON containment       #
+# --------------------------------------------------------------------------- #
+
+
+def test_http_absent_content_length_under_limit_accepted():
+    payload = json.dumps(_VALID).encode()
+    resp = _json_reviewer(lambda r: httpx.Response(200, content=iter([payload]))).review(_ctx())
+    assert resp.invalid_output is False
+
+
+def test_http_overstated_content_length_small_body_accepted():
+    # Content-Length is not consulted, so an overstated length with a small body
+    # is still accepted on the streamed-byte count.
+    body = json.dumps(_VALID).encode()
+
+    def handler(req):
+        return httpx.Response(
+            200, content=body, headers={"content-length": str(limits.RAW_RESPONSE_BYTES * 4)}
+        )
+
+    assert _json_reviewer(handler).review(_ctx()).invalid_output is False
+
+
+def test_http_understated_content_length_large_body_rejected():
+    body = b"x" * (limits.RAW_RESPONSE_BYTES + 1)
+
+    def handler(req):
+        return httpx.Response(200, content=body, headers={"content-length": "5"})
+
+    resp = _json_reviewer(handler).review(_ctx())
+    assert resp.invalid_output is True
+    assert resp.parsed_response.review_summary == "reviewer_output_too_large"
+
+
+def test_http_gzip_decoded_bytes_authoritative():
+    # Small transferred (compressed) body whose DECODED size exceeds the cap.
+    decoded = json.dumps(_VALID).encode() + b" " * (limits.RAW_RESPONSE_BYTES + 100)
+    compressed = gzip.compress(decoded)
+    assert len(compressed) < limits.RAW_RESPONSE_BYTES  # transferred is small
+
+    def handler(req):
+        return httpx.Response(200, content=compressed, headers={"content-encoding": "gzip"})
+
+    resp = _json_reviewer(handler).review(_ctx())
+    assert resp.invalid_output is True
+    assert resp.parsed_response.review_summary == "reviewer_output_too_large"
+
+
+def test_http_invalid_utf8_2xx_plain_json_is_invalid():
+    body = b'{"findings": []}\xff\xfe'  # invalid UTF-8 in a successful body
+    resp = _json_reviewer(lambda r: httpx.Response(200, content=body)).review(_ctx())
+    assert resp.invalid_output is True
+    assert "valid UTF-8" in resp.parsed_response.review_summary
+
+
+def test_http_invalid_utf8_2xx_openai_envelope_is_invalid():
+    body = b'{"choices": [{"message": {"content": "x"}}]}\xff'
+    resp = HttpReviewer(
+        "http://local/v1",
+        style="openai",
+        transport=httpx.MockTransport(lambda r: httpx.Response(200, content=body)),
+    ).review(_ctx())
+    assert resp.invalid_output is True
+    assert "valid UTF-8" in resp.parsed_response.review_summary
+
+
+def test_http_deeply_nested_envelope_is_contained():
+    body = (b"[" * 50_000) + (b"]" * 50_000)  # valid UTF-8, within byte cap, deeply nested
+    assert len(body) < limits.RAW_RESPONSE_BYTES
+    resp = HttpReviewer(
+        "http://local/v1",
+        style="openai",
+        transport=httpx.MockTransport(lambda r: httpx.Response(200, content=body)),
+    ).review(_ctx())
+    assert resp.invalid_output is True  # contained as invalid, run not crashed
+
+
+def test_http_deeply_nested_plain_json_is_contained():
+    body = (b"[" * 50_000) + (b"]" * 50_000)
+    resp = _json_reviewer(lambda r: httpx.Response(200, content=body)).review(_ctx())
+    assert resp.invalid_output is True

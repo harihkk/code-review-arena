@@ -1,4 +1,11 @@
-"""Phase 1B commit 1: strict, bounded external/reviewer/API schema contract."""
+"""Phase 1B: strict, bounded external/reviewer/API schema contract.
+
+Commit 1 added the strict base and bounds; the corrective commit completes the
+inventory (every external model), the runtime-field rejection, identity/collection
+uniqueness, real argv-collection limits, and the dedicated numeric limits.
+"""
+
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -6,9 +13,12 @@ from pydantic import ValidationError
 from arena.core import limits
 from arena.core.models import (
     AcceptableFinding,
+    BenchmarkCase,
     CaseInput,
+    CaseManifest,
     ExecutionConfig,
     Finding,
+    GroundTruth,
     GroundTruthBug,
     GroundTruthFile,
     LineRange,
@@ -17,6 +27,7 @@ from arena.core.models import (
     ScoreWeights,
     ScoringConfig,
     ValidationConfig,
+    _StrictExternal,
 )
 from arena.server.schemas import CreateRunRequest
 
@@ -37,26 +48,51 @@ def _finding(**overrides):
     return base
 
 
+_BUG = {
+    "summary": "s",
+    "files": [{"path": "a.py", "line_ranges": [{"start": 1, "end": 1}]}],
+    "concepts": ["c"],
+}
+_GROUND_TRUTH = {"bugs": [dict(_BUG)]}
+_CASE = {
+    "id": "case1",
+    "title": "t",
+    "category": "correctness",
+    "severity": "high",
+    "stack": ["python"],
+    "description": "d",
+    "input": {},
+    "ground_truth": {"bugs": [dict(_BUG)]},
+}
+_MANIFEST = {"version": "1", "name": "n", "cases": ["c1"]}
+
+
 # Valid minimal kwargs per external/reviewer/API model, for the unknown-field sweep.
 VALID_KWARGS = {
     LineRange: {"start": 1, "end": 2},
     GroundTruthFile: {"path": "a.py", "line_ranges": [{"start": 1, "end": 1}]},
-    GroundTruthBug: {
-        "summary": "s",
-        "files": [{"path": "a.py", "line_ranges": [{"start": 1, "end": 1}]}],
-        "concepts": ["c"],
-    },
+    GroundTruthBug: dict(_BUG),
     AcceptableFinding: {"concepts": ["c"]},
+    GroundTruth: _GROUND_TRUTH,
     CaseInput: {},
     ScoreWeights: {},
     ScoringConfig: {},
     ExecutionConfig: {},
     ValidationConfig: {},
     MetricsConfig: {},
+    BenchmarkCase: _CASE,
+    CaseManifest: _MANIFEST,
     Finding: _finding(),
     ReviewResult: {"findings": [], "overall_risk": "none", "review_summary": "x"},
     CreateRunRequest: {},
 }
+
+
+def test_unknown_field_sweep_covers_every_external_model():
+    # The sweep below must include every strict external model; this guard fails
+    # if a new _StrictExternal subclass is added without a fixture here.
+    missing = [s.__name__ for s in _StrictExternal.__subclasses__() if s not in VALID_KWARGS]
+    assert not missing, f"external models missing from VALID_KWARGS: {missing}"
 
 
 @pytest.mark.parametrize("model", list(VALID_KWARGS), ids=lambda m: m.__name__)
@@ -109,11 +145,13 @@ def test_numeric_safety_bounds():
 
 def test_collection_bounds_at_and_over_limit():
     files = [{"path": "a.py", "line_ranges": [{"start": 1, "end": 1}]}]
-    # concepts exactly at the cap is accepted; one over is rejected.
-    GroundTruthBug(summary="s", files=files, concepts=["c"] * limits.CONCEPTS_PER_BUG)
+    # concepts exactly at the cap is accepted; one over is rejected. Distinct values
+    # so the count cap (not the duplicate-rejection rule) is what is exercised.
+    unique = [f"c{i}" for i in range(limits.CONCEPTS_PER_BUG)]
+    GroundTruthBug(summary="s", files=files, concepts=unique)
     with pytest.raises(ValidationError):
-        GroundTruthBug(summary="s", files=files, concepts=["c"] * (limits.CONCEPTS_PER_BUG + 1))
-    # findings list cap on reviewer output
+        GroundTruthBug(summary="s", files=files, concepts=[*unique, "c-extra"])
+    # findings list cap on reviewer output (duplicates allowed in reviewer output)
     ReviewResult(
         findings=[Finding(**_finding())] * limits.FINDINGS_PER_RESPONSE,
         overall_risk="low",
@@ -166,3 +204,141 @@ def test_create_run_request_strict_and_bounded():
         CreateRunRequest(max_wall_seconds=0)  # must be positive when supplied
     with pytest.raises(ValidationError):
         CreateRunRequest(unknown_field=1)  # forbid extra
+
+
+# --- Corrective commit: completing the contract ----------------------------- #
+
+
+def test_case_dir_cannot_be_set_from_input():
+    BenchmarkCase(**_CASE)  # omitted case_dir is fine
+    for bad in (None, "some/path"):
+        with pytest.raises(ValidationError):
+            BenchmarkCase(**{**_CASE, "case_dir": bad})
+
+
+def test_case_dir_internal_assignment_and_serialization():
+    case = BenchmarkCase(**_CASE)
+    assert case.case_dir is None
+    case.case_dir = Path("/tmp/x")  # loader assigns after validation (not validated)
+    assert case.case_dir == Path("/tmp/x")
+    assert "case_dir" not in case.model_dump()  # excluded from serialization
+    assert "case_dir" not in case.model_dump(mode="json")
+
+
+def test_duplicate_bug_ids_rejected_after_autoassignment():
+    files = [{"path": "a.py", "line_ranges": [{"start": 1, "end": 1}]}]
+    # first bug auto-assigned bug-1; second explicitly bug-1 -> collision
+    with pytest.raises(ValidationError):
+        GroundTruth(
+            bugs=[
+                {"summary": "s", "files": files, "concepts": ["c"]},
+                {"id": "bug-1", "summary": "s2", "files": files, "concepts": ["d"]},
+            ]
+        )
+    # case-fold collision is also rejected
+    with pytest.raises(ValidationError):
+        GroundTruth(
+            bugs=[
+                {"id": "Bug-1", "summary": "s", "files": files, "concepts": ["c"]},
+                {"id": "bug-1", "summary": "s2", "files": files, "concepts": ["d"]},
+            ]
+        )
+    # distinct ids are fine
+    GroundTruth(
+        bugs=[
+            {"id": "a", "summary": "s", "files": files, "concepts": ["c"]},
+            {"id": "b", "summary": "s2", "files": files, "concepts": ["d"]},
+        ]
+    )
+
+
+def test_duplicate_semantic_collections_rejected():
+    files = [{"path": "a.py", "line_ranges": [{"start": 1, "end": 1}]}]
+    base = {"summary": "s", "files": files, "concepts": ["c"]}
+    with pytest.raises(ValidationError):
+        GroundTruthBug(**{**base, "concepts": ["c", "c"]})
+    with pytest.raises(ValidationError):
+        GroundTruthBug(**{**base, "must_mention": ["m", "m"]})
+    with pytest.raises(ValidationError):
+        GroundTruthBug(**{**base, "acceptable_fix_keywords": ["k", "k"]})
+    # exact-duplicate line ranges in one file rejected
+    with pytest.raises(ValidationError):
+        GroundTruthFile(path="a.py", line_ranges=[{"start": 1, "end": 2}, {"start": 1, "end": 2}])
+    # overlapping but non-identical ranges are allowed
+    GroundTruthFile(path="a.py", line_ranges=[{"start": 1, "end": 3}, {"start": 2, "end": 4}])
+    # duplicate acceptable_findings rejected
+    with pytest.raises(ValidationError):
+        GroundTruth(bugs=[base], acceptable_findings=[{"concepts": ["x"]}, {"concepts": ["x"]}])
+    # duplicate stack entries on the case rejected
+    with pytest.raises(ValidationError):
+        BenchmarkCase(**{**_CASE, "stack": ["python", "python"]})
+
+
+def test_manifest_requires_at_least_one_case_and_caps_maximum():
+    CaseManifest(version="1", name="n", cases=["c1"])  # exact minimum
+    with pytest.raises(ValidationError):
+        CaseManifest(version="1", name="n", cases=[])  # empty rejected
+    at_max = [f"case{i}" for i in range(limits.CASES_PER_MANIFEST)]
+    CaseManifest(version="1", name="n", cases=at_max)  # exact maximum
+    with pytest.raises(ValidationError):
+        CaseManifest(version="1", name="n", cases=[*at_max, "caseextra"])  # one over
+
+
+def test_argv_command_collection_limits_enforced():
+    # string form still supported and bounded
+    ExecutionConfig(test_command="pytest -q")
+    # one argv command: >=1 non-empty token, <= ARGV_TOKENS
+    ExecutionConfig(test_command=["pytest", "-q"])
+    ExecutionConfig(test_command=["x"] * limits.ARGV_TOKENS)  # exact token cap
+    with pytest.raises(ValidationError):
+        ExecutionConfig(test_command=[])  # empty outer list
+    with pytest.raises(ValidationError):
+        ExecutionConfig(test_command=[""])  # empty token
+    with pytest.raises(ValidationError):
+        ExecutionConfig(test_command=["x"] * (limits.ARGV_TOKENS + 1))  # too many tokens
+    # sequence form: >=1 command, <= ARGV_COMMANDS, each inner non-empty
+    ExecutionConfig(test_command=[["pytest"], ["ruff", "check"]])
+    ExecutionConfig(test_command=[["x"]] * limits.ARGV_COMMANDS)  # exact command cap
+    with pytest.raises(ValidationError):
+        ExecutionConfig(test_command=[[]])  # empty inner argv
+    with pytest.raises(ValidationError):
+        ExecutionConfig(test_command=[["x"]] * (limits.ARGV_COMMANDS + 1))  # too many commands
+
+
+def test_dedicated_numeric_limits_boundaries():
+    # test timeout: 1..TEST_TIMEOUT_SECONDS_MAX
+    ExecutionConfig(timeout_seconds=limits.TEST_TIMEOUT_SECONDS_MAX)
+    with pytest.raises(ValidationError):
+        ExecutionConfig(timeout_seconds=limits.TEST_TIMEOUT_SECONDS_MAX + 1)
+    with pytest.raises(ValidationError):
+        ExecutionConfig(timeout_seconds=0)
+    # beta: >0..BETA_MAX
+    MetricsConfig(beta=limits.BETA_MAX)
+    with pytest.raises(ValidationError):
+        MetricsConfig(beta=limits.BETA_MAX + 1)
+    # one score weight: 0..SCORE_WEIGHT_MAX
+    ScoreWeights(concept_match=limits.SCORE_WEIGHT_MAX)
+    with pytest.raises(ValidationError):
+        ScoreWeights(concept_match=limits.SCORE_WEIGHT_MAX + 1)
+    # penalties and the FP penalty cap: 0..PENALTY_MAX
+    ScoringConfig(
+        false_positive_penalty=limits.PENALTY_MAX,
+        false_positive_penalty_cap=limits.PENALTY_MAX,
+        invalid_json_penalty=limits.PENALTY_MAX,
+    )
+    with pytest.raises(ValidationError):
+        ScoringConfig(false_positive_penalty=limits.PENALTY_MAX + 1)
+    with pytest.raises(ValidationError):
+        ScoringConfig(false_positive_penalty_cap=limits.PENALTY_MAX + 1)
+    # API budgets: cost 0..API_COST_MAX, wall >0..API_WALL_SECONDS_MAX, beta >0..BETA_MAX
+    CreateRunRequest(
+        max_cost=limits.API_COST_MAX,
+        max_wall_seconds=limits.API_WALL_SECONDS_MAX,
+        beta=limits.BETA_MAX,
+    )
+    with pytest.raises(ValidationError):
+        CreateRunRequest(max_cost=limits.API_COST_MAX + 1)
+    with pytest.raises(ValidationError):
+        CreateRunRequest(max_wall_seconds=limits.API_WALL_SECONDS_MAX + 1)
+    with pytest.raises(ValidationError):
+        CreateRunRequest(beta=limits.BETA_MAX + 1)

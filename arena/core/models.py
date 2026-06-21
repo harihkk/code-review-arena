@@ -73,6 +73,15 @@ class GroundTruthFile(_StrictExternal):
     path: SafeRelativePath
     line_ranges: list[LineRange] = Field(min_length=1, max_length=limits.LINE_RANGES_PER_FILE)
 
+    @model_validator(mode="after")
+    def _reject_duplicate_line_ranges(self) -> GroundTruthFile:
+        # Reject exact-duplicate ranges only; overlapping but non-identical ranges
+        # remain valid (they can carry distinct scoring meaning).
+        keys = [(r.start, r.end) for r in self.line_ranges]
+        if len(keys) != len(set(keys)):
+            raise ValueError("duplicate line range in file")
+        return self
+
 
 class GroundTruthBug(_StrictExternal):
     # Stable identifier used to attribute repairs to specific bugs. Auto-assigned
@@ -87,6 +96,19 @@ class GroundTruthBug(_StrictExternal):
     acceptable_fix_keywords: list[BoundedPhrase] = Field(
         default_factory=list, max_length=limits.FIX_KEYWORDS_PER_BUG
     )
+
+    @model_validator(mode="after")
+    def _reject_duplicate_semantics(self) -> GroundTruthBug:
+        # These are sets of meanings; an exact-duplicate entry adds nothing and is
+        # rejected (not silently deduplicated) so a pack cannot hide a typo.
+        for label, items in (
+            ("concepts", self.concepts),
+            ("must_mention", self.must_mention),
+            ("acceptable_fix_keywords", self.acceptable_fix_keywords),
+        ):
+            if len(items) != len(set(items)):
+                raise ValueError(f"duplicate entries in {label}")
+        return self
 
 
 # Back-compat alias: cases authored against the single-bug model import PrimaryBug.
@@ -121,10 +143,28 @@ class GroundTruth(_StrictExternal):
         return converted
 
     @model_validator(mode="after")
-    def _assign_bug_ids(self) -> GroundTruth:
+    def _assign_and_validate_bug_ids(self) -> GroundTruth:
         for index, bug in enumerate(self.bugs):
             if not bug.id:
                 bug.id = f"bug-{index + 1}"
+        # Uniqueness runs AFTER auto-assignment, so an explicit "bug-1" colliding
+        # with an auto-assigned "bug-1" is rejected. Case-fold collisions are also
+        # rejected (matching the manifest case-id policy); never silently renamed.
+        seen: dict[str, str] = {}
+        for bug in self.bugs:
+            folded = bug.id.casefold()
+            if folded in seen:
+                raise ValueError(
+                    f"duplicate bug id after auto-assignment: {seen[folded]!r} and {bug.id!r}"
+                )
+            seen[folded] = bug.id
+        return self
+
+    @model_validator(mode="after")
+    def _reject_duplicate_acceptable_findings(self) -> GroundTruth:
+        keys = [(f.path, tuple(f.concepts)) for f in self.acceptable_findings]
+        if len(keys) != len(set(keys)):
+            raise ValueError("duplicate acceptable_findings entry")
         return self
 
     # Serialized for dashboards and tooling built on the single-bug shape.
@@ -144,17 +184,23 @@ class CaseInput(_StrictExternal):
 # A pack-controlled command string (test_command / static_analysis_command). A
 # bounded length and no separate regex: the executor tokenizes and runs without a
 # shell, and an incomplete homemade grammar would be less safe than a length cap.
+# These are size bounds only, NOT an executable allowlist.
 _BoundedCommand = Annotated[str, StringConstraints(max_length=limits.COMMAND_STRING_LEN)]
-_CommandToken = Annotated[str, StringConstraints(max_length=limits.TOKEN_LEN)]
+# One argv token is non-empty and bounded; one argv command holds 1..ARGV_TOKENS
+# tokens; a sequence holds 1..ARGV_COMMANDS commands. Empty outer or inner lists
+# are rejected by the min_length=1 bounds.
+_CommandToken = Annotated[str, StringConstraints(min_length=1, max_length=limits.TOKEN_LEN)]
+_ArgvCommand = Annotated[list[_CommandToken], Field(min_length=1, max_length=limits.ARGV_TOKENS)]
+_ArgvSequence = Annotated[list[_ArgvCommand], Field(min_length=1, max_length=limits.ARGV_COMMANDS)]
 
 
 class ScoreWeights(_StrictExternal):
-    concept_match: float = Field(default=35, ge=0)
-    file_match: float = Field(default=20, ge=0)
-    line_overlap: float = Field(default=15, ge=0)
-    severity_match: float = Field(default=10, ge=0)
-    fix_quality: float = Field(default=15, ge=0)
-    no_false_positives: float = Field(default=5, ge=0)
+    concept_match: float = Field(default=35, ge=0, le=limits.SCORE_WEIGHT_MAX)
+    file_match: float = Field(default=20, ge=0, le=limits.SCORE_WEIGHT_MAX)
+    line_overlap: float = Field(default=15, ge=0, le=limits.SCORE_WEIGHT_MAX)
+    severity_match: float = Field(default=10, ge=0, le=limits.SCORE_WEIGHT_MAX)
+    fix_quality: float = Field(default=15, ge=0, le=limits.SCORE_WEIGHT_MAX)
+    no_false_positives: float = Field(default=5, ge=0, le=limits.SCORE_WEIGHT_MAX)
 
     def total(self) -> float:
         return float(sum(self.model_dump().values()))
@@ -162,18 +208,17 @@ class ScoreWeights(_StrictExternal):
 
 class ScoringConfig(_StrictExternal):
     weights: ScoreWeights = Field(default_factory=ScoreWeights)
-    false_positive_penalty: float = Field(default=5, ge=0)
-    false_positive_penalty_cap: float = Field(default=15, ge=0)
-    invalid_json_penalty: float = Field(default=20, ge=0)
+    false_positive_penalty: float = Field(default=5, ge=0, le=limits.PENALTY_MAX)
+    false_positive_penalty_cap: float = Field(default=15, ge=0, le=limits.PENALTY_MAX)
+    invalid_json_penalty: float = Field(default=20, ge=0, le=limits.PENALTY_MAX)
 
 
 class ExecutionConfig(_StrictExternal):
     run_tests: bool = False
-    # One command string, one argv list, or a list of argv lists run in order.
-    test_command: _BoundedCommand | list[_CommandToken] | list[list[_CommandToken]] | None = Field(
-        default=None
-    )
-    timeout_seconds: int = Field(default=30, ge=1, le=limits.LINE_NUMBER_MAX)
+    # One command string, one argv list, or a list of argv lists run in order;
+    # the list forms are bounded in count and require non-empty tokens.
+    test_command: _BoundedCommand | _ArgvCommand | _ArgvSequence | None = Field(default=None)
+    timeout_seconds: int = Field(default=30, ge=1, le=limits.TEST_TIMEOUT_SECONDS_MAX)
     docker_image: (
         Annotated[str, StringConstraints(max_length=limits.DOCKER_IMAGE_REF_LEN)] | None
     ) = None
@@ -208,7 +253,7 @@ class ValidationConfig(_StrictExternal):
 
 
 class MetricsConfig(_StrictExternal):
-    beta: float = Field(default=1.0, gt=0, le=limits.LINE_NUMBER_MAX)
+    beta: float = Field(default=1.0, gt=0, le=limits.BETA_MAX)
 
 
 class BenchmarkCase(_StrictExternal):
@@ -224,13 +269,32 @@ class BenchmarkCase(_StrictExternal):
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     validation: ValidationConfig = Field(default_factory=ValidationConfig)
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)
+    # Runtime state assigned by the loader after validation, not pack-controlled
+    # input. Kept excluded from serialization; _reject_runtime_fields rejects any
+    # attempt to set it from a case.yaml document (see below).
     case_dir: Path | None = Field(default=None, exclude=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_runtime_fields(cls, value: Any) -> Any:
+        # case_dir is internal runtime state; reject it from input with any value
+        # (including null), while still allowing the loader's post-validation
+        # attribute assignment (assignment is not validated).
+        if isinstance(value, dict) and "case_dir" in value:
+            raise ValueError("case_dir is internal runtime state and cannot be set from pack input")
+        return value
+
+    @model_validator(mode="after")
+    def _reject_duplicate_stack(self) -> BenchmarkCase:
+        if len(self.stack) != len(set(self.stack)):
+            raise ValueError("duplicate entries in stack")
+        return self
 
 
 class CaseManifest(_StrictExternal):
     version: Annotated[str, StringConstraints(min_length=1, max_length=limits.IDENTIFIER_LEN)]
     name: Annotated[str, StringConstraints(min_length=1, max_length=limits.TITLE_LEN)]
-    cases: list[SafeCaseId] = Field(max_length=limits.CASES_PER_MANIFEST)
+    cases: list[SafeCaseId] = Field(min_length=1, max_length=limits.CASES_PER_MANIFEST)
     # Execution image applied to every case that does not set its own
     # docker_image. Lets a pack target one sandbox image in a single place
     # instead of repeating it across every case.yaml.

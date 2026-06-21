@@ -12,9 +12,11 @@ from arena.core.models import Finding, ReviewResult
 
 
 def _parse(candidate: str) -> ReviewResult | None:
+    # RecursionError guards against deeply nested (but within-byte-limit) JSON; a
+    # parse/validation failure means "not a valid review", never a crashed run.
     try:
         return ReviewResult.model_validate(json.loads(candidate))
-    except (json.JSONDecodeError, ValueError):
+    except (json.JSONDecodeError, ValueError, RecursionError):
         return None
 
 
@@ -44,7 +46,7 @@ def naive_repair(raw: str) -> str:
         try:
             data = json.loads(candidate)
             break
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, RecursionError):
             continue
     if data is None:
         return raw

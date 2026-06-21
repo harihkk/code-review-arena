@@ -25,7 +25,7 @@ class CreateRunRequest(BaseModel):
     )
     command: Annotated[str, StringConstraints(max_length=limits.COMMAND_LEN)] | None = None
     mode: Literal["review", "patch", "full"] = "review"
-    beta: float | None = Field(default=None, gt=0, le=limits.LINE_NUMBER_MAX)
+    beta: float | None = Field(default=None, gt=0, le=limits.BETA_MAX)
     allow_local_execution: bool = False
-    max_wall_seconds: float | None = Field(default=None, gt=0)
-    max_cost: float | None = Field(default=None, ge=0)
+    max_wall_seconds: float | None = Field(default=None, gt=0, le=limits.API_WALL_SECONDS_MAX)
+    max_cost: float | None = Field(default=None, ge=0, le=limits.API_COST_MAX)
