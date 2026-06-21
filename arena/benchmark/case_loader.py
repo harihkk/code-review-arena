@@ -78,6 +78,7 @@ def load_cases(benchmark_dir: Path) -> list[BenchmarkCase]:
     if benchmark_dir.is_symlink():
         raise ValidationError(f"benchmark root is a symlink: {benchmark_dir}")
     manifest = load_manifest(benchmark_dir)
+    seen_folded: dict[str, str] = {}
     for case_id in manifest.cases:
         # Slug-validate, reject a symlinked case directory, and resolve the path
         # under the benchmark root so a manifest entry cannot escape the pack
@@ -86,7 +87,26 @@ def load_cases(benchmark_dir: Path) -> list[BenchmarkCase]:
         if (benchmark_dir / case_id).is_symlink():
             raise ValidationError(f"case directory is a symlink: {case_id}")
         resolve_under(benchmark_dir, case_id)
-    cases = [load_case(benchmark_dir / case_id) for case_id in manifest.cases]
+        # Two ids that differ only in case collide on a case-insensitive filesystem
+        # (the directory name is the id), so reject the collision up front.
+        folded = case_id.casefold()
+        if folded in seen_folded:
+            raise ValidationError(
+                f"case ids collide case-insensitively: {seen_folded[folded]!r} and {case_id!r}"
+            )
+        seen_folded[folded] = case_id
+    cases = []
+    for case_id in manifest.cases:
+        case = load_case(benchmark_dir / case_id)
+        # Identity invariant: manifest id == directory name (by construction here)
+        # == BenchmarkCase.id. A case.yaml whose id disagrees with its directory is
+        # rejected rather than silently scored under the wrong identity.
+        if case.id != case_id:
+            raise ValidationError(
+                f"case id mismatch: manifest/directory is {case_id!r} but its case.yaml "
+                f"declares id {case.id!r}"
+            )
+        cases.append(case)
     if manifest.default_docker_image:
         for case in cases:
             if case.execution.docker_image is None:

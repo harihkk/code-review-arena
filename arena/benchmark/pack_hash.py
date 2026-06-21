@@ -20,12 +20,33 @@ def _content_files(benchmark_dir: Path) -> list[Path]:
         if not path.is_file():
             continue
         relative = path.relative_to(benchmark_dir)
-        if relative.name == PACK_CHECKSUM_FILENAME:
+        if relative == Path(PACK_CHECKSUM_FILENAME):  # only the root checksum artifact
             continue
         if any(part.startswith(".") or part == "__pycache__" for part in relative.parts):
             continue
         files.append(path)
     return files
+
+
+def unhashable_content(benchmark_dir: Path) -> list[str]:
+    """Regular files present in the pack but EXCLUDED from pack_checksum.
+
+    These sit under a dot-prefixed component or ``__pycache__``, so the digest
+    cannot see them and a pack could be modified there without changing its
+    checksum. Admission must reject such content until snapshot hashing (Phase 1C)
+    covers every regular file; only ``pack.sha256`` (which necessarily contains
+    its own digest) is legitimately excluded.
+    """
+    omitted: list[str] = []
+    for path in sorted(benchmark_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(benchmark_dir)
+        if relative == Path(PACK_CHECKSUM_FILENAME):  # only the root checksum artifact
+            continue
+        if any(part.startswith(".") or part == "__pycache__" for part in relative.parts):
+            omitted.append(relative.as_posix())
+    return omitted
 
 
 def pack_checksum(benchmark_dir: Path) -> str:

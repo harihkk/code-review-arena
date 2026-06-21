@@ -8,6 +8,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
+from arena.security.paths import SafeCaseId, SafeRelativePath
+
 Severity = Literal["critical", "high", "medium", "low"]
 Risk = Literal["critical", "high", "medium", "low", "none"]
 # A run's trust level. Only `complete` v2 runs are leaderboard-eligible; the rest
@@ -38,7 +40,7 @@ class LineRange(BaseModel):
 
 
 class GroundTruthFile(BaseModel):
-    path: str
+    path: SafeRelativePath
     line_ranges: list[LineRange]
 
 
@@ -60,7 +62,7 @@ PrimaryBug = GroundTruthBug
 class AcceptableFinding(BaseModel):
     """A known-good extra finding that is scored neutral, not as a false positive."""
 
-    path: str | None = None
+    path: SafeRelativePath | None = None
     concepts: list[str] = Field(min_length=1)
 
 
@@ -97,10 +99,10 @@ class GroundTruth(BaseModel):
 
 
 class CaseInput(BaseModel):
-    diff: str = "pr.diff"
-    before_dir: str = "before"
-    after_dir: str = "after"
-    tests_dir: str | None = "tests"
+    diff: SafeRelativePath = "pr.diff"
+    before_dir: SafeRelativePath = "before"
+    after_dir: SafeRelativePath = "after"
+    tests_dir: SafeRelativePath | None = "tests"
 
 
 class ScoreWeights(BaseModel):
@@ -137,7 +139,7 @@ class ValidationConfig(BaseModel):
     tests_required: bool = False
     structural_validators: list[str] = Field(default_factory=list)
     max_false_positives: int = Field(default=0, ge=0)
-    protected_paths: list[str] = Field(default_factory=list)
+    protected_paths: list[SafeRelativePath] = Field(default_factory=list)
     # Detection completeness required for a deterministic pass. Defaults to
     # all_bugs: for single-bug cases this is identical to at_least_one, and for
     # multi-bug cases it correctly requires every seeded bug to be found.
@@ -151,7 +153,7 @@ class MetricsConfig(BaseModel):
 class BenchmarkCase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    id: str
+    id: SafeCaseId
     title: str
     category: str
     severity: Severity
@@ -169,11 +171,20 @@ class BenchmarkCase(BaseModel):
 class CaseManifest(BaseModel):
     version: str
     name: str
-    cases: list[str]
+    cases: list[SafeCaseId]
     # Execution image applied to every case that does not set its own
     # docker_image. Lets a pack target one sandbox image in a single place
     # instead of repeating it across every case.yaml.
     default_docker_image: str | None = None
+
+    @model_validator(mode="after")
+    def _reject_duplicate_case_ids(self) -> CaseManifest:
+        seen: set[str] = set()
+        for case_id in self.cases:
+            if case_id in seen:
+                raise ValueError(f"duplicate case id in manifest: {case_id}")
+            seen.add(case_id)
+        return self
 
 
 class Finding(BaseModel):
