@@ -21,7 +21,6 @@ from arena.core.models import CaseContext, Finding, ReviewerResponse, ReviewResu
 from arena.patching.patch_parser import touched_files
 from arena.reviewers.base import BaseReviewer
 from arena.reviewers.reference_patch import REFERENCE_PATCH_FILENAME
-from arena.reviewers.response_parser import parse_review_response
 
 
 class ShallowPatchReviewer(BaseReviewer):
@@ -91,10 +90,11 @@ class ShallowPatchReviewer(BaseReviewer):
             proposed_patch=patch,
         )
         raw = json.dumps(result.model_dump())
-        parsed, attempts = parse_review_response(raw)
         return ReviewerResponse(
             raw_response=raw,
-            parsed_response=parsed,
-            parse_attempts=attempts,
+            parsed_response=result,
+            invalid_output=False,
+            parse_attempts=1,
+            parse_status="exact",
             latency_ms=int((time.perf_counter() - started) * 1000),
         )

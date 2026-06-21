@@ -25,6 +25,10 @@ Risk = Literal["critical", "high", "medium", "low", "none"]
 # are preserved and inspectable but excluded from normal comparisons.
 RunStatus = Literal["complete", "partial", "invalid", "failed", "cancelled", "legacy"]
 ExecutionBackend = Literal["docker", "trusted-local", "none"]
+# How a reviewer response was parsed. `exact` is the default comparable contract;
+# `invalid` is a reviewer-contract failure that still scores; `tolerant`/`repaired`
+# are development-only salvage that make a run non-comparable by default.
+ParseStatus = Literal["exact", "tolerant", "repaired", "invalid"]
 # Bumped when the run JSON shape changes in a way that breaks comparability.
 RUN_SCHEMA_VERSION = 2
 # Hard caps that bound finding-to-bug matching so it cannot be driven into a
@@ -378,11 +382,39 @@ class ReviewerResponse(BaseModel):
     parsed_response: ReviewResult | None = None
     invalid_output: bool = False
     parse_attempts: int = 1
+    # Persisted parse evidence (commit 3). parse_status is the comparable contract
+    # signal; parse_actions / dropped_finding_count / parse_error_summary record any
+    # development-only salvage. Bounded and inspectable; raw_response is always kept.
+    parse_status: ParseStatus = "exact"
+    parse_actions: list[str] = Field(default_factory=list)
+    dropped_finding_count: int = 0
+    parse_error_summary: str | None = None
     latency_ms: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
     estimated_cost: float = 0.0
     tool_usage: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _derive_parse_status(cls, value: Any) -> Any:
+        # Old saved responses predate parse_status: derive it so they keep loading
+        # without rewriting any file. invalid_output -> invalid; otherwise by the
+        # legacy attempt count (1 exact, 2 tolerant, >=3 repaired).
+        if not isinstance(value, dict) or "parse_status" in value:
+            return value
+        converted = dict(value)
+        if value.get("invalid_output"):
+            converted["parse_status"] = "invalid"
+        else:
+            attempts = value.get("parse_attempts", 1)
+            if attempts <= 1:
+                converted["parse_status"] = "exact"
+            elif attempts == 2:
+                converted["parse_status"] = "tolerant"
+            else:
+                converted["parse_status"] = "repaired"
+        return converted
 
 
 class ScoreBreakdown(BaseModel):
@@ -595,6 +627,13 @@ class RunMetadata(BaseModel):
     # default leaderboard eligibility requires; a regenerated internal pack.sha256
     # cannot set it.
     pack_digest_externally_verified: bool = False
+    # Per-status case counts (exact/tolerant/repaired/invalid). Empty on old runs.
+    reviewer_parse_status_counts: dict[str, int] = Field(default_factory=dict)
+    # Fail-closed comparability signal: False when every case is exact or invalid
+    # (Arena did not reinterpret any output), True when any case was tolerant or
+    # repaired, None for old runs where exactness is unknown. None and True are not
+    # default-comparable; invalid alone does NOT make a run non-comparable.
+    non_exact_output_used: bool | None = None
 
 
 class RunResult(BaseModel):

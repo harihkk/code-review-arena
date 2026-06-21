@@ -224,7 +224,7 @@ def test_http_response_one_over_limit_rejected_without_parsing():
     body = _at_limit_json(1)
     resp = _json_reviewer(lambda req: httpx.Response(200, content=body)).review(_ctx())
     assert resp.invalid_output is True
-    assert resp.parsed_response.review_summary == "reviewer_output_too_large"
+    assert resp.parse_error_summary == "reviewer_output_too_large"
 
 
 def test_http_oversized_without_content_length_still_rejected():
@@ -236,7 +236,7 @@ def test_http_oversized_without_content_length_still_rejected():
 
     resp = _json_reviewer(handler).review(_ctx())
     assert resp.invalid_output is True
-    assert resp.parsed_response.review_summary == "reviewer_output_too_large"
+    assert resp.parse_error_summary == "reviewer_output_too_large"
 
 
 def test_http_multi_chunk_within_limit_reassembled():
@@ -256,7 +256,7 @@ def test_http_oversized_non_2xx_body_is_bounded():
     body = b"e" * (limits.RAW_RESPONSE_BYTES + 1)
     resp = _json_reviewer(lambda req: httpx.Response(500, content=body)).review(_ctx())
     assert resp.invalid_output is True
-    assert resp.parsed_response.review_summary == "reviewer_output_too_large"
+    assert resp.parse_error_summary == "reviewer_output_too_large"
 
 
 def test_http_small_non_2xx_body_is_invalid_with_summary():
@@ -266,7 +266,7 @@ def test_http_small_non_2xx_body_is_invalid_with_summary():
         transport=httpx.MockTransport(lambda r: httpx.Response(500, text="boom")),
     ).review(_ctx())
     assert resp.invalid_output is True
-    assert "failed" in resp.parsed_response.review_summary
+    assert "failed" in resp.parse_error_summary
 
 
 def test_http_malformed_openai_envelope_is_invalid():
@@ -336,7 +336,7 @@ def test_command_overflow_is_too_large_not_malformed(monkeypatch, result):
     _patch_supervisor(monkeypatch, result)
     resp = CustomCommandReviewer("echo {case_json}").review(_ctx())
     assert resp.invalid_output is True
-    assert resp.parsed_response.review_summary == "reviewer_output_too_large"
+    assert resp.parse_error_summary == "reviewer_output_too_large"
 
 
 def test_command_overflow_does_not_invoke_parser(monkeypatch):
@@ -345,10 +345,10 @@ def test_command_overflow_does_not_invoke_parser(monkeypatch):
     def explode(*a, **k):
         raise AssertionError("parser must not run after overflow")
 
-    monkeypatch.setattr(cc_module, "parse_review_response", explode)
+    monkeypatch.setattr(cc_module, "parse_reviewer_output", explode)
     resp = CustomCommandReviewer("echo {case_json}").review(_ctx())
     assert resp.invalid_output is True
-    assert resp.parsed_response.review_summary == "reviewer_output_too_large"
+    assert resp.parse_error_summary == "reviewer_output_too_large"
 
 
 # --------------------------------------------------------------------------- #
@@ -572,7 +572,7 @@ def test_http_understated_content_length_large_body_rejected():
 
     resp = _json_reviewer(handler).review(_ctx())
     assert resp.invalid_output is True
-    assert resp.parsed_response.review_summary == "reviewer_output_too_large"
+    assert resp.parse_error_summary == "reviewer_output_too_large"
 
 
 def test_http_gzip_decoded_bytes_authoritative():
@@ -586,14 +586,14 @@ def test_http_gzip_decoded_bytes_authoritative():
 
     resp = _json_reviewer(handler).review(_ctx())
     assert resp.invalid_output is True
-    assert resp.parsed_response.review_summary == "reviewer_output_too_large"
+    assert resp.parse_error_summary == "reviewer_output_too_large"
 
 
 def test_http_invalid_utf8_2xx_plain_json_is_invalid():
     body = b'{"findings": []}\xff\xfe'  # invalid UTF-8 in a successful body
     resp = _json_reviewer(lambda r: httpx.Response(200, content=body)).review(_ctx())
     assert resp.invalid_output is True
-    assert "valid UTF-8" in resp.parsed_response.review_summary
+    assert "valid UTF-8" in resp.parse_error_summary
 
 
 def test_http_invalid_utf8_2xx_openai_envelope_is_invalid():
@@ -604,7 +604,7 @@ def test_http_invalid_utf8_2xx_openai_envelope_is_invalid():
         transport=httpx.MockTransport(lambda r: httpx.Response(200, content=body)),
     ).review(_ctx())
     assert resp.invalid_output is True
-    assert "valid UTF-8" in resp.parsed_response.review_summary
+    assert "valid UTF-8" in resp.parse_error_summary
 
 
 def test_http_deeply_nested_envelope_is_contained():

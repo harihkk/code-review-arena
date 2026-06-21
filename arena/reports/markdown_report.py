@@ -26,6 +26,13 @@ def render_markdown(run: RunResult) -> str:
         f"| Total Latency | {run.total_latency_ms / 1000:.2f}s |",
         "",
     ]
+    if run.metadata.non_exact_output_used:
+        counts = dict(run.metadata.reviewer_parse_status_counts)
+        lines.insert(
+            5,
+            "> **WARNING:** development salvage (tolerant or repaired reviewer output) was used; "
+            f"this run is NON-COMPARABLE by default. Parse status counts: {counts}.",
+        )
     if run.deterministic_metrics:
         metrics = run.deterministic_metrics
         lines.extend(

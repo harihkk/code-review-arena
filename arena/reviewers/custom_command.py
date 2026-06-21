@@ -13,10 +13,27 @@ from pathlib import Path
 
 from arena.core import limits
 from arena.core.errors import ExecutionError
-from arena.core.models import CaseContext, ReviewerResponse, ReviewResult
+from arena.core.models import CaseContext, ReviewerResponse
 from arena.execution.process import run_supervised
 from arena.reviewers.base import BaseReviewer
-from arena.reviewers.response_parser import naive_repair, parse_review_response
+from arena.reviewers.response_parser import parse_reviewer_output, response_from_outcome
+
+
+def _elapsed_ms(started: float) -> int:
+    return int((time.perf_counter() - started) * 1000)
+
+
+def _invalid_response(raw: str, summary: str, latency_ms: int) -> ReviewerResponse:
+    """An invalid custom-command response: parse_status=invalid, raw preserved."""
+    return ReviewerResponse(
+        raw_response=raw,
+        parsed_response=None,
+        invalid_output=True,
+        parse_attempts=1,
+        parse_status="invalid",
+        parse_error_summary=summary[:512],
+        latency_ms=latency_ms,
+    )
 
 
 def serialize_reviewer_case(
@@ -155,66 +172,35 @@ class CustomCommandReviewer(BaseReviewer):
                     output_limit=limits.RAW_RESPONSE_BYTES,
                 )
             except ExecutionError as exc:
-                raw = json.dumps({"error": str(exc)})
-                parsed, attempts = parse_review_response(raw)
-                return ReviewerResponse(
-                    raw_response=raw,
-                    parsed_response=parsed,
-                    invalid_output=True,
-                    parse_attempts=attempts,
-                    latency_ms=int((time.perf_counter() - started) * 1000),
+                return _invalid_response(
+                    json.dumps({"error": str(exc)}),
+                    f"reviewer process error: {type(exc).__name__}",
+                    _elapsed_ms(started),
                 )
             if completed.timed_out:
                 raw = json.dumps({"error": f"command timed out after {self.timeout_seconds}s"})
-                parsed, attempts = parse_review_response(raw)
-                return ReviewerResponse(
-                    raw_response=raw,
-                    parsed_response=parsed,
-                    invalid_output=True,
-                    parse_attempts=attempts,
-                    latency_ms=int((time.perf_counter() - started) * 1000),
-                )
+                return _invalid_response(raw, "reviewer timed out", _elapsed_ms(started))
             if completed.output_limit_exceeded:
-                # The child flooded past the output cap and was reaped, so the captured
-                # stdout/stderr are truncated. A valid JSON prefix followed by a flood
-                # must NOT pass: report a stable too-large error and never parse the
-                # truncated output as ordinary malformed JSON.
+                # Flooded past the cap and reaped, so the captured output is truncated.
+                # A valid JSON prefix followed by a flood must NOT pass: report a stable
+                # too-large error and never parse the truncated output.
                 raw = json.dumps({"error": "reviewer_output_too_large"})
-                return ReviewerResponse(
-                    raw_response=raw,
-                    parsed_response=ReviewResult(
-                        findings=[],
-                        overall_risk="none",
-                        review_summary="reviewer_output_too_large",
-                    ),
-                    invalid_output=True,
-                    parse_attempts=1,
-                    latency_ms=int((time.perf_counter() - started) * 1000),
-                )
-            raw = completed.stdout.strip() or completed.stderr.strip()
-            error_notes: list[str] = []
+                return _invalid_response(raw, "reviewer_output_too_large", _elapsed_ms(started))
             if completed.returncode != 0:
-                error_notes.append(f"command exited with code {completed.returncode}")
-            if completed.stderr.strip():
-                error_notes.append(completed.stderr.strip()[-500:])
-            parsed, attempts = parse_review_response(
-                raw if raw else "{}",
-                repair=naive_repair if self.enable_repair else None,
-            )
-            invalid = parsed is None or completed.returncode != 0 or not raw
-            if invalid and error_notes:
-                summary = "; ".join(error_notes)
-                parsed = ReviewResult(
-                    findings=[],
-                    overall_risk="none",
-                    review_summary=f"Custom command failed: {summary}",
+                # A process failure is invalid regardless of any valid-looking stdout;
+                # nonzero exit and stderr are not hidden by a parseable prefix.
+                notes = f"command exited with code {completed.returncode}"
+                stderr_tail = completed.stderr.strip()[-500:]
+                if stderr_tail:
+                    notes = f"{notes}; {stderr_tail}"
+                raw = completed.stdout.strip() or completed.stderr.strip() or notes
+                return _invalid_response(raw, notes, _elapsed_ms(started))
+            raw = completed.stdout.strip()
+            if not raw:
+                return _invalid_response(
+                    json.dumps({"error": "no output"}), "no reviewer output", _elapsed_ms(started)
                 )
-            return ReviewerResponse(
-                raw_response=raw or json.dumps({"error": error_notes}),
-                parsed_response=parsed,
-                invalid_output=invalid,
-                parse_attempts=attempts,
-                latency_ms=int((time.perf_counter() - started) * 1000),
-            )
+            outcome = parse_reviewer_output(raw, enable_repair=self.enable_repair)
+            return response_from_outcome(outcome, raw=raw, latency_ms=_elapsed_ms(started))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)

@@ -10,7 +10,7 @@ from arena.benchmark.case_loader import build_context, load_cases
 from arena.cli.main import app
 from arena.core.registry import create_reviewer
 from arena.reviewers.custom_command import CustomCommandReviewer, serialize_reviewer_case
-from arena.reviewers.response_parser import naive_repair, parse_review_response
+from arena.reviewers.response_parser import parse_reviewer_output
 
 runner = CliRunner()
 FIXTURES = Path("tests/fixtures/fake_reviewers")
@@ -68,7 +68,7 @@ def test_schema_command_emits_versioned_review_schema():
     assert set(schema["required"]) == {"findings", "overall_risk", "review_summary"}
 
 
-def test_naive_repair_wraps_bare_list_and_drops_invalid_findings():
+def test_repair_wraps_bare_list_and_drops_invalid_findings():
     valid_finding = {
         "title": "t",
         "summary": "s",
@@ -81,14 +81,16 @@ def test_naive_repair_wraps_bare_list_and_drops_invalid_findings():
         "confidence": 0.5,
     }
     raw = json.dumps([valid_finding, {"title": "broken"}])
-    parsed, attempts = parse_review_response(raw, repair=naive_repair)
-    assert parsed is not None
-    assert attempts == 3
-    assert len(parsed.findings) == 1
-    assert parsed.overall_risk == "medium"
-    # Without repair the same payload is rejected.
-    rejected, _ = parse_review_response(raw)
-    assert rejected is None
+    outcome = parse_reviewer_output(raw, enable_repair=True)
+    assert outcome.status == "repaired"
+    assert outcome.attempt_count == 3
+    assert outcome.result is not None
+    assert len(outcome.result.findings) == 1
+    assert outcome.result.overall_risk == "medium"
+    assert outcome.dropped_finding_count == 1
+    assert "wrap_findings_list" in outcome.actions
+    # Without salvage the same payload is invalid (a bare list is not an object).
+    assert parse_reviewer_output(raw).status == "invalid"
 
 
 def test_repair_is_opt_in_for_custom_command():

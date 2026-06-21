@@ -24,10 +24,11 @@ from typing import Any, Literal
 import httpx
 
 from arena.core import limits
-from arena.core.models import CaseContext, ReviewerResponse, ReviewResult
+from arena.core.models import CaseContext, ReviewerResponse
 from arena.reviewers.base import BaseReviewer
 from arena.reviewers.custom_command import serialize_reviewer_case
-from arena.reviewers.response_parser import naive_repair, parse_review_response
+from arena.reviewers.response_parser import parse_reviewer_output, response_from_outcome
+from arena.reviewers.strict_json import StrictJSONError, strict_loads
 
 # Bound for the message recorded on an invalid HTTP reviewer response (well under
 # the strict ReviewResult.review_summary cap, and never includes request headers).
@@ -173,29 +174,20 @@ class HttpReviewer(BaseReviewer):
             text = body.decode("utf-8")
         except UnicodeDecodeError:
             return self._invalid("http reviewer response was not valid UTF-8", started)
-        # Contain parser-controlled failures (malformed envelope, bad shape, deeply
-        # nested JSON) as typed invalid output instead of crashing the run. The set
-        # is narrow on purpose: never BaseException, KeyboardInterrupt, or SystemExit.
-        try:
-            raw = self._extract_openai_content(json.loads(text)) if self.style == "openai" else text
-            parsed, attempts = parse_review_response(
-                raw or "{}", repair=naive_repair if self.enable_repair else None
-            )
-        except (
-            KeyError,
-            IndexError,
-            TypeError,
-            ValueError,
-            UnicodeDecodeError,
-            RecursionError,
-        ) as exc:
-            return self._error_response(exc, started)
-        return ReviewerResponse(
-            raw_response=raw or "",
-            parsed_response=parsed,
-            invalid_output=parsed is None or not raw,
-            parse_attempts=attempts,
-            latency_ms=int((time.perf_counter() - started) * 1000),
+        # The OpenAI outer envelope goes through the same strict JSON decoder (so
+        # duplicate keys / non-finite constants there also fail); its assistant
+        # content is then parsed by the shared reviewer parser. Plain JSON style
+        # passes the whole body through the same parser.
+        if self.style == "openai":
+            try:
+                content = self._extract_openai_content(strict_loads(text))
+            except (StrictJSONError, KeyError, IndexError, TypeError) as exc:
+                return self._invalid(f"malformed OpenAI envelope: {type(exc).__name__}", started)
+        else:
+            content = text
+        outcome = parse_reviewer_output(content, enable_repair=self.enable_repair)
+        return response_from_outcome(
+            outcome, raw=content, latency_ms=int((time.perf_counter() - started) * 1000)
         )
 
     def _error_response(self, exc: Exception, started: float) -> ReviewerResponse:
@@ -207,8 +199,10 @@ class HttpReviewer(BaseReviewer):
         bounded = message[:_INVALID_MESSAGE_LEN]
         return ReviewerResponse(
             raw_response=json.dumps({"error": bounded}),
-            parsed_response=ReviewResult(findings=[], overall_risk="none", review_summary=bounded),
+            parsed_response=None,
             invalid_output=True,
             parse_attempts=1,
+            parse_status="invalid",
+            parse_error_summary=bounded,
             latency_ms=int((time.perf_counter() - started) * 1000),
         )

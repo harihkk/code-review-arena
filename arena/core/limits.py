@@ -45,6 +45,13 @@ CHECKSUM_FILE_BYTES = 256
 YAML_MAX_DEPTH = 64
 YAML_MAX_NODES = 100_000
 
+# --- Parsed-JSON structure caps for reviewer output (complement the byte cap) ---
+# The RAW_RESPONSE_BYTES ceiling is the first boundary; these bound the parsed
+# structure so a within-byte-limit document cannot be pathologically deep or dense.
+# A valid ReviewResult is a few thousand nodes at most; these sit far above.
+JSON_MAX_DEPTH = 64
+JSON_MAX_NODES = 200_000
+
 # --- Pack structure counts ---
 CASES_PER_MANIFEST = 1024
 BUGS_PER_CASE = 50  # also the finding-to-bug matching cap (MAX_BUGS_PER_CASE)
@@ -78,6 +85,7 @@ LINE_NUMBER_MAX = 10_000_000  # bound line-number magnitude (start/end)
 # Observed shipped values: timeout <= 30 s, beta 1.0, weights sum to 100, penalties
 # 5/15/20. External input outside a range is rejected, never clamped.
 TEST_TIMEOUT_SECONDS_MAX = 86_400  # 24 h ceiling on a single test command
+REVIEWER_TIMEOUT_SECONDS_MAX = 86_400  # 24 h ceiling on a single reviewer invocation
 API_WALL_SECONDS_MAX = 86_400  # 24 h ceiling on a run wall-clock budget
 API_COST_MAX = 1_000_000  # USD ceiling on a run cost budget
 SCORE_WEIGHT_MAX = 100  # one score weight (the six weights sum to 100)

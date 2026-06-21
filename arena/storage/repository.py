@@ -201,6 +201,7 @@ class RunRepository:
                 pack_digest_externally_verified=bool(
                     metadata.get("pack_digest_externally_verified", False)
                 ),
+                non_exact_output_used=metadata.get("non_exact_output_used"),
                 include_unverified=include_unverified,
             ):
                 continue

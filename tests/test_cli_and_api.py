@@ -121,6 +121,7 @@ def test_api_leaderboard_requires_external_digest(monkeypatch, tmp_path):
                 prompt_version="v2",
                 benchmark_version="v1",
                 pack_digest_externally_verified=externally_verified,
+                non_exact_output_used=False,
             ),
             case_results=[],
             total_score=0.0,

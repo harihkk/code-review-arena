@@ -1,85 +1,222 @@
-"""Defensive parsing for reviewer JSON output."""
+"""Reviewer-output parsing: exact by default, explicit development-only salvage.
+
+Exact parsing is the comparable contract: the raw response must be exactly one
+strict JSON object that validates as ``ReviewResult`` (with every finding path
+admitted to a canonical pack-relative path). No Markdown-fence stripping, no
+brace extraction, no trailing-comma removal, no bare-list wrapping, no field
+insertion, no finding dropping. Anything else is ``invalid`` -- a legitimate
+reviewer-contract failure that still scores (with the invalid-output penalty).
+
+Salvage (tolerant transforms, then deterministic repair) runs only when the
+caller opts in via ``enable_repair``. It is development-only and makes a run
+non-comparable; every transformation and every dropped finding is recorded.
+Salvage never calls a model and never relaxes strict JSON decoding (duplicate
+keys and non-finite numbers stay rejected). Both reviewer transports use this one
+parser and its status semantics.
+"""
 
 from __future__ import annotations
 
-import json
 import re
-from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any
 
 from pydantic import ValidationError as PydanticValidationError
 
-from arena.core.models import Finding, ReviewResult
+from arena.core.models import Finding, ParseStatus, ReviewerResponse, ReviewResult
+from arena.reviewers.strict_json import StrictJSONError, strict_loads
+from arena.security.paths import admit_reviewer_path
+
+_REASON_LEN = 512
 
 
-def _parse(candidate: str) -> ReviewResult | None:
-    # RecursionError guards against deeply nested (but within-byte-limit) JSON; a
-    # parse/validation failure means "not a valid review", never a crashed run.
-    try:
-        return ReviewResult.model_validate(json.loads(candidate))
-    except (json.JSONDecodeError, ValueError, RecursionError):
-        return None
+@dataclass
+class ParseOutcome:
+    """The structured result of parsing one reviewer response."""
+
+    result: ReviewResult | None
+    status: ParseStatus
+    attempt_count: int
+    actions: list[str] = field(default_factory=list)
+    input_finding_count: int = 0
+    retained_finding_count: int = 0
+    dropped_finding_count: int = 0
+    failure_reason: str | None = None
 
 
-def tolerant_candidate(raw: str) -> str:
+def _short(exc: Exception) -> str:
+    """A bounded failure reason that never echoes the reviewer's input values."""
+    if isinstance(exc, PydanticValidationError):
+        parts = [".".join(str(p) for p in e["loc"]) + ": " + e["type"] for e in exc.errors()[:5]]
+        return "; ".join(parts)[:_REASON_LEN]
+    return str(exc)[:_REASON_LEN]
+
+
+def _invalid(attempt: int, reason: str) -> ParseOutcome:
+    return ParseOutcome(
+        result=None, status="invalid", attempt_count=attempt, failure_reason=reason[:_REASON_LEN]
+    )
+
+
+def _tolerant_transform(raw: str) -> tuple[str, list[str]]:
+    """Apply only the documented tolerant transforms, recording which ones changed text."""
     text = raw.strip()
+    actions: list[str] = []
     if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*", "", text)
-        text = re.sub(r"\s*```$", "", text)
-    first = text.find("{")
-    last = text.rfind("}")
-    if first >= 0 and last > first:
+        stripped = re.sub(r"^```(?:json)?\s*", "", text)
+        stripped = re.sub(r"\s*```$", "", stripped)
+        if stripped != text:
+            actions.append("strip_markdown_fence")
+            text = stripped
+    first, last = text.find("{"), text.rfind("}")
+    if first >= 0 and last > first and (first > 0 or last < len(text) - 1):
         text = text[first : last + 1]
-    return re.sub(r",(\s*[}\]])", r"\1", text)
+        actions.append("extract_json_object")
+    no_commas = re.sub(r",(\s*[}\]])", r"\1", text)
+    if no_commas != text:
+        actions.append("remove_trailing_commas")
+        text = no_commas
+    return text, actions
 
 
-def naive_repair(raw: str) -> str:
-    """Deterministic salvage for almost-valid reviewer JSON; never calls a model.
+def _admit_paths_strict(data: dict[str, Any]) -> dict[str, Any]:
+    """Admit every finding path; raise if any is inadmissible (exact/tolerant)."""
+    findings = data.get("findings")
+    if not isinstance(findings, list):
+        return data
+    admitted = [
+        {**item, "file": admit_reviewer_path(item["file"])}
+        if isinstance(item, dict) and "file" in item
+        else item
+        for item in findings
+    ]
+    return {**data, "findings": admitted}
 
-    Wraps a bare findings list into the expected envelope, fills missing
-    top-level fields with neutral defaults, and drops individual findings that
-    fail validation rather than rejecting the whole response. Used only when a
-    reviewer opts in (--enable-repair); the attempt is visible as
-    parse_attempts=3 on the response.
-    """
-    data = None
-    for candidate in (raw, tolerant_candidate(raw)):
+
+def _repair_findings(data: dict[str, Any]) -> tuple[dict[str, Any], int, list[str]]:
+    """Drop individually invalid findings (bad path or schema); record what was dropped."""
+    findings = data.get("findings")
+    if not isinstance(findings, list):
+        findings = []
+    kept: list[Any] = []
+    dropped_locations: list[str] = []
+    for index, item in enumerate(findings):
         try:
-            data = json.loads(candidate)
-            break
-        except (json.JSONDecodeError, RecursionError):
-            continue
-    if data is None:
-        return raw
+            if isinstance(item, dict) and "file" in item:
+                item = {**item, "file": admit_reviewer_path(item["file"])}
+            Finding.model_validate(item)
+            kept.append(item)
+        except (ValueError, PydanticValidationError) as exc:
+            dropped_locations.append(f"findings[{index}]: {_short(exc)}")
+    return {**data, "findings": kept}, len(findings) - len(kept), dropped_locations
+
+
+def _try_exact(raw: str) -> ParseOutcome:
+    try:
+        data = strict_loads(raw)
+    except StrictJSONError as exc:
+        return _invalid(1, str(exc))
+    if not isinstance(data, dict):
+        return _invalid(1, "top-level JSON value is not an object")
+    try:
+        result = ReviewResult.model_validate(_admit_paths_strict(data))
+    except (ValueError, PydanticValidationError) as exc:
+        return _invalid(1, _short(exc))
+    count = len(result.findings)
+    return ParseOutcome(result, "exact", 1, [], count, count, 0, None)
+
+
+def _try_tolerant(raw: str) -> ParseOutcome | None:
+    transformed, actions = _tolerant_transform(raw)
+    if not actions:
+        return None  # nothing tolerant to do; exact already failed
+    try:
+        data = strict_loads(transformed)
+        if not isinstance(data, dict):
+            return None
+        result = ReviewResult.model_validate(_admit_paths_strict(data))
+    except (StrictJSONError, ValueError, PydanticValidationError):
+        return None  # tolerant must not drop findings; fall through to repair
+    count = len(result.findings)
+    return ParseOutcome(result, "tolerant", 2, actions, count, count, 0, None)
+
+
+def _try_repair(raw: str) -> ParseOutcome:
+    # Decode the raw text first: a bare findings list is already valid JSON and must
+    # not be mangled by the brace-extraction transform. Only fall back to the
+    # tolerant transforms when the raw text does not decode.
+    actions: list[str] = []
+    try:
+        data = strict_loads(raw)
+    except StrictJSONError:
+        transformed, transform_actions = _tolerant_transform(raw)
+        actions.extend(transform_actions)
+        try:
+            data = strict_loads(transformed)
+        except StrictJSONError as exc:
+            return _invalid(3, str(exc))
     if isinstance(data, list):
         data = {"findings": data}
+        actions.append("wrap_findings_list")
     if not isinstance(data, dict):
-        return raw
-    data.setdefault("overall_risk", "medium")
-    data.setdefault("review_summary", "")
-    findings = data.get("findings")
-    kept: list[object] = []
-    if isinstance(findings, list):
-        for item in findings:
-            try:
-                Finding.model_validate(item)
-            except PydanticValidationError:
-                continue
-            kept.append(item)
-    data["findings"] = kept
-    return json.dumps(data)
+        return _invalid(3, "top-level JSON value is not an object")
+    data = dict(data)
+    if "overall_risk" not in data:
+        data["overall_risk"] = "medium"
+        actions.append("default_overall_risk")
+    if "review_summary" not in data:
+        data["review_summary"] = ""
+        actions.append("default_review_summary")
+    raw_findings = data.get("findings")
+    input_count = len(raw_findings) if isinstance(raw_findings, list) else 0
+    data, dropped, locations = _repair_findings(data)
+    if dropped:
+        actions.append("drop_invalid_findings")
+    try:
+        result = ReviewResult.model_validate(data)
+    except (ValueError, PydanticValidationError) as exc:
+        return _invalid(3, _short(exc))
+    return ParseOutcome(
+        result=result,
+        status="repaired",
+        attempt_count=3,
+        actions=actions,
+        input_finding_count=input_count,
+        retained_finding_count=len(result.findings),
+        dropped_finding_count=dropped,
+        failure_reason="; ".join(locations)[:_REASON_LEN] or None,
+    )
 
 
-def parse_review_response(
-    raw: str, repair: Callable[[str], str] | None = None
-) -> tuple[ReviewResult | None, int]:
-    parsed = _parse(raw)
-    if parsed is not None:
-        return parsed, 1
-    parsed = _parse(tolerant_candidate(raw))
-    if parsed is not None:
-        return parsed, 2
-    if repair is not None:
-        parsed = _parse(repair(raw))
-        if parsed is not None:
-            return parsed, 3
-    return None, 3 if repair is not None else 2
+def parse_reviewer_output(raw: str, *, enable_repair: bool = False) -> ParseOutcome:
+    """Parse a raw reviewer response into a structured outcome.
+
+    Default (``enable_repair=False``): exact attempt only -- success is ``exact``,
+    anything else is ``invalid``. With salvage enabled: exact, then tolerant
+    transforms, then deterministic repair, recording the status and actions.
+    """
+    exact = _try_exact(raw)
+    if exact.status == "exact" or not enable_repair:
+        return exact
+    tolerant = _try_tolerant(raw)
+    if tolerant is not None:
+        return tolerant
+    return _try_repair(raw)
+
+
+def response_from_outcome(
+    outcome: ParseOutcome, *, raw: str, latency_ms: int = 0, **extra: Any
+) -> ReviewerResponse:
+    """Build a ReviewerResponse from a parse outcome, preserving the raw output."""
+    return ReviewerResponse(
+        raw_response=raw,
+        parsed_response=outcome.result,
+        invalid_output=outcome.status == "invalid",
+        parse_attempts=outcome.attempt_count,
+        parse_status=outcome.status,
+        parse_actions=list(outcome.actions),
+        dropped_finding_count=outcome.dropped_finding_count,
+        parse_error_summary=outcome.failure_reason,
+        latency_ms=latency_ms,
+        **extra,
+    )

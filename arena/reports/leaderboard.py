@@ -39,6 +39,7 @@ def eligibility_from_fields(
     execution_backend: str,
     coverage_rate: float,
     pack_digest_externally_verified: bool,
+    non_exact_output_used: bool | None = None,
     include_unverified: bool = False,
 ) -> bool:
     """The single leaderboard-eligibility policy, in terms of plain fields.
@@ -46,11 +47,13 @@ def eligibility_from_fields(
     Shared by the file/report leaderboard (RunResult objects) and the database
     repository / API (stored run JSON), so they never drift. A verified run is
     one whose result can be trusted: complete v2, run in Docker (not on the host),
-    full coverage, and a pack whose content matched a digest supplied out of band
-    (--expected-pack-sha256). The pack's own pack.sha256 is NOT sufficient -- it
-    lives inside the pack, so an edited pack with a regenerated hash still passes
-    self-consistency. Anything short of an external digest match is inspectable
-    only with include_unverified, never on the default leaderboard.
+    full coverage, a pack whose content matched a digest supplied out of band
+    (--expected-pack-sha256), AND exact reviewer output (Arena did not reinterpret
+    any case). The pack's own pack.sha256 is NOT sufficient -- it lives inside the
+    pack, so an edited pack with a regenerated hash still passes self-consistency.
+    ``non_exact_output_used`` is False only when every case was exact or invalid;
+    True (salvage used) and None (old run, exactness unknown) are not default
+    comparable. Anything short is inspectable only with include_unverified.
     """
     if schema_version < 2 or run_status != "complete":
         return False
@@ -60,6 +63,7 @@ def eligibility_from_fields(
         execution_backend == "docker"
         and coverage_rate == 1.0
         and pack_digest_externally_verified is True
+        and non_exact_output_used is False
     )
 
 
@@ -71,6 +75,7 @@ def leaderboard_eligible(run: RunResult, *, include_unverified: bool = False) ->
         execution_backend=run.execution_backend,
         coverage_rate=run.coverage_rate,
         pack_digest_externally_verified=run.metadata.pack_digest_externally_verified,
+        non_exact_output_used=run.metadata.non_exact_output_used,
         include_unverified=include_unverified,
     )
 

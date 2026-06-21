@@ -10,7 +10,6 @@ from arena.benchmark.artifacts import load_reference_patch
 from arena.core.models import CaseContext, Finding, ReviewerResponse, ReviewResult
 from arena.patching.patch_parser import touched_files
 from arena.reviewers.base import BaseReviewer
-from arena.reviewers.response_parser import parse_review_response
 
 REFERENCE_PATCH_FILENAME = "reference.patch"
 
@@ -290,10 +289,11 @@ class ReferencePatchReviewer(BaseReviewer):
             proposed_patch=patch_text if patch_text.strip() else None,
         )
         raw = json.dumps(result.model_dump())
-        parsed, attempts = parse_review_response(raw)
         return ReviewerResponse(
             raw_response=raw,
-            parsed_response=parsed,
-            parse_attempts=attempts,
+            parsed_response=result,
+            invalid_output=False,
+            parse_attempts=1,
+            parse_status="exact",
             latency_ms=int((time.perf_counter() - started) * 1000),
         )

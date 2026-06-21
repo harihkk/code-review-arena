@@ -101,6 +101,36 @@ def _check_relative_path(value: str) -> str:
 SafeRelativePath = Annotated[str, AfterValidator(_check_relative_path)]
 
 
+def admit_reviewer_path(value: object) -> str:
+    """Admit a reviewer-supplied finding path to a canonical pack-relative path.
+
+    ``Finding.file`` is reviewer-controlled. Reviewers conventionally prefix paths
+    with a diff-style ``a/`` or ``b/`` or a leading ``./``; exactly one such
+    presentation prefix is removed, then the remainder must satisfy the SAME
+    portable relative-path policy as pack paths (ASCII profile, no traversal, no
+    absolute/UNC/drive/backslash/control/dot-prefixed components). Returns the
+    canonical pack-relative path, or raises ``ValueError`` so the parser can treat
+    a bad path as an invalid finding. The raw value is preserved separately in the
+    reviewer's raw_response for audit; this never normalizes an arbitrary malformed
+    path into a valid identity.
+    """
+    if not isinstance(value, str):
+        raise ValueError("finding path must be a string")
+    candidate = value
+    if candidate.startswith("./"):
+        candidate = candidate[2:]
+    elif candidate.startswith(("a/", "b/")):
+        candidate = candidate[2:]
+    # "/dev/null" is caught by the leading-"/" rule; "dev/null" is a valid relative
+    # path under the policy but is the conventional "no file" sentinel, not a target.
+    if candidate == "dev/null":
+        raise ValueError(f"unsafe finding path {value!r}: 'dev/null' is not a real file")
+    error = _relative_path_error(candidate)
+    if error is not None:
+        raise ValueError(f"unsafe finding path {value!r}: {error}")
+    return candidate
+
+
 def _check_case_id(value: str) -> str:
     """Pydantic-facing validator: a case id is exactly one safe path component.
 
