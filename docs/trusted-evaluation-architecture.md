@@ -309,10 +309,12 @@ another (a time-of-check/time-of-use gap on its own pack consumers).
 
 ```text
 mutable source pack
-  -> secure bounded copy into a private temp tree (mutation-checked, hashed)
-  -> seal: per-file manifest + pack checksum computed from snapshot bytes
+  -> capture the complete source identity (root, every dir incl. empty, every file)
+  -> descriptor-anchored secure copy into a private temp tree (mutation-checked, hashed)
+  -> require the source identity to match exactly after copying
+  -> seal: full manifest (files AND dirs) + manifest digest + public pack checksum
   -> load/validate/context/certify/mutate/execute read ONLY the snapshot
-  -> verify the snapshot again before evidence is sealed
+  -> rebuild and re-verify the full seal before evidence is sealed
   -> remove the temp tree (on normal return and on exceptions)
 ```
 
@@ -325,32 +327,70 @@ with snapshot_pack(source) as snapshot:
 Once accepted, modifying or deleting the original source does not affect the operation, and
 the source is never re-read by that operation.
 
-### Secure traversal and mutation detection
+### Descriptor-anchored traversal (and fallback)
 
-The source filesystem is treated as adversarial. Traversal rejects a missing source and a
-symlinked root, walks with `os.scandir` without following symlinks, accepts only real
-directories and regular files, and rejects symlinks, FIFOs, sockets and devices. Each
-regular file is opened with `O_NOFOLLOW` (a no-op fallback where unsupported), read and
-hashed in bounded chunks, and written to the snapshot with exclusive create. The opened
-descriptor is re-stat'd after reading to reject mid-read identity/size/mtime changes;
-hardlink aliases are rejected by `(st_dev, st_ino)`. After the walk the source is re-scanned
-and any addition, removal, type change or modification is rejected. Races are not assumed
-impossible; they are detected and the operation fails closed.
+Where the platform supports directory file descriptors (Linux/macOS), traversal is
+descriptor-anchored: the root is opened no-follow and its identity verified, every child is
+enumerated via `scandir(fd)` and opened relative to its parent descriptor with no-follow
+(directories with `O_DIRECTORY`), a child directory's opened identity is checked against what
+was discovered, and an untrusted child is never re-resolved from a mutable absolute path. All
+descriptors are closed on success and failure. On platforms without `dir_fd` support
+(Windows) a conservative path-based fallback re-lstats and compares identity before reading
+and rejects symlink/reparse substitutions; its residual limitation is that it cannot fully
+close the descriptor-anchoring window, so it fails closed on any detected identity change
+rather than claiming an identical guarantee.
 
-### Digest semantics
+### Bounded enumeration
 
-The public checksum algorithm is unchanged (sorted relative POSIX path, NUL, exact bytes,
-NUL) and is computed from the snapshot bytes. It now covers every regular file except the
-root `pack.sha256` artifact, so hidden files and `__pycache__` are included; the three
-shipped packs contain no such files, so their stored checksums are unchanged. The earlier
-`unhashable_content` admission guard is removed because every regular file is now hashed.
+Directory entries are counted against the file, directory and a total-entry cap WHILE the
+`scandir` iterator is consumed, so a directory with millions of names is rejected before its
+listing is materialized. Deterministic ordering is applied only to the already-bounded
+collection. Nothing is ever silently skipped to satisfy a limit.
+
+### Copy verification and mutation detection
+
+The source filesystem is treated as adversarial. Symlinks, FIFOs, sockets and devices are
+rejected; hardlink aliases are rejected by `(st_dev, st_ino)`. For each file the opened
+descriptor is compared to the discovered entry BEFORE any byte is read (type, device, inode,
+size, mtime, link count) and again after reading. Writes loop to completion and treat zero
+progress as an error. The copied destination is then re-lstatted, size-checked, re-hashed and
+mode-checked before it joins the manifest; a partial destination is removed on failure. The
+complete source tree captured before the copy is required to match exactly afterward, which
+detects added/removed/renamed/retyped directories (including empty ones) and files.
+
+### Two integrity identities
+
+These are distinct and not interchangeable:
+
+- The **public pack checksum** keeps its compatible algorithm (sorted relative POSIX path,
+  NUL, exact bytes, NUL), computed from the snapshot bytes, covering every regular file
+  except the root `pack.sha256`. Hidden files and `__pycache__` are included; the three
+  shipped packs contain none, so their stored checksums are unchanged. The earlier
+  `unhashable_content` admission guard is removed because every regular file is now hashed.
+- The **full snapshot seal** is a deterministic manifest digest over the COMPLETE tree:
+  every regular file (including the root `pack.sha256`) and every directory (including empty
+  ones), each with relative path, kind, size, per-file SHA-256, normalized mode, plus a
+  manifest version. `PackSnapshot.verify()` rebuilds this manifest from the snapshot and
+  rejects any drift -- added/removed/modified files, root `pack.sha256` modification,
+  added/removed empty directories, mode changes, and introduced symlinks or special entries.
+  The public checksum is also recomputed, but it is only one component of verification.
+
+### Secure checksum writing
+
+`write_checksum` never reads `pack_checksum` from the mutable source. It snapshots to compute
+the intended checksum, atomically writes the root `pack.sha256` (exclusive temp + complete
+write + fsync + replace), re-snapshots, and verifies that the public checksum, the stored
+checksum and every non-checksum source entry are as expected. On any mismatch it restores the
+prior artifact (or removes a newly created one) and raises `source_changed_before_checksum_write`,
+so a known-stale checksum is never left behind. No filesystem API can prevent the source from
+changing AFTER the command returns; the guarantee is that the artifact written here was
+verified against the source state through the operation's completion boundary.
 
 ### Resource limits
 
 Observed across the shipped packs: <=84 files, <=74 directories, <=40 KB total, depth <=9.
-Selected limits (far above, finite): 4096 files, 4096 directories, 256 MiB total, depth 32,
-plus the existing 8 MiB per-file cap. Exceeding any limit fails closed; files are never
-silently skipped.
+Selected limits (far above, finite): 4096 files, 4096 directories, 8192 total entries, 256 MiB
+total, depth 32, plus the existing 8 MiB per-file cap. Exceeding any limit fails closed.
 
 ### Collision and name policy
 
@@ -363,18 +403,22 @@ represented safely.
 ### Evidence and error model
 
 `RunMetadata` records nullable snapshot evidence (file count, total bytes, manifest version,
-integrity-verified) and the snapshot content checksum (the existing `pack_checksum` field);
-the temporary snapshot path is never persisted, `RUN_SCHEMA_VERSION` is unchanged, and old
-runs load with null snapshot fields. Failures raise `SnapshotError` with a stable reason
-code (`source_missing`, `root_symlink`, `symlink_found`, `hardlink_found`, `unsafe_file_type`,
-`path_collision`, `unsupported_filename`, `file_count_exceeded`, `directory_count_exceeded`,
-`total_bytes_exceeded`, `path_too_deep`, `file_changed_during_copy`, `tree_changed_during_copy`,
+integrity-verified, and the full `snapshot_manifest_digest`) plus the snapshot content
+checksum (the existing `pack_checksum` field); the temporary snapshot path is never persisted,
+`RUN_SCHEMA_VERSION` is unchanged, and old runs load with null snapshot fields. Failures raise
+`SnapshotError` with a stable reason code (`source_missing`, `root_symlink`, `symlink_found`,
+`hardlink_found`, `unsafe_file_type`, `path_collision`, `unsupported_filename`,
+`file_count_exceeded`, `directory_count_exceeded`, `entry_count_exceeded`, `total_bytes_exceeded`,
+`path_too_deep`, `file_changed_during_copy`, `tree_changed_during_copy`,
+`destination_write_failed`, `destination_verification_failed`,
 `source_changed_before_checksum_write`, `snapshot_changed_after_sealing`) and never include
-file contents.
+file contents. A failed snapshot is never yielded or used, and the temp tree is always removed.
 
 ### Honest scope
 
 Snapshots remove mutable-source TOCTOU from Arena's own pack consumers. They do NOT isolate
 the reviewer process, and an internally consistent snapshot does not make a self-reported run
-official (the external trust anchor remains a pinned out-of-band digest). Git-authoritative
-patch semantics remain Phase 1D.
+official (the external trust anchor remains a pinned out-of-band digest). The descriptor
+fallback cannot fully close the anchoring window on platforms without `dir_fd`, and no
+filesystem API can prevent a source change after a command returns; both fail closed on
+detection. Git-authoritative patch semantics remain Phase 1D.
