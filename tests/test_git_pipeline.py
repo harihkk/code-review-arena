@@ -28,7 +28,8 @@ def _make(tmp_path, files: dict[str, str], modes: dict[str, int] | None = None):
     for rel, content in files.items():
         path = src / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        # newline="" disables newline translation so LF patches match on Windows too.
+        path.write_text(content, encoding="utf-8", newline="")
         if modes and rel in modes:
             os.chmod(path, modes[rel])
     return src, tmp_path / f"ws{n}"
