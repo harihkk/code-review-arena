@@ -12,6 +12,7 @@ from arena.cli.commands.report import report as report_command
 from arena.cli.commands.run import run as run_command
 from arena.cli.commands.validate import validate as validate_command
 from arena.cli.commands.verify_reviewer import verify_reviewer as verify_reviewer_command
+from arena.core import limits
 from arena.core.config import DEFAULT_BENCHMARK_SET, DEFAULT_RUNS_DIR, resolve_benchmark_path
 
 app = typer.Typer(help="Benchmark AI code reviewers on realistic pull-request bugs.")
@@ -32,7 +33,7 @@ def run(
     benchmark_set: Path = typer.Argument(DEFAULT_BENCHMARK_SET),
     reviewer: str = typer.Option("control:perfect", "--reviewer"),
     mode: Literal["review", "patch", "full"] = typer.Option("review", "--mode"),
-    beta: float | None = typer.Option(None, "--beta", min=0.01),
+    beta: float | None = typer.Option(None, "--beta", min=0.01, max=limits.BETA_MAX),
     allow_local_execution: bool = typer.Option(False, "--allow-local-execution"),
     command: str | None = typer.Option(None, "--command"),
     model: str | None = typer.Option(
@@ -41,7 +42,9 @@ def run(
         help="Model name for openai:/http: reviewers (e.g. llama3). "
         "Falls back to ARENA_HTTP_MODEL.",
     ),
-    reviewer_timeout_seconds: int = typer.Option(120, "--reviewer-timeout-seconds", min=1),
+    reviewer_timeout_seconds: int = typer.Option(
+        120, "--reviewer-timeout-seconds", min=1, max=limits.REVIEWER_TIMEOUT_SECONDS_MAX
+    ),
     reveal_metadata: bool = typer.Option(
         False,
         "--reveal-metadata",
@@ -58,20 +61,24 @@ def run(
     enable_repair: bool = typer.Option(
         False,
         "--enable-repair",
-        help="Attempt a deterministic salvage of malformed reviewer JSON "
-        "(logged as parse_attempts=3) instead of taking the invalid-output penalty.",
+        help="Development-only deterministic salvage of malformed reviewer JSON. Any "
+        "tolerant or repaired case makes the run NON-COMPARABLE by default (excluded "
+        "from the default leaderboard); the raw output is always retained. Off by "
+        "default, where only exact output is accepted.",
     ),
     as_json: bool = typer.Option(False, "--json", help="Emit the run result as JSON to stdout."),
     max_wall_seconds: float | None = typer.Option(
         None,
         "--max-wall-seconds",
         min=0,
+        max=limits.API_WALL_SECONDS_MAX,
         help="Stop scheduling new cases once the run has taken this long.",
     ),
     max_cost: float | None = typer.Option(
         None,
         "--max-cost",
         min=0,
+        max=limits.API_COST_MAX,
         help="Stop scheduling new cases once estimated reviewer cost reaches this budget.",
     ),
     expected_pack_sha256: str | None = typer.Option(
@@ -294,9 +301,16 @@ def verify_reviewer(
     benchmark_set: Path = typer.Argument(DEFAULT_BENCHMARK_SET),
     command: str = typer.Option(..., "--command", help="Wrapper command template to verify."),
     case_id: str | None = typer.Option(None, "--case-id"),
-    reviewer_timeout_seconds: int = typer.Option(120, "--reviewer-timeout-seconds", min=1),
+    reviewer_timeout_seconds: int = typer.Option(
+        120, "--reviewer-timeout-seconds", min=1, max=limits.REVIEWER_TIMEOUT_SECONDS_MAX
+    ),
     reveal_metadata: bool = typer.Option(False, "--reveal-metadata"),
-    enable_repair: bool = typer.Option(False, "--enable-repair"),
+    enable_repair: bool = typer.Option(
+        False,
+        "--enable-repair",
+        help="Development-only salvage. Tolerant or repaired output prints SALVAGED and "
+        "is non-comparable; default mode accepts only exact output.",
+    ),
 ) -> None:
     """Run a wrapper against one case and validate its output with actionable errors."""
     verify_reviewer_command(

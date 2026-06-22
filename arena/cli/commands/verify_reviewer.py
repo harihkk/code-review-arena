@@ -59,17 +59,31 @@ def verify_reviewer(
     console.print(f"Running wrapper against case [bold]{case.id}[/bold] (blind payload)...")
     reviewer = CustomCommandReviewer(command, timeout_seconds, reveal_metadata, enable_repair)
     response = reviewer.review(build_context(case))
-    console.print(f"latency={response.latency_ms}ms parse_attempts={response.parse_attempts}")
-    if not response.invalid_output and response.parsed_response is not None:
-        parsed = response.parsed_response
+    console.print(
+        f"status={response.parse_status} attempts={response.parse_attempts} "
+        f"actions={response.parse_actions} "
+        f"findings(input={response.input_finding_count} retained={response.retained_finding_count} "
+        f"dropped={response.dropped_finding_count}) latency={response.latency_ms}ms"
+    )
+    parsed = response.parsed_response
+    if response.parse_status == "exact" and parsed is not None:
         console.print(
             f"[green]VALID[/green] {len(parsed.findings)} finding(s), "
             f"overall_risk={parsed.overall_risk}"
         )
-        if response.parse_attempts > 1:
+        return
+    if response.parse_status in {"tolerant", "repaired"} and parsed is not None:
+        # Salvage succeeded but the output is NOT exact: never present it as contract
+        # compliance, and make clear the run would be non-comparable.
+        console.print(
+            "[yellow]SALVAGED (DEVELOPMENT ONLY, NON-COMPARABLE)[/yellow] "
+            f"{len(parsed.findings)} finding(s) after salvage "
+            f"({response.parse_status}); a comparable run requires exact output."
+        )
+        if response.dropped_finding_count:
             console.print(
-                "[yellow]note[/yellow] output needed tolerant parsing or repair; "
-                "emit a single clean JSON object to avoid penalties."
+                f"  dropped {response.dropped_finding_count} invalid finding(s): "
+                f"{response.parse_error_summary}"
             )
         return
     console.print("[red]INVALID[/red] the wrapper's output failed the reviewer contract:")

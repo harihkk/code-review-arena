@@ -7,6 +7,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from arena.core.bounded_io import read_text_bounded
+from arena.core.limits import PACK_FILE_BYTES
 from arena.core.models import BenchmarkCase, Finding
 
 
@@ -38,7 +40,7 @@ class BaseValidator(ABC):
 def read_expected_file(context: ValidatorContext) -> tuple[str, str]:
     path = context.case_metadata.ground_truth.primary_bug.files[0].path
     full_path = context.workspace_path / path
-    return path, full_path.read_text(encoding="utf-8")
+    return path, read_text_bounded(full_path, PACK_FILE_BYTES, label="workspace file")
 
 
 def read_expected_source(context: ValidatorContext) -> tuple[str, str]:

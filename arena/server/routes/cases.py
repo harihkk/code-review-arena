@@ -3,8 +3,10 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 
+from arena.benchmark.artifacts import load_reference_patch
 from arena.benchmark.case_loader import build_context, load_cases
 from arena.core.config import resolve_benchmark_set
+from arena.core.errors import ValidationError
 
 router = APIRouter(prefix="/cases", tags=["cases"])
 BenchmarkSet = Literal["v1", "audit_v1", "audit_v2"]
@@ -43,15 +45,18 @@ def case_detail(case_id: str, benchmark_set: BenchmarkSet = "v1") -> dict[str, o
         if case.id == case_id:
             context = build_context(case)
             reference_patch_path = case.case_dir / "reference.patch" if case.case_dir else None
+            reference_patch: str | None = None
+            if reference_patch_path is not None and reference_patch_path.is_file():
+                try:
+                    reference_patch = load_reference_patch(reference_patch_path)
+                except ValidationError:
+                    # Oversized, unsafe, or non-UTF-8 artifact: omit rather than 500.
+                    reference_patch = None
             return {
                 **case.model_dump(mode="json"),
                 "benchmark_set": benchmark_set,
                 "diff": context.diff,
                 "relevant_files": context.relevant_files,
-                "reference_patch": (
-                    reference_patch_path.read_text(encoding="utf-8")
-                    if reference_patch_path and reference_patch_path.exists()
-                    else None
-                ),
+                "reference_patch": reference_patch,
             }
     raise HTTPException(status_code=404, detail="Case not found")

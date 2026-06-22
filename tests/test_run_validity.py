@@ -194,6 +194,7 @@ def _verified_run(**overrides) -> RunResult:
             benchmark_version="v1",
             pack_checksum_verified=True,
             pack_digest_externally_verified=True,
+            non_exact_output_used=False,
         ),
     )
     base.update(overrides)

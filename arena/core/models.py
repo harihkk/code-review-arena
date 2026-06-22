@@ -4,10 +4,19 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
+from arena.core import limits
 from arena.security.paths import SafeCaseId, SafeRelativePath
 
 Severity = Literal["critical", "high", "medium", "low"]
@@ -16,19 +25,59 @@ Risk = Literal["critical", "high", "medium", "low", "none"]
 # are preserved and inspectable but excluded from normal comparisons.
 RunStatus = Literal["complete", "partial", "invalid", "failed", "cancelled", "legacy"]
 ExecutionBackend = Literal["docker", "trusted-local", "none"]
+# How a reviewer response was parsed. `exact` is the default comparable contract;
+# `invalid` is a reviewer-contract failure that still scores; `tolerant`/`repaired`
+# are development-only salvage that make a run non-comparable by default.
+ParseStatus = Literal["exact", "tolerant", "repaired", "invalid"]
+# The fixed salvage-action vocabulary. Newly generated reviewer responses may only
+# record these; arbitrary external action strings are rejected (legacy responses
+# that predate the field carry none and load through the compatibility path).
+PARSE_ACTIONS: frozenset[str] = frozenset(
+    {
+        "strip_markdown_fence",
+        "extract_json_object",
+        "remove_trailing_commas",
+        "wrap_findings_list",
+        "default_overall_risk",
+        "default_review_summary",
+        "drop_invalid_findings",
+    }
+)
+_ParseAction = Annotated[str, StringConstraints(max_length=limits.PARSE_ACTION_LEN)]
 # Bumped when the run JSON shape changes in a way that breaks comparability.
 RUN_SCHEMA_VERSION = 2
 # Hard caps that bound finding-to-bug matching so it cannot be driven into a
 # pathological size by an adversarial pack or a reviewer spamming findings. They
 # are generous relative to any real case or review, and rejection is at the
 # schema layer (a response/pack exceeding them is invalid, not silently truncated).
-MAX_BUGS_PER_CASE = 50
-MAX_FINDINGS_PER_RESPONSE = 200
+MAX_BUGS_PER_CASE = limits.BUGS_PER_CASE
+MAX_FINDINGS_PER_RESPONSE = limits.FINDINGS_PER_RESPONSE
 
 
-class LineRange(BaseModel):
-    start: int = Field(ge=1)
-    end: int = Field(ge=1)
+class _StrictExternal(BaseModel):
+    """Base for attacker-controlled input (pack files, reviewer output, API).
+
+    Forbids unknown fields, disables type coercion (strict), validates defaults,
+    and rejects NaN/inf. Strictness does NOT propagate to nested models in
+    Pydantic, so every nested external model must inherit this base explicitly.
+    Internally generated and persisted models keep plain BaseModel so legacy run
+    JSON, reports, and database hydration continue to load.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid", strict=True, validate_default=True, allow_inf_nan=False
+    )
+
+
+# Bounded string element types for list fields (per-element length caps).
+BoundedConcept = Annotated[str, StringConstraints(min_length=1, max_length=limits.CONCEPT_LEN)]
+BoundedPhrase = Annotated[str, StringConstraints(min_length=1, max_length=limits.PHRASE_LEN)]
+BoundedName = Annotated[str, StringConstraints(min_length=1, max_length=limits.IDENTIFIER_LEN)]
+
+
+class LineRange(_StrictExternal):
+    start: int = Field(ge=1, le=limits.LINE_NUMBER_MAX)
+    end: int = Field(ge=1, le=limits.LINE_NUMBER_MAX)
 
     @field_validator("end")
     @classmethod
@@ -39,36 +88,64 @@ class LineRange(BaseModel):
         return value
 
 
-class GroundTruthFile(BaseModel):
+class GroundTruthFile(_StrictExternal):
     path: SafeRelativePath
-    line_ranges: list[LineRange]
+    line_ranges: list[LineRange] = Field(min_length=1, max_length=limits.LINE_RANGES_PER_FILE)
+
+    @model_validator(mode="after")
+    def _reject_duplicate_line_ranges(self) -> GroundTruthFile:
+        # Reject exact-duplicate ranges only; overlapping but non-identical ranges
+        # remain valid (they can carry distinct scoring meaning).
+        keys = [(r.start, r.end) for r in self.line_ranges]
+        if len(keys) != len(set(keys)):
+            raise ValueError("duplicate line range in file")
+        return self
 
 
-class GroundTruthBug(BaseModel):
+class GroundTruthBug(_StrictExternal):
     # Stable identifier used to attribute repairs to specific bugs. Auto-assigned
     # as bug-1, bug-2, ... by GroundTruth when a case does not declare one.
-    id: str = ""
-    summary: str
-    files: list[GroundTruthFile]
-    concepts: list[str]
-    must_mention: list[str] = Field(default_factory=list)
-    acceptable_fix_keywords: list[str] = Field(default_factory=list)
+    id: str = Field(default="", max_length=limits.IDENTIFIER_LEN)
+    summary: Annotated[str, StringConstraints(min_length=1, max_length=limits.SUMMARY_LEN)]
+    files: list[GroundTruthFile] = Field(min_length=1, max_length=limits.FILES_PER_BUG)
+    concepts: list[BoundedConcept] = Field(min_length=1, max_length=limits.CONCEPTS_PER_BUG)
+    must_mention: list[BoundedPhrase] = Field(
+        default_factory=list, max_length=limits.MUST_MENTION_PER_BUG
+    )
+    acceptable_fix_keywords: list[BoundedPhrase] = Field(
+        default_factory=list, max_length=limits.FIX_KEYWORDS_PER_BUG
+    )
+
+    @model_validator(mode="after")
+    def _reject_duplicate_semantics(self) -> GroundTruthBug:
+        # These are sets of meanings; an exact-duplicate entry adds nothing and is
+        # rejected (not silently deduplicated) so a pack cannot hide a typo.
+        for label, items in (
+            ("concepts", self.concepts),
+            ("must_mention", self.must_mention),
+            ("acceptable_fix_keywords", self.acceptable_fix_keywords),
+        ):
+            if len(items) != len(set(items)):
+                raise ValueError(f"duplicate entries in {label}")
+        return self
 
 
 # Back-compat alias: cases authored against the single-bug model import PrimaryBug.
 PrimaryBug = GroundTruthBug
 
 
-class AcceptableFinding(BaseModel):
+class AcceptableFinding(_StrictExternal):
     """A known-good extra finding that is scored neutral, not as a false positive."""
 
     path: SafeRelativePath | None = None
-    concepts: list[str] = Field(min_length=1)
+    concepts: list[BoundedConcept] = Field(min_length=1, max_length=limits.CONCEPTS_PER_BUG)
 
 
-class GroundTruth(BaseModel):
+class GroundTruth(_StrictExternal):
     bugs: list[GroundTruthBug] = Field(min_length=1, max_length=MAX_BUGS_PER_CASE)
-    acceptable_findings: list[AcceptableFinding] = Field(default_factory=list)
+    acceptable_findings: list[AcceptableFinding] = Field(
+        default_factory=list, max_length=limits.ACCEPTABLE_FINDINGS_PER_CASE
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -85,10 +162,28 @@ class GroundTruth(BaseModel):
         return converted
 
     @model_validator(mode="after")
-    def _assign_bug_ids(self) -> GroundTruth:
+    def _assign_and_validate_bug_ids(self) -> GroundTruth:
         for index, bug in enumerate(self.bugs):
             if not bug.id:
                 bug.id = f"bug-{index + 1}"
+        # Uniqueness runs AFTER auto-assignment, so an explicit "bug-1" colliding
+        # with an auto-assigned "bug-1" is rejected. Case-fold collisions are also
+        # rejected (matching the manifest case-id policy); never silently renamed.
+        seen: dict[str, str] = {}
+        for bug in self.bugs:
+            folded = bug.id.casefold()
+            if folded in seen:
+                raise ValueError(
+                    f"duplicate bug id after auto-assignment: {seen[folded]!r} and {bug.id!r}"
+                )
+            seen[folded] = bug.id
+        return self
+
+    @model_validator(mode="after")
+    def _reject_duplicate_acceptable_findings(self) -> GroundTruth:
+        keys = [(f.path, tuple(f.concepts)) for f in self.acceptable_findings]
+        if len(keys) != len(set(keys)):
+            raise ValueError("duplicate acceptable_findings entry")
         return self
 
     # Serialized for dashboards and tooling built on the single-bug shape.
@@ -98,84 +193,133 @@ class GroundTruth(BaseModel):
         return self.bugs[0]
 
 
-class CaseInput(BaseModel):
+class CaseInput(_StrictExternal):
     diff: SafeRelativePath = "pr.diff"
     before_dir: SafeRelativePath = "before"
     after_dir: SafeRelativePath = "after"
     tests_dir: SafeRelativePath | None = "tests"
 
 
-class ScoreWeights(BaseModel):
-    concept_match: float = 35
-    file_match: float = 20
-    line_overlap: float = 15
-    severity_match: float = 10
-    fix_quality: float = 15
-    no_false_positives: float = 5
+# A pack-controlled command string (test_command / static_analysis_command). A
+# bounded length and no separate regex: the executor tokenizes and runs without a
+# shell, and an incomplete homemade grammar would be less safe than a length cap.
+# These are size bounds only, NOT an executable allowlist.
+_BoundedCommand = Annotated[str, StringConstraints(max_length=limits.COMMAND_STRING_LEN)]
+# One argv token is non-empty and bounded; one argv command holds 1..ARGV_TOKENS
+# tokens; a sequence holds 1..ARGV_COMMANDS commands. Empty outer or inner lists
+# are rejected by the min_length=1 bounds.
+_CommandToken = Annotated[str, StringConstraints(min_length=1, max_length=limits.TOKEN_LEN)]
+_ArgvCommand = Annotated[list[_CommandToken], Field(min_length=1, max_length=limits.ARGV_TOKENS)]
+_ArgvSequence = Annotated[list[_ArgvCommand], Field(min_length=1, max_length=limits.ARGV_COMMANDS)]
+
+
+class ScoreWeights(_StrictExternal):
+    concept_match: float = Field(default=35, ge=0, le=limits.SCORE_WEIGHT_MAX)
+    file_match: float = Field(default=20, ge=0, le=limits.SCORE_WEIGHT_MAX)
+    line_overlap: float = Field(default=15, ge=0, le=limits.SCORE_WEIGHT_MAX)
+    severity_match: float = Field(default=10, ge=0, le=limits.SCORE_WEIGHT_MAX)
+    fix_quality: float = Field(default=15, ge=0, le=limits.SCORE_WEIGHT_MAX)
+    no_false_positives: float = Field(default=5, ge=0, le=limits.SCORE_WEIGHT_MAX)
 
     def total(self) -> float:
         return float(sum(self.model_dump().values()))
 
 
-class ScoringConfig(BaseModel):
+class ScoringConfig(_StrictExternal):
     weights: ScoreWeights = Field(default_factory=ScoreWeights)
-    false_positive_penalty: float = 5
-    false_positive_penalty_cap: float = Field(default=15, ge=0)
-    invalid_json_penalty: float = 20
+    false_positive_penalty: float = Field(default=5, ge=0, le=limits.PENALTY_MAX)
+    false_positive_penalty_cap: float = Field(default=15, ge=0, le=limits.PENALTY_MAX)
+    invalid_json_penalty: float = Field(default=20, ge=0, le=limits.PENALTY_MAX)
 
 
-class ExecutionConfig(BaseModel):
+class ExecutionConfig(_StrictExternal):
     run_tests: bool = False
-    # One command string, one argv list, or a list of argv lists run in order.
-    test_command: str | list[str] | list[list[str]] | None = None
-    timeout_seconds: int = Field(default=30, ge=1)
-    docker_image: str | None = None
+    # One command string, one argv list, or a list of argv lists run in order;
+    # the list forms are bounded in count and require non-empty tokens.
+    test_command: _BoundedCommand | _ArgvCommand | _ArgvSequence | None = Field(default=None)
+    timeout_seconds: int = Field(default=30, ge=1, le=limits.TEST_TIMEOUT_SECONDS_MAX)
+    docker_image: (
+        Annotated[str, StringConstraints(max_length=limits.DOCKER_IMAGE_REF_LEN)] | None
+    ) = None
     run_static_analysis: bool = False
-    static_analysis_command: str | None = None
+    static_analysis_command: _BoundedCommand | None = None
 
 
-class ValidationConfig(BaseModel):
+class ValidationConfig(_StrictExternal):
     patch_required: bool = False
     tests_required: bool = False
-    structural_validators: list[str] = Field(default_factory=list)
-    max_false_positives: int = Field(default=0, ge=0)
-    protected_paths: list[SafeRelativePath] = Field(default_factory=list)
+    structural_validators: list[BoundedName] = Field(
+        default_factory=list, max_length=limits.STRUCTURAL_VALIDATORS_PER_CASE
+    )
+    max_false_positives: int = Field(default=0, ge=0, le=limits.FINDINGS_PER_RESPONSE)
+    protected_paths: list[SafeRelativePath] = Field(
+        default_factory=list, max_length=limits.PROTECTED_PATHS_PER_CASE
+    )
     # Detection completeness required for a deterministic pass. Defaults to
     # all_bugs: for single-bug cases this is identical to at_least_one, and for
     # multi-bug cases it correctly requires every seeded bug to be found.
     detection_requirement: Literal["all_bugs", "at_least_one"] = "all_bugs"
 
+    @model_validator(mode="after")
+    def _reject_duplicate_collections(self) -> ValidationConfig:
+        for label, items in (
+            ("structural_validators", self.structural_validators),
+            ("protected_paths", self.protected_paths),
+        ):
+            if len(items) != len(set(items)):
+                raise ValueError(f"duplicate entries in {label}")
+        return self
 
-class MetricsConfig(BaseModel):
-    beta: float = Field(default=1.0, gt=0)
+
+class MetricsConfig(_StrictExternal):
+    beta: float = Field(default=1.0, gt=0, le=limits.BETA_MAX)
 
 
-class BenchmarkCase(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class BenchmarkCase(_StrictExternal):
     id: SafeCaseId
-    title: str
-    category: str
+    title: Annotated[str, StringConstraints(min_length=1, max_length=limits.TITLE_LEN)]
+    category: Annotated[str, StringConstraints(min_length=1, max_length=limits.CATEGORY_LEN)]
     severity: Severity
-    stack: list[str]
-    description: str
+    stack: list[BoundedName] = Field(min_length=1, max_length=limits.STACK_ENTRIES)
+    description: Annotated[str, StringConstraints(max_length=limits.DESCRIPTION_LEN)]
     input: CaseInput
     ground_truth: GroundTruth
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     validation: ValidationConfig = Field(default_factory=ValidationConfig)
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)
+    # Runtime state assigned by the loader after validation, not pack-controlled
+    # input. Kept excluded from serialization; _reject_runtime_fields rejects any
+    # attempt to set it from a case.yaml document (see below).
     case_dir: Path | None = Field(default=None, exclude=True)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_runtime_fields(cls, value: Any) -> Any:
+        # case_dir is internal runtime state; reject it from input with any value
+        # (including null), while still allowing the loader's post-validation
+        # attribute assignment (assignment is not validated).
+        if isinstance(value, dict) and "case_dir" in value:
+            raise ValueError("case_dir is internal runtime state and cannot be set from pack input")
+        return value
 
-class CaseManifest(BaseModel):
-    version: str
-    name: str
-    cases: list[SafeCaseId]
+    @model_validator(mode="after")
+    def _reject_duplicate_stack(self) -> BenchmarkCase:
+        if len(self.stack) != len(set(self.stack)):
+            raise ValueError("duplicate entries in stack")
+        return self
+
+
+class CaseManifest(_StrictExternal):
+    version: Annotated[str, StringConstraints(min_length=1, max_length=limits.IDENTIFIER_LEN)]
+    name: Annotated[str, StringConstraints(min_length=1, max_length=limits.TITLE_LEN)]
+    cases: list[SafeCaseId] = Field(min_length=1, max_length=limits.CASES_PER_MANIFEST)
     # Execution image applied to every case that does not set its own
     # docker_image. Lets a pack target one sandbox image in a single place
     # instead of repeating it across every case.yaml.
-    default_docker_image: str | None = None
+    default_docker_image: (
+        Annotated[str, StringConstraints(max_length=limits.DOCKER_IMAGE_REF_LEN)] | None
+    ) = None
 
     @model_validator(mode="after")
     def _reject_duplicate_case_ids(self) -> CaseManifest:
@@ -187,18 +331,25 @@ class CaseManifest(BaseModel):
         return self
 
 
-class Finding(BaseModel):
-    title: str
-    summary: str
-    category: str
+class Finding(_StrictExternal):
+    title: Annotated[str, StringConstraints(max_length=limits.FINDING_TITLE_LEN)]
+    summary: Annotated[str, StringConstraints(max_length=limits.FINDING_SUMMARY_LEN)]
+    category: Annotated[str, StringConstraints(max_length=limits.CATEGORY_LEN)]
     severity: Severity
-    file: str
-    line_start: int = Field(ge=1)
-    line_end: int = Field(ge=1)
-    evidence: str
-    suggested_fix: str | None = None
-    suggested_patch: str | None = None
-    replacement_code: str | None = None
+    # Reviewer-controlled path. Bounded here; the reviewer-path containment
+    # contract (prefix handling, traversal rejection) lives in the scorer's
+    # normalization, which is the single place paths are interpreted.
+    file: Annotated[str, StringConstraints(max_length=limits.IDENTIFIER_LEN * 8)]
+    line_start: int = Field(ge=1, le=limits.LINE_NUMBER_MAX)
+    line_end: int = Field(ge=1, le=limits.LINE_NUMBER_MAX)
+    evidence: Annotated[str, StringConstraints(max_length=limits.EVIDENCE_LEN)]
+    suggested_fix: Annotated[str, StringConstraints(max_length=limits.SUGGESTED_FIX_LEN)] | None = (
+        None
+    )
+    suggested_patch: Annotated[str, StringConstraints(max_length=limits.PATCH_LEN)] | None = None
+    replacement_code: (
+        Annotated[str, StringConstraints(max_length=limits.REPLACEMENT_CODE_LEN)] | None
+    ) = None
     patch_confidence: float | None = Field(default=None, ge=0, le=1)
     confidence: float = Field(ge=0, le=1)
 
@@ -211,14 +362,14 @@ class Finding(BaseModel):
         return value
 
 
-class ReviewResult(BaseModel):
+class ReviewResult(_StrictExternal):
     findings: list[Finding] = Field(max_length=MAX_FINDINGS_PER_RESPONSE)
     # The reviewer's single complete repair for the whole case. This is the only
     # patch Arena applies; per-finding ``suggested_patch`` is advisory and never
     # applied (combining finding patches has ambiguous order/overlap semantics).
-    proposed_patch: str | None = None
+    proposed_patch: Annotated[str, StringConstraints(max_length=limits.PATCH_LEN)] | None = None
     overall_risk: Risk
-    review_summary: str
+    review_summary: Annotated[str, StringConstraints(max_length=limits.REVIEW_SUMMARY_LEN)]
 
 
 class ReviewerCaseMetadata(BaseModel):
@@ -246,11 +397,89 @@ class ReviewerResponse(BaseModel):
     parsed_response: ReviewResult | None = None
     invalid_output: bool = False
     parse_attempts: int = 1
+    # Persisted parse evidence (commit 3+). parse_status is the comparable contract
+    # signal; parse_actions / finding counts / parse_error_summary record any
+    # development-only salvage. Bounded and inspectable; raw_response is always kept.
+    # Counts are None when no valid findings list was established (invalid output)
+    # or on old responses that predate the fields (unknown, never fabricated).
+    parse_status: ParseStatus = "exact"
+    parse_actions: list[_ParseAction] = Field(
+        default_factory=list, max_length=limits.PARSE_ACTIONS_MAX
+    )
+    input_finding_count: int | None = Field(default=None, ge=0, le=limits.JSON_MAX_NODES)
+    retained_finding_count: int | None = Field(default=None, ge=0, le=limits.JSON_MAX_NODES)
+    dropped_finding_count: int = Field(default=0, ge=0, le=limits.JSON_MAX_NODES)
+    parse_error_summary: (
+        Annotated[str, StringConstraints(max_length=limits.PARSE_ERROR_SUMMARY_LEN)] | None
+    ) = None
     latency_ms: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
     estimated_cost: float = 0.0
     tool_usage: list[str] = Field(default_factory=list)
+    # True only for responses loaded from pre-parse-status saved JSON; lets the
+    # invariant check below skip historical data while still fully validating any
+    # newly produced response. Never serialized.
+    derived_from_legacy: bool = Field(default=False, exclude=True, repr=False)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _derive_parse_status(cls, value: Any) -> Any:
+        # Old saved responses predate parse_status: derive it so they keep loading
+        # without rewriting any file, and mark them legacy so the invariant check
+        # tolerates their missing action/count evidence. invalid_output -> invalid;
+        # otherwise by the legacy attempt count (1 exact, 2 tolerant, >=3 repaired).
+        if not isinstance(value, dict) or "parse_status" in value:
+            return value
+        converted = dict(value)
+        converted["derived_from_legacy"] = True
+        if value.get("invalid_output"):
+            converted["parse_status"] = "invalid"
+        else:
+            attempts = value.get("parse_attempts", 1)
+            if attempts <= 1:
+                converted["parse_status"] = "exact"
+            elif attempts == 2:
+                converted["parse_status"] = "tolerant"
+            else:
+                converted["parse_status"] = "repaired"
+        return converted
+
+    @model_validator(mode="after")
+    def _check_evidence_invariants(self) -> ReviewerResponse:
+        # Legacy responses load as-is; full invariants apply only to new responses.
+        if self.derived_from_legacy:
+            return self
+        if set(self.parse_actions) - PARSE_ACTIONS:
+            raise ValueError("parse_actions contains an action outside the fixed vocabulary")
+        if self.parse_status == "invalid":
+            if not self.invalid_output:
+                raise ValueError("invalid parse_status requires invalid_output=True")
+            if self.parsed_response is not None:
+                raise ValueError("invalid response must not carry a parsed_response")
+            if self.retained_finding_count:
+                raise ValueError("invalid response cannot retain findings")
+            return self
+        if self.invalid_output or self.parsed_response is None:
+            raise ValueError(f"{self.parse_status} response must be valid with a parsed_response")
+        parsed_count = len(self.parsed_response.findings)
+        if self.parse_status == "exact":
+            if self.parse_attempts != 1 or self.parse_actions or self.dropped_finding_count:
+                raise ValueError("exact response must have attempts=1, no actions, no drops")
+        elif self.parse_status == "tolerant":
+            if not self.parse_actions or self.dropped_finding_count:
+                raise ValueError("tolerant response must record actions and drop nothing")
+        elif self.parse_status == "repaired" and not self.parse_actions:
+            raise ValueError("repaired response must record at least one action")
+        if self.retained_finding_count is not None and self.retained_finding_count != parsed_count:
+            raise ValueError("retained_finding_count must match the parsed findings")
+        if (
+            self.input_finding_count is not None
+            and self.retained_finding_count is not None
+            and self.input_finding_count != self.retained_finding_count + self.dropped_finding_count
+        ):
+            raise ValueError("input_finding_count must equal retained + dropped")
+        return self
 
 
 class ScoreBreakdown(BaseModel):
@@ -463,6 +692,13 @@ class RunMetadata(BaseModel):
     # default leaderboard eligibility requires; a regenerated internal pack.sha256
     # cannot set it.
     pack_digest_externally_verified: bool = False
+    # Per-status case counts (exact/tolerant/repaired/invalid). Empty on old runs.
+    reviewer_parse_status_counts: dict[str, int] = Field(default_factory=dict)
+    # Fail-closed comparability signal: False when every case is exact or invalid
+    # (Arena did not reinterpret any output), True when any case was tolerant or
+    # repaired, None for old runs where exactness is unknown. None and True are not
+    # default-comparable; invalid alone does NOT make a run non-comparable.
+    non_exact_output_used: bool | None = None
 
 
 class RunResult(BaseModel):
@@ -501,3 +737,27 @@ class RunResult(BaseModel):
     @property
     def case_count(self) -> int:
         return len(self.case_results)
+
+    @model_validator(mode="after")
+    def _check_parse_evidence_consistency(self) -> RunResult:
+        # Old runs (non_exact_output_used is None) are legacy/unknown and bypass this.
+        # New runs must have parse-status counts that agree with their case results.
+        if self.metadata.non_exact_output_used is None:
+            return self
+        actual: dict[str, int] = {}
+        for case in self.case_results:
+            status = case.response.parse_status
+            actual[status] = actual.get(status, 0) + 1
+        recorded = self.metadata.reviewer_parse_status_counts
+        if set(recorded) - {"exact", "tolerant", "repaired", "invalid"}:
+            raise ValueError("reviewer_parse_status_counts has an unknown status key")
+        if any(count < 0 for count in recorded.values()):
+            raise ValueError("reviewer_parse_status_counts has a negative count")
+        if {k: v for k, v in recorded.items() if v} != {k: v for k, v in actual.items() if v}:
+            raise ValueError("reviewer_parse_status_counts disagree with case_results")
+        if sum(recorded.values()) != len(self.case_results):
+            raise ValueError("reviewer_parse_status_counts total must equal case count")
+        expected_non_exact = any(status in {"tolerant", "repaired"} for status in actual)
+        if self.metadata.non_exact_output_used != expected_non_exact:
+            raise ValueError("non_exact_output_used disagrees with case parse statuses")
+        return self

@@ -482,7 +482,7 @@ def _failed_case_result(
         category=case.category,
         severity=case.severity,
         ground_truth_summary=case.ground_truth.primary_bug.summary,
-        response=ReviewerResponse(raw_response="", invalid_output=True),
+        response=ReviewerResponse(raw_response="", invalid_output=True, parse_status="invalid"),
         scored_findings=[],
         breakdown=ScoreBreakdown(),
         score=0.0,
@@ -607,6 +607,16 @@ def run_benchmark(
         1 for case in case_results if case.execution_backend in {"docker", "trusted-local"}
     )
     unavailable_cases = sum(1 for case in case_results if case.execution_unavailable)
+    # Comparability evidence: count cases per parse status, and flag the run
+    # non-exact when any case was salvaged (tolerant/repaired). invalid alone does
+    # NOT make a run non-comparable (it is a reviewer-contract failure that scores).
+    parse_status_counts: dict[str, int] = {}
+    for item in case_results:
+        status = item.response.parse_status
+        parse_status_counts[status] = parse_status_counts.get(status, 0) + 1
+    non_exact_output_used = any(
+        item.response.parse_status in {"tolerant", "repaired"} for item in case_results
+    )
     run = RunResult(
         run_id=run_id,
         benchmark_set=manifest.version,
@@ -626,6 +636,8 @@ def run_benchmark(
             # mismatch aborts above), so the pack was verified against an external
             # digest, not just its own pack.sha256.
             pack_digest_externally_verified=expected_pack_sha256 is not None,
+            reviewer_parse_status_counts=parse_status_counts,
+            non_exact_output_used=non_exact_output_used,
         ),
         case_results=case_results,
         total_score=(
@@ -704,6 +716,8 @@ def _write_run_manifest(
         "pack_checksum": run.metadata.pack_checksum,
         "pack_checksum_verified": run.metadata.pack_checksum_verified,
         "pack_digest_externally_verified": run.metadata.pack_digest_externally_verified,
+        "reviewer_parse_status_counts": run.metadata.reviewer_parse_status_counts,
+        "non_exact_output_used": run.metadata.non_exact_output_used,
         "prompt_version": run.metadata.prompt_version,
         "reviewer": {
             "identifier": reviewer.identifier,

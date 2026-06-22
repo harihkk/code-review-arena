@@ -6,10 +6,12 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-import yaml
+from pydantic import ValidationError as SchemaError
 
 from arena.benchmark.diff_loader import load_diff
+from arena.core.bounded_io import read_text_capped, read_yaml_mapping_bounded
 from arena.core.errors import ValidationError
+from arena.core.limits import CASE_YAML_BYTES, MANIFEST_BYTES, PACK_FILE_BYTES
 from arena.core.models import BenchmarkCase, CaseContext, CaseManifest, ReviewerCaseMetadata
 from arena.execution.integrity import find_unsafe_files
 from arena.patching.patch_parser import touched_files
@@ -35,12 +37,13 @@ class ContextLimits:
 
 def load_manifest(benchmark_dir: Path) -> CaseManifest:
     manifest_path = benchmark_dir / "manifest.yaml"
-    if not manifest_path.exists():
-        raise ValidationError(f"Missing manifest: {manifest_path}")
+    # Bound the raw bytes and reject aliases/non-mapping roots BEFORE schema parsing.
+    # Byte, encoding, and YAML errors propagate as typed ValidationError subclasses;
+    # only the schema error is rewrapped so Pydantic field locations survive.
+    manifest_data = read_yaml_mapping_bounded(manifest_path, MANIFEST_BYTES, label="manifest.yaml")
     try:
-        manifest_data = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
         return CaseManifest.model_validate(manifest_data)
-    except Exception as exc:
+    except SchemaError as exc:
         raise ValidationError(f"Invalid manifest {manifest_path}: {exc}") from exc
 
 
@@ -51,11 +54,10 @@ def load_case(case_dir: Path) -> BenchmarkCase:
     if case_dir.is_symlink():
         raise ValidationError(f"case directory is a symlink: {case_dir}")
     config_path = case_dir / "case.yaml"
-    if not config_path.is_file():
-        raise ValidationError(f"Missing case.yaml: {config_path}")
+    case_data = read_yaml_mapping_bounded(config_path, CASE_YAML_BYTES, label="case.yaml")
     try:
-        case = BenchmarkCase.model_validate(yaml.safe_load(config_path.read_text(encoding="utf-8")))
-    except Exception as exc:
+        case = BenchmarkCase.model_validate(case_data)
+    except SchemaError as exc:
         raise ValidationError(f"Invalid case metadata in {config_path}: {exc}") from exc
     unsafe = find_unsafe_files(case_dir)
     if unsafe:
@@ -135,13 +137,13 @@ def _read_relevant_files(
         if len(contents) >= limits.max_files or total_bytes >= limits.max_total_bytes:
             omitted.append(relative)
             continue
-        text = (after_dir / relative).read_text(encoding="utf-8", errors="replace")
-        raw = text.encode("utf-8")
-        if len(raw) > limits.max_file_bytes:
-            text = (
-                raw[: limits.max_file_bytes].decode("utf-8", errors="replace")
-                + "\n…[truncated by arena: file exceeds max_file_bytes]"
-            )
+        # Cap the read at the per-file budget so a pathologically large pack file
+        # is never pulled fully into memory before truncation.
+        text, file_truncated = read_text_capped(
+            after_dir / relative, min(limits.max_file_bytes, PACK_FILE_BYTES), label="pack file"
+        )
+        if file_truncated:
+            text = text + "\n…[truncated by arena: file exceeds max_file_bytes]"
             truncated = True
         size = len(text.encode("utf-8"))
         if total_bytes + size > limits.max_total_bytes:

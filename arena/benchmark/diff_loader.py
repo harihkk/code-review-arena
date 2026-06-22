@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from arena.core import limits
+from arena.core.bounded_io import read_text_bounded
 from arena.core.errors import ValidationError
 
 HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
@@ -13,7 +15,7 @@ HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 def load_diff(path: Path) -> str:
     if not path.is_file():
         raise ValidationError(f"Missing pull request diff: {path}")
-    return path.read_text(encoding="utf-8")
+    return read_text_bounded(path, limits.DIFF_BYTES, label="pull request diff")
 
 
 def parse_added_lines(diff: str) -> dict[str, set[int]]:

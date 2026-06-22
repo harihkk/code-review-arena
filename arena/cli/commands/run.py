@@ -6,6 +6,7 @@ import typer
 from rich.console import Console
 
 from arena.benchmark.benchmark_runner import run_benchmark
+from arena.core import limits
 from arena.core.config import runs_path
 from arena.core.errors import ArenaError
 from arena.core.registry import create_reviewer
@@ -28,6 +29,16 @@ def run(
     model: str | None = None,
     expected_pack_sha256: str | None = None,
 ) -> None:
+    # Enforce the centralized string caps before reviewer creation (Typer cannot
+    # express max-length on these string options directly).
+    for label, value, cap in (
+        ("reviewer", reviewer_spec, limits.REVIEWER_ID_LEN),
+        ("model", model, limits.MODEL_ID_LEN),
+        ("command", command, limits.COMMAND_LEN),
+    ):
+        if value is not None and len(value) > cap:
+            Console(stderr=True).print(f"[red]ERROR[/red] {label} exceeds {cap} characters")
+            raise typer.Exit(code=1)
     try:
         reviewer = create_reviewer(
             reviewer_spec,
@@ -61,6 +72,13 @@ def run(
         Console(stderr=True).print(
             "[yellow]WARNING[/yellow] benchmark pack content does not match its stored "
             "pack.sha256; results may come from a tampered pack."
+        )
+    if result.metadata.non_exact_output_used:
+        counts = dict(result.metadata.reviewer_parse_status_counts)
+        Console(stderr=True).print(
+            "[yellow]WARNING[/yellow] development salvage was used (tolerant or repaired "
+            "reviewer output): this run is NON-COMPARABLE by default and excluded from the "
+            f"default leaderboard. parse status counts: {counts}."
         )
     unavailable = sum(1 for case in result.case_results if case.execution_unavailable)
     if unavailable:

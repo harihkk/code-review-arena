@@ -6,10 +6,10 @@ import json
 import time
 from pathlib import Path
 
+from arena.benchmark.artifacts import load_reference_patch
 from arena.core.models import CaseContext, Finding, ReviewerResponse, ReviewResult
 from arena.patching.patch_parser import touched_files
 from arena.reviewers.base import BaseReviewer
-from arena.reviewers.response_parser import parse_review_response
 
 REFERENCE_PATCH_FILENAME = "reference.patch"
 
@@ -244,7 +244,7 @@ class ReferencePatchReviewer(BaseReviewer):
         patch_path = self._reference_patch_path(context)
         patch_text = ""
         if patch_path is not None and patch_path.is_file():
-            patch_text = patch_path.read_text(encoding="utf-8")
+            patch_text = load_reference_patch(patch_path)
         hints = LOCALIZATION_HINTS.get(context.case.id)
         if hints is None:
             title = f"Reference patch review for {context.case.id}"
@@ -289,10 +289,13 @@ class ReferencePatchReviewer(BaseReviewer):
             proposed_patch=patch_text if patch_text.strip() else None,
         )
         raw = json.dumps(result.model_dump())
-        parsed, attempts = parse_review_response(raw)
         return ReviewerResponse(
             raw_response=raw,
-            parsed_response=parsed,
-            parse_attempts=attempts,
+            parsed_response=result,
+            invalid_output=False,
+            parse_attempts=1,
+            parse_status="exact",
+            input_finding_count=len(result.findings),
+            retained_finding_count=len(result.findings),
             latency_ms=int((time.perf_counter() - started) * 1000),
         )

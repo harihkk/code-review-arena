@@ -26,6 +26,7 @@ def _run(
     case_rate: float = 1.0,
     backend: str = "trusted-local",
     externally_verified: bool = False,
+    non_exact_output_used: bool | None = False,
     benchmark_set: str = "v1",
 ):
     return RunResult(
@@ -39,6 +40,7 @@ def _run(
             prompt_version="v1",
             benchmark_version="v1",
             pack_digest_externally_verified=externally_verified,
+            non_exact_output_used=non_exact_output_used,
         ),
         case_results=[],
         total_score=0.0,

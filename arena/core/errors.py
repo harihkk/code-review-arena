@@ -9,6 +9,18 @@ class ValidationError(ArenaError):
     """Raised when a benchmark case is not internally consistent."""
 
 
+class InputTooLargeError(ValidationError):
+    """Externally controlled input exceeded its pre-parse byte limit."""
+
+
+class UnsafeInputError(ValidationError):
+    """An input artifact is a symlink, special file, or otherwise unsafe to read."""
+
+
+class InvalidEncodingError(ValidationError):
+    """Externally controlled input is not valid UTF-8."""
+
+
 class ReviewerError(ArenaError):
     """Raised when a reviewer cannot complete a requested review."""
 

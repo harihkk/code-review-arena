@@ -8,7 +8,7 @@ import time
 
 from arena.core.models import CaseContext, Finding, ReviewerResponse, ReviewResult
 from arena.reviewers.base import BaseReviewer
-from arena.reviewers.response_parser import parse_review_response
+from arena.reviewers.response_parser import parse_reviewer_output, response_from_outcome
 
 
 class ControlReviewer(BaseReviewer):
@@ -637,13 +637,9 @@ def build_prompt(
         started = time.perf_counter()
         if self.mode == "invalid_json":
             raw = "{not-valid-review-output"
-            parsed, attempts = parse_review_response(raw)
-            return ReviewerResponse(
-                raw_response=raw,
-                parsed_response=parsed,
-                invalid_output=True,
-                parse_attempts=attempts,
-                latency_ms=int((time.perf_counter() - started) * 1000),
+            outcome = parse_reviewer_output(raw)
+            return response_from_outcome(
+                outcome, raw=raw, latency_ms=int((time.perf_counter() - started) * 1000)
             )
         findings = [self._primary_finding(context, partial=self.mode in {"partial", "bad"})]
         if self.mode in {"false_positive", "bad", "false_positive_patch"}:
@@ -669,12 +665,19 @@ def build_prompt(
             # review-only and false-positive modes that propose no fix).
             proposed_patch=findings[0].suggested_patch if findings else None,
         )
+        # A built-in control emits a known-valid ReviewResult: record it as exact
+        # without round-tripping through text salvage.
+        # A built-in control emits a known-valid ReviewResult: record it as exact
+        # without round-tripping through text salvage.
         raw = json.dumps(result.model_dump())
-        parsed, attempts = parse_review_response(raw)
         return ReviewerResponse(
             raw_response=raw,
-            parsed_response=parsed,
-            parse_attempts=attempts,
+            parsed_response=result,
+            invalid_output=False,
+            parse_attempts=1,
+            parse_status="exact",
+            input_finding_count=len(result.findings),
+            retained_finding_count=len(result.findings),
             latency_ms=int((time.perf_counter() - started) * 1000),
             output_tokens=max(1, len(raw) // 4),
         )

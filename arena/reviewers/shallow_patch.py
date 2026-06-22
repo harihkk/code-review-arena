@@ -16,11 +16,11 @@ import difflib
 import json
 import time
 
+from arena.benchmark.artifacts import load_reference_patch
 from arena.core.models import CaseContext, Finding, ReviewerResponse, ReviewResult
 from arena.patching.patch_parser import touched_files
 from arena.reviewers.base import BaseReviewer
 from arena.reviewers.reference_patch import REFERENCE_PATCH_FILENAME
-from arena.reviewers.response_parser import parse_review_response
 
 
 class ShallowPatchReviewer(BaseReviewer):
@@ -32,7 +32,7 @@ class ShallowPatchReviewer(BaseReviewer):
         if context.case_dir is not None:
             reference = context.case_dir / REFERENCE_PATCH_FILENAME
             if reference.is_file():
-                touched = touched_files(reference.read_text(encoding="utf-8"))
+                touched = touched_files(load_reference_patch(reference))
                 if touched:
                     return touched[0]
         return next(iter(context.relevant_files), None)
@@ -90,10 +90,13 @@ class ShallowPatchReviewer(BaseReviewer):
             proposed_patch=patch,
         )
         raw = json.dumps(result.model_dump())
-        parsed, attempts = parse_review_response(raw)
         return ReviewerResponse(
             raw_response=raw,
-            parsed_response=parsed,
-            parse_attempts=attempts,
+            parsed_response=result,
+            invalid_output=False,
+            parse_attempts=1,
+            parse_status="exact",
+            input_finding_count=len(result.findings),
+            retained_finding_count=len(result.findings),
             latency_ms=int((time.perf_counter() - started) * 1000),
         )

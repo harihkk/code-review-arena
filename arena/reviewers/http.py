@@ -23,10 +23,20 @@ from typing import Any, Literal
 
 import httpx
 
-from arena.core.models import CaseContext, ReviewerResponse, ReviewResult
+from arena.core import limits
+from arena.core.models import CaseContext, ReviewerResponse
 from arena.reviewers.base import BaseReviewer
 from arena.reviewers.custom_command import serialize_reviewer_case
-from arena.reviewers.response_parser import naive_repair, parse_review_response
+from arena.reviewers.response_parser import (
+    known_paths_from_context,
+    parse_reviewer_output,
+    response_from_outcome,
+)
+from arena.reviewers.strict_json import StrictJSONError, strict_loads
+
+# Bound for the message recorded on an invalid HTTP reviewer response (well under
+# the strict ReviewResult.review_summary cap, and never includes request headers).
+_INVALID_MESSAGE_LEN = 4096
 
 SYSTEM_PROMPT = (
     "You are a code reviewer under evaluation. Inspect the pull request diff and "
@@ -114,6 +124,34 @@ class HttpReviewer(BaseReviewer):
             raise TypeError("chat completion message content is not a string")
         return content
 
+    def _post_bounded(self, payload: dict[str, object]) -> tuple[bytes, int, bool]:
+        """Stream the response, returning (body, status, too_large).
+
+        The body is read in chunks and capped at ``RAW_RESPONSE_BYTES + 1`` so a
+        huge or never-ending response is never fully materialized. ``iter_bytes``
+        yields content-decoded bytes, so the cap is enforced on the DECODED body
+        that will actually be parsed and a compressed bomb cannot bypass it.
+        Content-Length is NOT consulted: it describes the transferred (encoded)
+        representation and can be absent or false, so the streamed decoded-byte
+        count is authoritative. On overflow the stream context closes the response.
+        """
+        limit = limits.RAW_RESPONSE_BYTES
+        with httpx.Client(timeout=self.timeout_seconds, transport=self._transport) as client:
+            with client.stream(
+                "POST",
+                self._endpoint(),
+                json=self._request_body(payload),
+                headers=self._headers(),
+            ) as response:
+                chunks: list[bytes] = []
+                total = 0
+                for chunk in response.iter_bytes():
+                    total += len(chunk)
+                    if total > limit:
+                        return b"", response.status_code, True
+                    chunks.append(chunk)
+                return b"".join(chunks), response.status_code, False
+
     def review(self, context: CaseContext) -> ReviewerResponse:
         started = time.perf_counter()
         payload = serialize_reviewer_case(
@@ -122,37 +160,57 @@ class HttpReviewer(BaseReviewer):
             reveal_test_output=self.reveal_test_output,
         )
         try:
-            with httpx.Client(timeout=self.timeout_seconds, transport=self._transport) as client:
-                response = client.post(
-                    self._endpoint(),
-                    json=self._request_body(payload),
-                    headers=self._headers(),
-                )
-            response.raise_for_status()
-            raw = (
-                self._extract_openai_content(response.json())
-                if self.style == "openai"
-                else response.text
-            )
-        except (httpx.HTTPError, KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+            body, status, too_large = self._post_bounded(payload)
+        except httpx.HTTPError as exc:
             return self._error_response(exc, started)
-        parsed, attempts = parse_review_response(
-            raw or "{}", repair=naive_repair if self.enable_repair else None
+        if too_large:
+            return self._invalid("reviewer_output_too_large", started)
+        if status >= 400:
+            # A non-2xx body is only a diagnostic snippet, never parsed as reviewer
+            # JSON, so bounded replacement decoding is acceptable here.
+            snippet = body.decode("utf-8", errors="replace")[:512]
+            return self._invalid(
+                f"http reviewer request failed with status {status}: {snippet}", started
+            )
+        # A successful body is decoded STRICTLY: invalid UTF-8 cannot be silently
+        # repaired with replacement characters into a parseable review.
+        try:
+            text = body.decode("utf-8")
+        except UnicodeDecodeError:
+            return self._invalid("http reviewer response was not valid UTF-8", started)
+        # The OpenAI outer envelope goes through the same strict JSON decoder (so
+        # duplicate keys / non-finite constants there also fail); its assistant
+        # content is then parsed by the shared reviewer parser. Plain JSON style
+        # passes the whole body through the same parser.
+        if self.style == "openai":
+            try:
+                content = self._extract_openai_content(strict_loads(text))
+            except (StrictJSONError, KeyError, IndexError, TypeError) as exc:
+                return self._invalid(f"malformed OpenAI envelope: {type(exc).__name__}", started)
+        else:
+            content = text
+        outcome = parse_reviewer_output(
+            content,
+            enable_repair=self.enable_repair,
+            known_paths=known_paths_from_context(context),
         )
-        return ReviewerResponse(
-            raw_response=raw or "",
-            parsed_response=parsed,
-            invalid_output=parsed is None or not raw,
-            parse_attempts=attempts,
-            latency_ms=int((time.perf_counter() - started) * 1000),
+        return response_from_outcome(
+            outcome, raw=content, latency_ms=int((time.perf_counter() - started) * 1000)
         )
 
     def _error_response(self, exc: Exception, started: float) -> ReviewerResponse:
-        message = f"http reviewer request failed: {type(exc).__name__}: {exc}"
+        return self._invalid(f"http reviewer request failed: {type(exc).__name__}: {exc}", started)
+
+    def _invalid(self, message: str, started: float) -> ReviewerResponse:
+        # The recorded message is bounded and derived only from status/exception
+        # type and body text, never from request headers, so no secret is persisted.
+        bounded = message[:_INVALID_MESSAGE_LEN]
         return ReviewerResponse(
-            raw_response=json.dumps({"error": message}),
-            parsed_response=ReviewResult(findings=[], overall_risk="none", review_summary=message),
+            raw_response=json.dumps({"error": bounded}),
+            parsed_response=None,
             invalid_output=True,
             parse_attempts=1,
+            parse_status="invalid",
+            parse_error_summary=bounded,
             latency_ms=int((time.perf_counter() - started) * 1000),
         )

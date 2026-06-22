@@ -15,6 +15,8 @@ from pathlib import Path
 
 from arena.benchmark.case_loader import load_cases
 from arena.benchmark.diff_loader import load_diff
+from arena.core.bounded_io import read_text_capped
+from arena.core.limits import PACK_FILE_BYTES
 from arena.core.models import BenchmarkCase
 from arena.validators.source_text import extract_comments
 
@@ -77,7 +79,8 @@ def scan_case(case: BenchmarkCase) -> list[ContaminationWarning]:
         if not path.is_file() or not path.name.endswith(_TEXT_SUFFIXES):
             continue
         relative = path.relative_to(case.case_dir).as_posix()
-        comments = extract_comments(path.name, path.read_text(encoding="utf-8", errors="replace"))
+        source, _ = read_text_capped(path, PACK_FILE_BYTES, label="pack file")
+        comments = extract_comments(path.name, source)
         for comment in comments:
             for phrase in phrases:
                 if _phrase_in(phrase, comment):
@@ -93,12 +96,8 @@ def scan_case(case: BenchmarkCase) -> list[ContaminationWarning]:
             relative = path.relative_to(case.case_dir).as_posix()
             names = [path.name]
             if path.suffix == ".py":
-                names.extend(
-                    re.findall(
-                        r"def\s+(test_\w+)",
-                        path.read_text(encoding="utf-8", errors="replace"),
-                    )
-                )
+                source, _ = read_text_capped(path, PACK_FILE_BYTES, label="pack file")
+                names.extend(re.findall(r"def\s+(test_\w+)", source))
             for name in names:
                 for phrase in phrases:
                     if _phrase_in(phrase, name.replace("_", " ")) or _phrase_in(phrase, name):

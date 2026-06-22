@@ -92,8 +92,8 @@ def test_http_error_becomes_invalid_output_with_summary():
     )
     response = reviewer.review(_context())
     assert response.invalid_output is True
-    assert response.parsed_response is not None
-    assert "failed" in response.parsed_response.review_summary
+    assert response.parse_status == "invalid"
+    assert "failed" in response.parse_error_summary
 
 
 def test_malformed_chat_shape_is_invalid_output():
