@@ -192,13 +192,17 @@ def test_pack_checksum_pins_content(tmp_path):
     assert pack_checksum(pack) != first
 
 
-def test_pack_checksum_ignores_hidden_files_and_itself(tmp_path):
+def test_pack_checksum_covers_hidden_files_but_not_the_root_artifact(tmp_path):
     pack = _make_pack(tmp_path)
     baseline = pack_checksum(pack)
     checksum = write_checksum(pack)
-    (pack / ".DS_Store").write_bytes(b"junk")
-    assert pack_checksum(pack) == baseline == checksum
+    # Writing the root pack.sha256 does not change the digest (it excludes itself).
+    assert checksum == baseline
+    assert pack_checksum(pack) == baseline
     assert stored_checksum(pack) == checksum
+    # Phase 1C: a hidden regular file is COVERED by the digest, so it changes it.
+    (pack / ".DS_Store").write_bytes(b"junk")
+    assert pack_checksum(pack) != baseline
 
 
 def test_resolve_benchmark_set_rejects_path_tricks(monkeypatch, tmp_path):

@@ -14,8 +14,7 @@ from typing import Literal
 
 from arena import __version__
 from arena.benchmark.case_loader import build_context, load_manifest
-from arena.benchmark.dataset_validator import load_and_validate_pack
-from arena.benchmark.pack_hash import pack_checksum, stored_checksum
+from arena.benchmark.snapshot import PackSnapshot, snapshot_pack
 from arena.core.config import (
     PROMPT_VERSION,
     database_path,
@@ -513,10 +512,46 @@ def run_benchmark(
     max_cost: float | None = None,
     expected_pack_sha256: str | None = None,
 ) -> RunResult:
+    """Snapshot the source pack, then run entirely from the immutable snapshot.
+
+    The snapshot is created before any run directory is reserved and is verified
+    again before reports are sealed; the mutable source is never re-read during the
+    run, and the snapshot is removed on return (including on error).
+    """
+    with snapshot_pack(benchmark_dir) as snapshot:
+        return _run_on_snapshot(
+            snapshot,
+            reviewer,
+            output_dir=output_dir,
+            db_path=db_path,
+            persist=persist,
+            mode=mode,
+            beta=beta,
+            allow_local_execution=allow_local_execution,
+            max_wall_seconds=max_wall_seconds,
+            max_cost=max_cost,
+            expected_pack_sha256=expected_pack_sha256,
+        )
+
+
+def _run_on_snapshot(
+    snapshot: PackSnapshot,
+    reviewer: BaseReviewer,
+    *,
+    output_dir: Path | None = None,
+    db_path: Path | None = None,
+    persist: bool = True,
+    mode: Literal["review", "patch", "full"] = "review",
+    beta: float | None = None,
+    allow_local_execution: bool = False,
+    max_wall_seconds: float | None = None,
+    max_cost: float | None = None,
+    expected_pack_sha256: str | None = None,
+) -> RunResult:
     # Validation is a precondition: a partially valid or tampered pack must abort
     # before any run directory or side effect is created.
-    cases = load_and_validate_pack(benchmark_dir)
-    checksum = pack_checksum(benchmark_dir)
+    cases = snapshot.load_and_validate()
+    checksum = snapshot.checksum
     # External trust anchor: pack.sha256 lives inside the pack, so on its own it
     # cannot prove the pack was not tampered with and its hash regenerated. When a
     # caller pins the expected digest out of band (a signed release, CI), a pack
@@ -529,8 +564,8 @@ def run_benchmark(
     root = output_dir or runs_path()
     root.mkdir(parents=True, exist_ok=True)
     run_id, run_dir = _reserve_run_dir(root)
-    manifest = load_manifest(benchmark_dir)
-    pinned = stored_checksum(benchmark_dir)
+    manifest = load_manifest(snapshot.root)
+    pinned = snapshot.stored_checksum
     # Defense in depth: when an operator pins a trusted-hash allowlist, a pack
     # not on it does not get host execution even if the caller passed the flag.
     effective_allow_local = allow_local_execution
@@ -636,6 +671,10 @@ def run_benchmark(
             # mismatch aborts above), so the pack was verified against an external
             # digest, not just its own pack.sha256.
             pack_digest_externally_verified=expected_pack_sha256 is not None,
+            snapshot_file_count=snapshot.file_count,
+            snapshot_total_bytes=snapshot.total_bytes,
+            snapshot_manifest_version=1,
+            snapshot_integrity_verified=True,
             reviewer_parse_status_counts=parse_status_counts,
             non_exact_output_used=non_exact_output_used,
         ),
@@ -676,6 +715,9 @@ def run_benchmark(
         total_cost=total_cost,
         total_latency_ms=total_latency,
     )
+    # Re-verify the snapshot before sealing any evidence: a successful result is
+    # never published if the snapshot changed under the run.
+    snapshot.verify()
     write_json_report(run, run_dir / "run.json")
     write_markdown_report(run, run_dir / "report.md")
     write_html_report(run, run_dir / "report.html")
@@ -683,7 +725,7 @@ def run_benchmark(
         run_dir,
         run,
         reviewer,
-        benchmark_dir,
+        snapshot.source,
         max_wall_seconds=max_wall_seconds,
         max_cost=max_cost,
     )
@@ -716,6 +758,9 @@ def _write_run_manifest(
         "pack_checksum": run.metadata.pack_checksum,
         "pack_checksum_verified": run.metadata.pack_checksum_verified,
         "pack_digest_externally_verified": run.metadata.pack_digest_externally_verified,
+        "snapshot_file_count": run.metadata.snapshot_file_count,
+        "snapshot_total_bytes": run.metadata.snapshot_total_bytes,
+        "snapshot_integrity_verified": run.metadata.snapshot_integrity_verified,
         "reviewer_parse_status_counts": run.metadata.reviewer_parse_status_counts,
         "non_exact_output_used": run.metadata.non_exact_output_used,
         "prompt_version": run.metadata.prompt_version,

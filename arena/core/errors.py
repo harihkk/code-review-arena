@@ -21,6 +21,18 @@ class InvalidEncodingError(ValidationError):
     """Externally controlled input is not valid UTF-8."""
 
 
+class SnapshotError(ValidationError):
+    """A pack snapshot could not be created or verified safely.
+
+    Carries a stable ``reason`` code (see arena/benchmark/snapshot.py) and a
+    human message that never includes private file contents.
+    """
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
 class ReviewerError(ArenaError):
     """Raised when a reviewer cannot complete a requested review."""
 

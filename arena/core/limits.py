@@ -39,6 +39,16 @@ PACK_FILE_BYTES = 8 * 1024 * 1024
 # pack.sha256 is a single hex digest line.
 CHECKSUM_FILE_BYTES = 256
 
+# --- Immutable pack snapshot caps (Phase 1C) ---
+# Whole-pack bounds for secure source -> snapshot copy, enforced before excessive
+# memory or disk use. Observed across the shipped packs: <=84 files, <=74 dirs,
+# <=40 KB total, depth <=9; these sit far above with operational headroom.
+SNAPSHOT_MAX_FILES = 4096
+SNAPSHOT_MAX_DIRS = 4096
+SNAPSHOT_MAX_TOTAL_BYTES = 256 * 1024 * 1024
+SNAPSHOT_MAX_DEPTH = 32
+SNAPSHOT_MANIFEST_ENTRIES = SNAPSHOT_MAX_FILES
+
 # --- Parsed-YAML structure caps (checked during parsing, after the byte cap) ---
 # Bound parser amplification that a byte cap alone misses (deep nesting, huge node
 # counts). Observed: depth 9, nodes 104 across the shipped packs; these are far above.

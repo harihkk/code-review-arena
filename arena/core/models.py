@@ -692,6 +692,15 @@ class RunMetadata(BaseModel):
     # default leaderboard eligibility requires; a regenerated internal pack.sha256
     # cannot set it.
     pack_digest_externally_verified: bool = False
+    # Immutable-snapshot evidence (Phase 1C). The run executed from a sealed
+    # snapshot of the source pack; pack_checksum above is the snapshot content
+    # checksum. These describe the snapshot, never its temporary path, and are None
+    # on old runs. snapshot_integrity_verified records that the snapshot was
+    # re-verified before reports were sealed.
+    snapshot_file_count: int | None = None
+    snapshot_total_bytes: int | None = None
+    snapshot_manifest_version: int | None = None
+    snapshot_integrity_verified: bool | None = None
     # Per-status case counts (exact/tolerant/repaired/invalid). Empty on old runs.
     reviewer_parse_status_counts: dict[str, int] = Field(default_factory=dict)
     # Fail-closed comparability signal: False when every case is exact or invalid

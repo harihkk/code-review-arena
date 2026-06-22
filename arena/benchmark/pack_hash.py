@@ -1,14 +1,18 @@
 """Content checksums for benchmark packs.
 
-A pack checksum pins the exact bytes of every case file, so a pack inspected
-once can be verified again at run time: results from a silently modified pack
-are flagged instead of trusted. Hidden files and bytecode caches are excluded
-so OS noise (.DS_Store) does not churn the checksum.
+A pack checksum pins the exact bytes of every regular file in the pack, so a pack
+inspected once can be verified again at run time: results from a silently modified
+pack are flagged instead of trusted. Every regular file is covered except the root
+``pack.sha256`` artifact itself (which necessarily cannot contain its own digest).
+Hidden files and bytecode caches are covered too -- as of Phase 1C the checksum is
+computed from an immutable snapshot whose secure traversal copies every regular
+file, so nothing pack-controlled is outside the digest.
 """
 
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 
 from arena.core.bounded_io import read_bytes_bounded, read_text_bounded
@@ -25,35 +29,16 @@ def _content_files(benchmark_dir: Path) -> list[Path]:
         relative = path.relative_to(benchmark_dir)
         if relative == Path(PACK_CHECKSUM_FILENAME):  # only the root checksum artifact
             continue
-        if any(part.startswith(".") or part == "__pycache__" for part in relative.parts):
-            continue
         files.append(path)
     return files
 
 
-def unhashable_content(benchmark_dir: Path) -> list[str]:
-    """Regular files present in the pack but EXCLUDED from pack_checksum.
-
-    These sit under a dot-prefixed component or ``__pycache__``, so the digest
-    cannot see them and a pack could be modified there without changing its
-    checksum. Admission must reject such content until snapshot hashing (Phase 1C)
-    covers every regular file; only ``pack.sha256`` (which necessarily contains
-    its own digest) is legitimately excluded.
-    """
-    omitted: list[str] = []
-    for path in sorted(benchmark_dir.rglob("*")):
-        if not path.is_file():
-            continue
-        relative = path.relative_to(benchmark_dir)
-        if relative == Path(PACK_CHECKSUM_FILENAME):  # only the root checksum artifact
-            continue
-        if any(part.startswith(".") or part == "__pycache__" for part in relative.parts):
-            omitted.append(relative.as_posix())
-    return omitted
-
-
 def pack_checksum(benchmark_dir: Path) -> str:
-    """SHA-256 over sorted relative paths and file bytes of the pack."""
+    """SHA-256 over sorted relative paths and file bytes of the pack.
+
+    Framing per file: sorted relative POSIX path, NUL, exact bytes, NUL. Phase 1C
+    computes this from snapshot bytes; the algorithm is unchanged.
+    """
     digest = hashlib.sha256()
     for path in _content_files(benchmark_dir):
         digest.update(path.relative_to(benchmark_dir).as_posix().encode("utf-8"))
@@ -73,6 +58,25 @@ def stored_checksum(benchmark_dir: Path) -> str | None:
 
 
 def write_checksum(benchmark_dir: Path) -> str:
-    checksum = pack_checksum(benchmark_dir)
-    (benchmark_dir / PACK_CHECKSUM_FILENAME).write_text(checksum + "\n", encoding="utf-8")
+    """Compute the checksum from a snapshot, then write the root artifact atomically.
+
+    The digest is computed from a sealed snapshot; before writing, the source is
+    re-checked so a digest representing stale source bytes is never written.
+    """
+    # Lazy import: snapshot imports pack_hash, so importing it at module load would
+    # create a cycle.
+    from arena.benchmark.snapshot import snapshot_pack
+    from arena.core.errors import SnapshotError
+
+    with snapshot_pack(benchmark_dir) as snapshot:
+        checksum = snapshot.checksum
+        if pack_checksum(benchmark_dir) != checksum:
+            raise SnapshotError(
+                "source_changed_before_checksum_write",
+                "pack source changed between snapshot and checksum write",
+            )
+    target = benchmark_dir / PACK_CHECKSUM_FILENAME
+    tmp = benchmark_dir / f"{PACK_CHECKSUM_FILENAME}.tmp"
+    tmp.write_text(checksum + "\n", encoding="utf-8")
+    os.replace(tmp, target)
     return checksum

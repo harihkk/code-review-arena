@@ -116,17 +116,21 @@ def mutation_test(
     """Mutate each case's solution and report how many mutants its tests kill."""
     from rich.console import Console
 
-    from arena.benchmark.case_loader import load_cases
     from arena.benchmark.mutation import run_mutation_test
+    from arena.benchmark.snapshot import snapshot_pack
 
     console = Console()
-    for case in load_cases(resolve_benchmark_path(benchmark_set)):
-        if not case.execution.run_tests or not case.execution.test_command:
-            console.print(f"{case.id}: skipped (no executable tests)")
-            continue
-        result = run_mutation_test(case, allow_local_execution=allow_local_execution, limit=limit)
-        rate = f"{result.kill_rate:.0%}" if result.kill_rate is not None else "n/a"
-        console.print(f"{case.id}: mutant_kill_rate={rate} ({result.killed}/{result.total})")
+    # Mutate the solution from the immutable snapshot, not the mutable source.
+    with snapshot_pack(resolve_benchmark_path(benchmark_set)) as snapshot:
+        for case in snapshot.load():
+            if not case.execution.run_tests or not case.execution.test_command:
+                console.print(f"{case.id}: skipped (no executable tests)")
+                continue
+            result = run_mutation_test(
+                case, allow_local_execution=allow_local_execution, limit=limit
+            )
+            rate = f"{result.kill_rate:.0%}" if result.kill_rate is not None else "n/a"
+            console.print(f"{case.id}: mutant_kill_rate={rate} ({result.killed}/{result.total})")
 
 
 @app.command("verify-run")
@@ -330,10 +334,16 @@ def pack_hash(
         False, "--write", help="Store the checksum as pack.sha256 inside the pack."
     ),
 ) -> None:
-    from arena.benchmark.pack_hash import pack_checksum, stored_checksum, write_checksum
+    from arena.benchmark.pack_hash import stored_checksum, write_checksum
+    from arena.benchmark.snapshot import snapshot_pack
 
     benchmark_set = resolve_benchmark_path(benchmark_set)
-    checksum = write_checksum(benchmark_set) if write else pack_checksum(benchmark_set)
+    if write:
+        checksum = write_checksum(benchmark_set)
+    else:
+        # Compute the displayed checksum from the immutable snapshot.
+        with snapshot_pack(benchmark_set) as snapshot:
+            checksum = snapshot.checksum
     typer.echo(checksum)
     pinned = stored_checksum(benchmark_set)
     if not write and pinned is not None and pinned != checksum:

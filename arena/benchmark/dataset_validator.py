@@ -7,7 +7,6 @@ from pathlib import Path
 from arena.benchmark.artifacts import load_reference_patch
 from arena.benchmark.case_loader import load_cases, load_manifest
 from arena.benchmark.diff_loader import load_diff, parse_added_lines
-from arena.benchmark.pack_hash import unhashable_content
 from arena.core.bounded_io import read_text_bounded
 from arena.core.errors import ValidationError
 from arena.core.limits import PACK_FILE_BYTES
@@ -89,15 +88,10 @@ def validate_dataset(benchmark_dir: Path) -> list[str]:
     except ValidationError as exc:
         return [str(exc)]
     errors: list[str] = []
-    # Fail closed on content the pack checksum cannot see (dot-prefixed files or
-    # __pycache__): it could be swapped without changing the digest. This admission
-    # guard is removed in Phase 1C once snapshot hashing covers every regular file.
-    omitted = unhashable_content(benchmark_dir)
-    if omitted:
-        errors.append(
-            "pack contains files excluded from the checksum (dot-prefixed or __pycache__), "
-            f"so they are not covered by the pack digest: {', '.join(omitted)}"
-        )
+    # Phase 1C: the snapshot's secure traversal copies and hashes every regular
+    # file, so the pack checksum already covers all content (only the root
+    # pack.sha256 is excluded). The earlier unhashable-content admission guard is
+    # therefore no longer needed and has been removed.
     for case in cases:
         errors.extend(validate_case(case))
     if not cases:

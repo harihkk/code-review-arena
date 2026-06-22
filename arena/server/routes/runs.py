@@ -3,7 +3,8 @@ from pathlib import PurePosixPath
 from fastapi import APIRouter, Depends, HTTPException
 
 from arena.benchmark.benchmark_runner import run_benchmark
-from arena.benchmark.case_loader import build_context, load_cases
+from arena.benchmark.case_loader import build_context
+from arena.benchmark.snapshot import snapshot_pack
 from arena.core.config import benchmark_root, database_path, resolve_benchmark_set
 from arena.core.errors import ReviewerError
 from arena.core.registry import create_reviewer
@@ -87,14 +88,16 @@ def run_case_detail(run_id: str, case_id: str) -> dict[str, object]:
             benchmark_dir = resolve_benchmark_set(run.benchmark_set)
             if benchmark_dir is None:
                 return result.model_dump(mode="json")
-            for case in load_cases(benchmark_dir):
-                if case.id == case_id:
-                    context = build_context(case)
-                    return {
-                        **result.model_dump(mode="json"),
-                        "diff": context.diff,
-                        "ground_truth": case.ground_truth.model_dump(mode="json"),
-                        "stack": case.stack,
-                    }
+            # Diff/ground-truth context comes from the immutable snapshot.
+            with snapshot_pack(benchmark_dir) as snapshot:
+                for case in snapshot.load():
+                    if case.id == case_id:
+                        context = build_context(case)
+                        return {
+                            **result.model_dump(mode="json"),
+                            "diff": context.diff,
+                            "ground_truth": case.ground_truth.model_dump(mode="json"),
+                            "stack": case.stack,
+                        }
             return result.model_dump(mode="json")
     raise HTTPException(status_code=404, detail="Case result not found")
