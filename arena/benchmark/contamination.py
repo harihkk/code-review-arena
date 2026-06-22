@@ -13,8 +13,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from arena.benchmark.case_loader import load_cases
 from arena.benchmark.diff_loader import load_diff
+from arena.benchmark.snapshot import snapshot_pack
 from arena.core.bounded_io import read_text_capped
 from arena.core.limits import PACK_FILE_BYTES
 from arena.core.models import BenchmarkCase
@@ -111,6 +111,8 @@ def scan_case(case: BenchmarkCase) -> list[ContaminationWarning]:
 
 def scan_benchmark(benchmark_dir: Path) -> list[ContaminationWarning]:
     warnings: list[ContaminationWarning] = []
-    for case in load_cases(benchmark_dir):
-        warnings.extend(scan_case(case))
+    # Scan the immutable snapshot, not the mutable source.
+    with snapshot_pack(benchmark_dir) as snapshot:
+        for case in snapshot.load():
+            warnings.extend(scan_case(case))
     return warnings

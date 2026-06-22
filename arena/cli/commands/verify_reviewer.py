@@ -9,7 +9,8 @@ import typer
 from pydantic import ValidationError as PydanticValidationError
 from rich.console import Console
 
-from arena.benchmark.case_loader import build_context, load_cases
+from arena.benchmark.case_loader import build_context
+from arena.benchmark.snapshot import snapshot_pack
 from arena.core.errors import ArenaError
 from arena.core.models import ReviewResult
 from arena.reviewers.custom_command import CustomCommandReviewer
@@ -46,19 +47,24 @@ def verify_reviewer(
     enable_repair: bool,
 ) -> None:
     console = Console()
+    reviewer = CustomCommandReviewer(command, timeout_seconds, reveal_metadata, enable_repair)
+    # Build the reviewer context from the immutable snapshot, not the mutable source.
     try:
-        cases = load_cases(benchmark_set)
+        with snapshot_pack(benchmark_set) as snapshot:
+            cases = snapshot.load()
+            case = (
+                next((item for item in cases if item.id == case_id), None)
+                if case_id
+                else (cases[0] if cases else None)
+            )
+            if case is None:
+                Console(stderr=True).print(f"[red]ERROR[/red] case not found: {case_id}")
+                raise typer.Exit(code=1)
+            console.print(f"Running wrapper against case [bold]{case.id}[/bold] (blind payload)...")
+            response = reviewer.review(build_context(case))
     except ArenaError as exc:
         Console(stderr=True).print(f"[red]ERROR[/red] {exc}")
         raise typer.Exit(code=1) from exc
-    case = next((item for item in cases if item.id == case_id), None) if case_id else cases[0]
-    if case is None:
-        Console(stderr=True).print(f"[red]ERROR[/red] case not found: {case_id}")
-        raise typer.Exit(code=1)
-
-    console.print(f"Running wrapper against case [bold]{case.id}[/bold] (blind payload)...")
-    reviewer = CustomCommandReviewer(command, timeout_seconds, reveal_metadata, enable_repair)
-    response = reviewer.review(build_context(case))
     console.print(
         f"status={response.parse_status} attempts={response.parse_attempts} "
         f"actions={response.parse_actions} "

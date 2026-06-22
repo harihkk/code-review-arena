@@ -1,4 +1,4 @@
-# Trusted Evaluation Architecture (v0.2; Phase 1A and 1B landed, 1C/1D pending)
+# Trusted Evaluation Architecture (v0.2; Phase 1A, 1B and 1C landed, 1D pending)
 
 This is the living design document for the v0.2 milestone. The goal is not "no bugs";
 it is enforceable invariants so that any unknown, incomplete, tampered, or untrusted
@@ -45,10 +45,12 @@ official rankings.
 
 ## Boundaries (filled in as phases land)
 
-- Pack boundary: Phase 1. Phase 1A (strict portable paths/ids) and Phase 1B (strict
+- Pack boundary: Phase 1. Phase 1A (strict portable paths/ids), Phase 1B (strict
   bounded external schemas, pre-parse byte limits, bounded YAML/JSON structure, exact
   reviewer-output contract with development-only salvage, contextual reviewer-path
-  admission, comparability metadata) have landed. The immutable snapshot is Phase 1C.
+  admission, comparability metadata) and Phase 1C (immutable pack snapshot: every
+  pack consumer reads a sealed, mutation-checked copy, not the mutable source) have
+  landed. Git-authoritative patch application is Phase 1D.
 - Run validity: Phase 2.
 - Reviewer boundary: Phase 3.
 - Execution boundary: Phase 4.
@@ -58,14 +60,16 @@ official rankings.
 
 - No reviewer isolation yet: `custom-command` runs from the repo cwd with the full host
   environment and can read `reference.patch`. All current results are self-reported.
-- No held-out official packs; public packs contain their own answers.
+  The Phase 1C snapshot removes mutable-source TOCTOU from Arena's OWN pack consumers; it
+  does NOT sandbox the reviewer process.
+- No held-out official packs; public packs contain their own answers. An internally
+  consistent snapshot does not make a self-reported run official; the external trust
+  anchor is still a pinned, out-of-band expected digest (`--expected-pack-sha256`).
 - Docker "verified path" is documented but not exercised end to end in CI.
 - Per-bug repair attribution is suite-level (overstated for multi-bug cases).
-- Phase 1B bounds individual input bytes and parsed YAML/JSON structure, but does NOT
-  solve filesystem time-of-check/time-of-use or provide immutable traversal: validation
-  and hashing still read the mutable source and execution re-reads it later. Total
-  filesystem entry-count limits and collision rejection on a snapshot remain Phase 1C;
-  Git-authoritative patch application remains Phase 1D.
+- Git-authoritative patch application (temp repo + `git apply --check`) remains Phase 1D.
+  Snapshot mutation detection bounds the source filesystem at copy time but cannot prove
+  the absence of every concurrent-modification race; it fails closed when one is detected.
 
 ---
 
@@ -190,7 +194,11 @@ location (e.g. `input.after_dir`, `ground_truth.bugs.0.files.0.path`,
   and identity/uniqueness bounds are enforced. A coherent minimum-dependency CI job
   (Python 3.11, FastAPI 0.110, Pydantic 2.6, HTTPX 0.27) guards the declared floors.
 - 1C immutable pack snapshot + rewire load/cert/mutation/exec to the snapshot, including
-  case-insensitive / normalization collision rejection: pending.
+  case-insensitive / normalization collision rejection: DONE (see "Phase 1C" below). A
+  context-managed `PackSnapshot` securely copies the source into a sealed, mutation-checked
+  temp tree; every pack consumer reads only the snapshot. The pack checksum now covers every
+  regular file except the root `pack.sha256`, so the earlier `unhashable_content` admission
+  guard was removed.
 - 1D git-result patch pipeline (temp repo + git apply --check + NUL-delimited paths):
   pending.
 
@@ -283,3 +291,134 @@ stored run JSON, so `RUN_SCHEMA_VERSION` is unchanged and no SQL migration is ne
 saved runs and reviewer responses load unchanged: a response without `parse_status` derives
 it from `invalid_output`/`parse_attempts` and loads with unknown (None) counts rather than
 fabricated evidence; a run with `non_exact_output_used: null` is treated as legacy/unknown.
+
+---
+
+## Phase 1C: immutable pack snapshots
+
+### The problem
+
+Arena validated and hashed a mutable source pack and then re-read and copied that same
+source for reviewer context, certification, mutation and execution. A source file could
+therefore change between validation and use, so Arena could validate one tree and execute
+another (a time-of-check/time-of-use gap on its own pack consumers).
+
+### Snapshot lifecycle
+
+`arena/benchmark/snapshot.py` provides a context-managed `PackSnapshot`:
+
+```text
+mutable source pack
+  -> capture the complete source identity (root, every dir incl. empty, every file)
+  -> descriptor-anchored secure copy into a private temp tree (mutation-checked, hashed)
+  -> require the source identity to match exactly after copying
+  -> seal: full manifest (files AND dirs) + manifest digest + public pack checksum
+  -> load/validate/context/certify/mutate/execute read ONLY the snapshot
+  -> rebuild and re-verify the full seal before evidence is sealed
+  -> remove the temp tree (on normal return and on exceptions)
+```
+
+```python
+with snapshot_pack(source) as snapshot:
+    cases = snapshot.load_and_validate()   # case_dir points inside snapshot.root
+    ...
+```
+
+Once accepted, modifying or deleting the original source does not affect the operation, and
+the source is never re-read by that operation.
+
+### Descriptor-anchored traversal (and fallback)
+
+Where the platform supports directory file descriptors (Linux/macOS), traversal is
+descriptor-anchored: the root is opened no-follow and its identity verified, every child is
+enumerated via `scandir(fd)` and opened relative to its parent descriptor with no-follow
+(directories with `O_DIRECTORY`), a child directory's opened identity is checked against what
+was discovered, and an untrusted child is never re-resolved from a mutable absolute path. All
+descriptors are closed on success and failure. On platforms without `dir_fd` support
+(Windows) a conservative path-based fallback re-lstats and compares identity before reading
+and rejects symlink/reparse substitutions; its residual limitation is that it cannot fully
+close the descriptor-anchoring window, so it fails closed on any detected identity change
+rather than claiming an identical guarantee.
+
+### Bounded enumeration
+
+Directory entries are counted against the file, directory and a total-entry cap WHILE the
+`scandir` iterator is consumed, so a directory with millions of names is rejected before its
+listing is materialized. Deterministic ordering is applied only to the already-bounded
+collection. Nothing is ever silently skipped to satisfy a limit.
+
+### Copy verification and mutation detection
+
+The source filesystem is treated as adversarial. Symlinks, FIFOs, sockets and devices are
+rejected; hardlink aliases are rejected by `(st_dev, st_ino)`. For each file the opened
+descriptor is compared to the discovered entry BEFORE any byte is read (type, device, inode,
+size, mtime, link count) and again after reading. Writes loop to completion and treat zero
+progress as an error. The copied destination is then re-lstatted, size-checked, re-hashed and
+mode-checked before it joins the manifest; a partial destination is removed on failure. The
+complete source tree captured before the copy is required to match exactly afterward, which
+detects added/removed/renamed/retyped directories (including empty ones) and files.
+
+### Two integrity identities
+
+These are distinct and not interchangeable:
+
+- The **public pack checksum** keeps its compatible algorithm (sorted relative POSIX path,
+  NUL, exact bytes, NUL), computed from the snapshot bytes, covering every regular file
+  except the root `pack.sha256`. Hidden files and `__pycache__` are included; the three
+  shipped packs contain none, so their stored checksums are unchanged. The earlier
+  `unhashable_content` admission guard is removed because every regular file is now hashed.
+- The **full snapshot seal** is a deterministic manifest digest over the COMPLETE tree:
+  every regular file (including the root `pack.sha256`) and every directory (including empty
+  ones), each with relative path, kind, size, per-file SHA-256, normalized mode, plus a
+  manifest version. `PackSnapshot.verify()` rebuilds this manifest from the snapshot and
+  rejects any drift -- added/removed/modified files, root `pack.sha256` modification,
+  added/removed empty directories, mode changes, and introduced symlinks or special entries.
+  The public checksum is also recomputed, but it is only one component of verification.
+
+### Secure checksum writing
+
+`write_checksum` never reads `pack_checksum` from the mutable source. It snapshots to compute
+the intended checksum, atomically writes the root `pack.sha256` (exclusive temp + complete
+write + fsync + replace), re-snapshots, and verifies that the public checksum, the stored
+checksum and every non-checksum source entry are as expected. On any mismatch it restores the
+prior artifact (or removes a newly created one) and raises `source_changed_before_checksum_write`,
+so a known-stale checksum is never left behind. No filesystem API can prevent the source from
+changing AFTER the command returns; the guarantee is that the artifact written here was
+verified against the source state through the operation's completion boundary.
+
+### Resource limits
+
+Observed across the shipped packs: <=84 files, <=74 directories, <=40 KB total, depth <=9.
+Selected limits (far above, finite): 4096 files, 4096 directories, 8192 total entries, 256 MiB
+total, depth 32, plus the existing 8 MiB per-file cap. Exceeding any limit fails closed.
+
+### Collision and name policy
+
+Distinct entries that collide under case folding, NFC normalization, or both (across full
+relative paths and directory components) are rejected, as are names that cannot be encoded
+to UTF-8. The pack-declared `SafeRelativePath` policy for case-schema path fields is
+unchanged; arbitrary tree entries are allowed only when they can be copied, hashed and
+represented safely.
+
+### Evidence and error model
+
+`RunMetadata` records nullable snapshot evidence (file count, total bytes, manifest version,
+integrity-verified, and the full `snapshot_manifest_digest`) plus the snapshot content
+checksum (the existing `pack_checksum` field); the temporary snapshot path is never persisted,
+`RUN_SCHEMA_VERSION` is unchanged, and old runs load with null snapshot fields. Failures raise
+`SnapshotError` with a stable reason code (`source_missing`, `root_symlink`, `symlink_found`,
+`hardlink_found`, `unsafe_file_type`, `path_collision`, `unsupported_filename`,
+`file_count_exceeded`, `directory_count_exceeded`, `entry_count_exceeded`, `total_bytes_exceeded`,
+`path_too_deep`, `file_changed_during_copy`, `tree_changed_during_copy`,
+`destination_write_failed`, `destination_verification_failed`,
+`source_changed_before_checksum_write`, `snapshot_changed_after_sealing`) and never include
+file contents. A failed snapshot is never yielded or used, and the temp tree is always removed.
+
+### Honest scope
+
+Snapshots remove mutable-source TOCTOU from Arena's own pack consumers. They do NOT isolate
+the reviewer process, and an internally consistent snapshot does not make a self-reported run
+official (the external trust anchor remains a pinned out-of-band digest). The descriptor
+fallback cannot fully close the anchoring window on platforms without `dir_fd`, and no
+filesystem API can prevent a source change after a command returns; both fail closed on
+detection. Git-authoritative patch semantics remain Phase 1D.

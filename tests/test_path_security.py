@@ -411,44 +411,45 @@ def test_load_cases_rejects_duplicate_manifest_ids(tmp_path):
         load_cases(pack)
 
 
-# -- pack-level: fail closed on content the checksum cannot see ----------------
+# -- pack-level: every regular file is covered by the checksum (Phase 1C) ------
 
 
-def test_load_and_validate_pack_fails_closed_on_unhashable_content(tmp_path):
+def test_hidden_files_are_covered_by_the_checksum(tmp_path):
     import shutil
 
     from arena.benchmark.dataset_validator import load_and_validate_pack
+    from arena.benchmark.pack_hash import pack_checksum
 
     pack = tmp_path / "pack"
     shutil.copytree("benchmark_sets/audit_v2", pack)
-    # The clean copy admits.
-    load_and_validate_pack(pack)
-    # A hidden regular file under a case is invisible to pack_checksum, so it
-    # could be swapped without changing the digest: admission must fail closed.
+    base = pack_checksum(pack)
+    load_and_validate_pack(pack)  # the clean copy validates
+    # A hidden regular file is now COVERED by the digest (Phase 1C), not silently
+    # ignored, so it changes the checksum -- it cannot be swapped invisibly.
     (pack / "money_discount_rounding_001" / ".secret.py").write_text("X = 1\n")
-    with pytest.raises(ValidationError, match="checksum"):
-        load_and_validate_pack(pack)
+    assert pack_checksum(pack) != base
+    load_and_validate_pack(pack)  # still a valid pack; the file is just covered content
 
 
-def test_load_and_validate_pack_fails_closed_on_pycache(tmp_path):
+def test_pycache_files_are_covered_by_the_checksum(tmp_path):
     import shutil
 
-    from arena.benchmark.dataset_validator import load_and_validate_pack
+    from arena.benchmark.pack_hash import pack_checksum
 
     pack = tmp_path / "pack"
     shutil.copytree("benchmark_sets/audit_v2", pack)
+    base = pack_checksum(pack)
     cache = pack / "money_discount_rounding_001" / "__pycache__"
     cache.mkdir()
     (cache / "x.cpython-311.pyc").write_bytes(b"\x00\x01")
-    with pytest.raises(ValidationError, match="checksum"):
-        load_and_validate_pack(pack)
+    assert pack_checksum(pack) != base  # __pycache__ content is covered, not ignored
 
 
 # -- checksum exclusion is limited to the root artifact ------------------------
 
 
 def test_checksum_excludes_only_the_root_artifact(tmp_path):
-    from arena.benchmark.pack_hash import pack_checksum, unhashable_content
+    from arena.benchmark.pack_hash import pack_checksum
 
     pack = tmp_path / "p"
     (pack / "after").mkdir(parents=True)
@@ -465,9 +466,6 @@ def test_checksum_excludes_only_the_root_artifact(tmp_path):
     assert with_nested != base
     (pack / "after" / "pack.sha256").write_text("v2\n")  # ...and its bytes are covered.
     assert pack_checksum(pack) != with_nested
-    # (3) the nested file is hashable, so it is not reported as omitted content.
-    assert "after/pack.sha256" not in unhashable_content(pack)
-    assert unhashable_content(pack) == []
 
 
 def test_load_and_validate_pack_accepts_a_nested_checksum_file(tmp_path):

@@ -24,8 +24,8 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-from arena.benchmark.dataset_validator import load_and_validate_pack
 from arena.benchmark.mutation import run_mutation_test
+from arena.benchmark.snapshot import snapshot_pack
 from arena.benchmark.solution import fixed_solution
 from arena.core.errors import ValidationError
 from arena.core.models import BenchmarkCase
@@ -273,16 +273,20 @@ def certify_pack(
     mutation_limit: int = 20,
     determinism_runs: int = 1,
 ) -> PackCertification:
+    # One snapshot for the whole certification: baseline, reference, determinism,
+    # and mutant gates all read the same immutable tree, never the source.
     executor = TestExecutor()
     result = PackCertification(pack=benchmark_dir.name)
-    for case in load_and_validate_pack(benchmark_dir):
-        result.cases.append(
-            certify_case(
-                case,
-                executor=executor,
-                allow_local_execution=allow_local_execution,
-                mutation_limit=mutation_limit,
-                determinism_runs=determinism_runs,
+    with snapshot_pack(benchmark_dir) as snapshot:
+        for case in snapshot.load_and_validate():
+            result.cases.append(
+                certify_case(
+                    case,
+                    executor=executor,
+                    allow_local_execution=allow_local_execution,
+                    mutation_limit=mutation_limit,
+                    determinism_runs=determinism_runs,
+                )
             )
-        )
+        snapshot.verify()
     return result
