@@ -369,11 +369,27 @@ def _walk_path(
         raise SnapshotError("path_too_deep", "pack path depth exceeds the limit")
     with os.scandir(directory) as iterator:
         children = _enumerate(iterator, state, prefix)
-    for name, info, kind in children:
+    for name, _scandir_info, kind in children:
         relative = f"{prefix}{name}"
         _register(state, relative)
         child = directory / name
+        # Re-lstat with a fresh stat for the canonical identity: os.scandir's cached
+        # DirEntry.stat() sets st_ino/st_dev/st_nlink to 0 on Windows, so comparing it
+        # against a later lstat/fstat would spuriously flag an unchanged entry. A fresh
+        # lstat is consistent with the fstat/lstat used in every later comparison.
+        try:
+            info = child.lstat()
+        except FileNotFoundError as exc:
+            raise SnapshotError(
+                "tree_changed_during_copy", f"entry disappeared during traversal: {relative!r}"
+            ) from exc
+        if stat.S_ISLNK(info.st_mode):
+            raise SnapshotError("symlink_found", f"pack contains a symlink: {relative!r}")
         if kind == "dir":
+            if not stat.S_ISDIR(info.st_mode):
+                raise SnapshotError(
+                    "tree_changed_during_copy", f"directory replaced during traversal: {relative!r}"
+                )
             entry = visit_dir(relative, info)
             if entry is not None:
                 yield entry
@@ -388,6 +404,10 @@ def _walk_path(
                 )
             yield from _walk_path(child, f"{relative}/", depth + 1, state, visit_file, visit_dir)
         else:
+            if not stat.S_ISREG(info.st_mode):
+                raise SnapshotError(
+                    "unsafe_file_type", f"pack entry is not a regular file: {relative!r}"
+                )
 
             def opener(
                 _path: Path = child, _info: os.stat_result = info, _rel: str = relative
