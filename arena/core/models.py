@@ -647,6 +647,16 @@ class CaseResult(BaseModel):
     patch_applied: bool = False
     patch_error: str | None = None
     touched_files: list[str] = Field(default_factory=list)
+    # Authoritative Git-patch evidence (Phase 1D). touched_files and patch_error now
+    # reflect the actual post-application Git tree; these record its identity. All are
+    # optional/defaulted so old saved runs load unchanged.
+    patch_sha256: str | None = None
+    patch_object_format: str | None = None
+    patch_baseline_tree: str | None = None
+    patch_result_tree: str | None = None
+    patch_added: list[str] = Field(default_factory=list)
+    patch_deleted: list[str] = Field(default_factory=list)
+    patch_mode_changes: list[str] = Field(default_factory=list)
     tests_ran: bool = False
     tests_passed: bool | None = None
     test_stdout_tail: str = ""
