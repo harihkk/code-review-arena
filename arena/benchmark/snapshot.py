@@ -65,6 +65,9 @@ _DIR_FD = (
     and os.scandir in getattr(os, "supports_fd", set())
     and os.open in os.supports_dir_fd
 )
+# chmod sets exact POSIX permission bits only on POSIX; on Windows it cannot, so the
+# exact intended-mode check is POSIX-only and modes are sealed as read-back values.
+_POSIX = os.name == "posix"
 
 
 @dataclass(frozen=True)
@@ -236,11 +239,15 @@ def _copy_one_file(
         raise SnapshotError(
             "file_changed_during_copy", f"pack file changed while copying: {relative!r}"
         )
-    mode = _mode_for(before, is_dir=False)
-    os.chmod(dst, mode)
-    _verify_destination(dst, size, digest.hexdigest(), mode, relative)
+    intended = _mode_for(before, is_dir=False)
+    os.chmod(dst, intended)
+    actual = dst.lstat().st_mode & 0o777
+    _verify_destination(dst, size, digest.hexdigest(), intended, relative)
+    # Seal the mode the filesystem actually stored: POSIX keeps the intended bits,
+    # while Windows ignores them (so this is the read-back value). The seal and the
+    # verify() rebuild both read this same value, so a later chmod is still detected.
     return SnapshotManifestEntry(
-        kind="file", path=relative, size=size, sha256=digest.hexdigest(), mode=mode
+        kind="file", path=relative, size=size, sha256=digest.hexdigest(), mode=actual
     )
 
 
@@ -252,9 +259,12 @@ def _safe_unlink(path: Path) -> None:
 
 
 def _verify_destination(dst: Path, size: int, sha: str, mode: int, relative: str) -> None:
-    """The copied file must be a regular file of the exact size, bytes and mode."""
+    """The copied file must be a regular file of the exact size, bytes and (POSIX) mode."""
     dinfo = dst.lstat()
-    if not stat.S_ISREG(dinfo.st_mode) or dinfo.st_size != size or (dinfo.st_mode & 0o777) != mode:
+    # The exact intended-mode check applies only where chmod sets POSIX bits exactly;
+    # on Windows chmod cannot, so the mode is verified via the full seal instead.
+    bad_mode = _POSIX and (dinfo.st_mode & 0o777) != mode
+    if not stat.S_ISREG(dinfo.st_mode) or dinfo.st_size != size or bad_mode:
         _safe_unlink(dst)
         raise SnapshotError(
             "destination_verification_failed", f"snapshot copy is wrong: {relative!r}"
@@ -484,7 +494,8 @@ def _copy_tree(
         target = dst_root / relative
         os.mkdir(target, 0o700)
         os.chmod(target, 0o755)
-        return SnapshotManifestEntry(kind="dir", path=relative, size=0, sha256="", mode=0o755)
+        actual = target.lstat().st_mode & 0o777
+        return SnapshotManifestEntry(kind="dir", path=relative, size=0, sha256="", mode=actual)
 
     def on_file(relative: str, opener: _Opener, info: os.stat_result) -> SnapshotManifestEntry:
         return _copy_one_file(relative, opener, info, dst_root / relative, state, inodes)
