@@ -456,10 +456,14 @@ gate remains outside the pipeline.
 Every Git subprocess runs with a private empty `HOME`/`XDG_CONFIG_HOME`, an empty
 `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` plus `GIT_CONFIG_NOSYSTEM=1` and `GIT_ATTR_NOSYSTEM=1`,
 an empty `core.hooksPath`, no pager/editor/credential prompts, `protocol.allow=never`,
-`commit.gpgsign=false`, `core.autocrlf=false`, a fixed `C` locale, a bounded timeout and
-output (the process group is killed on timeout on POSIX), and `GIT_CEILING_DIRECTORIES` so no
-repository above the workspace is discovered. Host `~/.gitconfig`, system config, aliases,
-filters, hooks, external-diff and signing are never consulted.
+`commit.gpgsign=false`, `core.autocrlf=false`, a fixed `C` locale, a range-checked caller
+timeout, and `GIT_CEILING_DIRECTORIES` so no repository above the workspace is discovered.
+Host `~/.gitconfig`, system config, aliases, filters, hooks, external-diff and signing are
+never consulted. stdout/stderr are consumed incrementally by reader threads that retain at
+most `GIT_OUTPUT_BYTES + 1` bytes per stream and kill the whole process group the moment a
+stream (or the combined output) exceeds the ceiling -- the output is bounded WHILE it is
+read, not after buffering -- distinguishing `git_timeout`, `git_output_too_large` and a
+normal nonzero exit; stdin is delivered without pipe deadlock.
 
 ### Workspace and metadata isolation
 
@@ -472,15 +476,20 @@ entirely; only a successful, source-only workspace is preserved for tests and va
 
 ### Atomic apply and authoritative result
 
-A baseline tree is built (`git add` from the exact copied bytes; transforms are caught by the
-later index/worktree equivalence check). The patch preflights with
-`git apply --check --index --whitespace=nowarn -` and, only on success, applies the identical
-bytes with `git apply --index --whitespace=nowarn -` -- atomically, with no `--reject` and no
-partial result. After application the status must be clean (no untracked, unmerged, or
-worktree/index divergence), the result tree id is recorded, and the authoritative changes are
-read with `git diff --raw -z --no-renames --full-index baseline result` (rename detection
-disabled, so a rename is an explicit delete + add and both endpoints are checked). Object IDs
-are not assumed to be 40 hex; the object format is recorded.
+A baseline tree is built with `git add`, then proven byte-exact: the complete baseline path
+set is validated first (rejecting dot-prefixed control files such as `.gitattributes` before
+Git could honor them), and every baseline index blob is required to equal the Git blob id of
+the exact worktree bytes computed with `git hash-object --no-filters` (and the object-id
+length must match the detected format). So an attribute/encoding/eol/`ident`/clean-filter
+conversion cannot slip a different tree past staging; `git status` is defense in depth, not
+byte-equivalence proof. The patch preflights with `git apply --check --index --whitespace=nowarn -`
+and, only on success, applies the identical bytes with `git apply --index --whitespace=nowarn -`
+-- atomically, with no `--reject` and no partial result. The result tree id is recorded and the
+authoritative changes are read with `git diff --raw -z --no-renames baseline result` (rename
+detection disabled, so a rename is an explicit delete + add and both endpoints are checked).
+`git ls-files -s -z` provides the full-length object ids; object IDs are not assumed to be 40
+hex and SHA-256 repositories are supported. The same no-filter byte-equivalence check is then
+run against every FINAL index blob, independent of `git status`.
 
 ### Path, mode, protection and equivalence policy
 
@@ -488,21 +497,29 @@ Every changed path and every path in the complete resulting index is UTF-8 decod
 and validated under `SafeRelativePath` (rejecting traversal, absolute/UNC/drive, backslashes,
 control chars, dot-prefixed, `.git`, Windows-reserved, trailing dot/space, over-length), with
 NFC / case-fold / case-folded-NFC collision rejection across the full index. Protected paths
-(test-collection control files, plus `.git`/`.gitmodules`/`.gitattributes`) are enforced on
-the actual added/modified/deleted/renamed paths. Only `100644`/`100755` modes are allowed;
-`120000` (symlink) and `160000` (gitlink) and unknown modes are rejected. The workspace is
-rescanned to reject symlinks, special files and hardlink aliases, and the workspace file set
-must equal the index file set (index/worktree equivalence). The handwritten parser remains
-only for non-authoritative diagnostics.
+(test-collection control files, plus `.git`/`.gitmodules`/`.gitattributes`) are matched
+portably -- normalized separators, NFC, `casefold()`, component-wise -- so case variants like
+`Conftest.py` or `Tests/test_x.py` are caught, on both the source and destination side of every
+change; the retained `is_protected_path()` diagnostic uses the same matcher. Only `100644`/
+`100755` modes are allowed; `120000` (symlink) and `160000` (gitlink) and unknown modes are
+rejected. Git metadata is then removed fail-closed (no `ignore_errors`) and its removal
+verified, and the workspace is securely rescanned -- directories included (rejecting symlinked
+directories, special entries, and any residual `.git` case-variant) and files (rejecting
+symlinks, special files, hardlink aliases) -- with the workspace file set required to equal the
+index file set. The handwritten parser remains only for non-authoritative diagnostics.
 
 ### Evidence and compatibility
 
 `PatchApplyResult` and `CaseResult` gain optional, defaulted authoritative-evidence fields
 (patch SHA-256, Git version, object format, baseline/result tree ids, added/deleted paths,
-mode changes); `touched_files` and `patch_error` now reflect the actual Git result. Old saved
-runs load unchanged, `RUN_SCHEMA_VERSION` is not bumped, and the private Git directory path is
-never persisted. The reference patch goes through the same policy as a candidate, with no
-special trust: a reference patch that fails or violates policy makes the case uncertifiable.
+mode changes); `touched_files` and `patch_error` now reflect the actual Git result. A separate
+bounded `git_diagnostic` carries a human-readable reason (with private workspace/HOME/metadata
+paths scrubbed and never any patch bytes or file contents); `patch_error` stays the stable
+machine reason. `PatchApplier` forwards its `timeout_seconds` to the pipeline (range-checked
+against centralized bounds), and `fixed_solution` uses the documented default. Old saved runs
+load with these fields `None`, `RUN_SCHEMA_VERSION` is not bumped, and the private Git directory
+path is never persisted. The reference patch goes through the same policy as a candidate, with
+no special trust: a reference patch that fails or violates policy makes the case uncertifiable.
 
 ### Honest scope
 

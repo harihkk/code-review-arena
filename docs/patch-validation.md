@@ -12,10 +12,15 @@ behavior observable.
 3. The shared Git-authoritative pipeline applies the patch atomically inside an isolated Git
    repository (preflight `git apply --check --index`, then apply; no `--reject`). What
    actually changed is read from the Git tree, not the patch text, and the changed paths and
-   modes are validated and protected-path checked there. A rejected, malformed, or
-   policy-violating patch is recorded as a failed application with a stable reason code, and
-   the candidate workspace never contains `.git` or the patch input. See
-   [trusted-evaluation-architecture.md](trusted-evaluation-architecture.md) "Phase 1D".
+   modes are validated and protected-path checked there (protected matching is portable and
+   case-insensitive). Baseline and final workspace bytes are proven byte-for-byte equal to the
+   Git index blobs with filters disabled (`git status` is defense in depth, not the
+   byte-equivalence proof), Git subprocess output is bounded while it is read, and Git metadata
+   is removed and its removal verified before the workspace is returned. A rejected, malformed,
+   or policy-violating patch is recorded as a failed application with a stable reason code plus
+   a separate bounded diagnostic, and the candidate workspace never contains `.git` or the
+   patch input. See [trusted-evaluation-architecture.md](trusted-evaluation-architecture.md)
+   "Phase 1D".
 4. Fixture-owned tests are copied into the same workspace only when required for execution.
 5. Enabled structural validators inspect the patched files and record evidence.
 6. The outcome contributes to `validated_case_rate` only when the case satisfies every
