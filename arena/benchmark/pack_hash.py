@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import tempfile
 from pathlib import Path
 
 from arena.core.bounded_io import read_bytes_bounded, read_text_bounded
@@ -57,26 +58,83 @@ def stored_checksum(benchmark_dir: Path) -> str | None:
     )
 
 
-def write_checksum(benchmark_dir: Path) -> str:
-    """Compute the checksum from a snapshot, then write the root artifact atomically.
+def _nonchecksum_manifest(snapshot: object) -> tuple:
+    """The full snapshot manifest minus the root pack.sha256 file entry.
 
-    The digest is computed from a sealed snapshot; before writing, the source is
-    re-checked so a digest representing stale source bytes is never written.
+    Two snapshots of a source that changed only in pack.sha256 produce identical
+    values, so this proves no other source entry moved across the write.
     """
-    # Lazy import: snapshot imports pack_hash, so importing it at module load would
-    # create a cycle.
+    return tuple(
+        (e.kind, e.path, e.size, e.sha256, e.mode)
+        for e in snapshot.manifest  # type: ignore[attr-defined]
+        if not (e.kind == "file" and e.path == PACK_CHECKSUM_FILENAME)
+    )
+
+
+def _atomic_write(target: Path, data: bytes) -> None:
+    """Exclusive-create temp + complete write + fsync + atomic replace of ``target``."""
+    fd, tmp = tempfile.mkstemp(prefix=".pack-sha256-", dir=str(target.parent))
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def write_checksum(benchmark_dir: Path) -> str:
+    """Write pack.sha256, verified through secure snapshots only (no live-tree read).
+
+    Snapshots the source to compute the intended public checksum, atomically writes
+    the root artifact, then re-snapshots and verifies that the public checksum and
+    stored checksum equal the intended value and that no non-checksum source entry
+    moved. On any mismatch it restores the prior artifact (or removes a newly created
+    one) and raises, so a known-stale checksum is never left behind.
+
+    No filesystem API can prevent the source from changing AFTER this returns; the
+    guarantee is that the artifact written here was verified against the source state
+    through the completion of this operation.
+    """
     from arena.benchmark.snapshot import snapshot_pack
     from arena.core.errors import SnapshotError
 
-    with snapshot_pack(benchmark_dir) as snapshot:
-        checksum = snapshot.checksum
-        if pack_checksum(benchmark_dir) != checksum:
-            raise SnapshotError(
-                "source_changed_before_checksum_write",
-                "pack source changed between snapshot and checksum write",
-            )
     target = benchmark_dir / PACK_CHECKSUM_FILENAME
-    tmp = benchmark_dir / f"{PACK_CHECKSUM_FILENAME}.tmp"
-    tmp.write_text(checksum + "\n", encoding="utf-8")
-    os.replace(tmp, target)
-    return checksum
+    with snapshot_pack(benchmark_dir) as snapshot:
+        intended = snapshot.checksum
+        before_nonchecksum = _nonchecksum_manifest(snapshot)
+
+    had_prior = target.is_file()
+    prior = (
+        read_bytes_bounded(target, CHECKSUM_FILE_BYTES, label=PACK_CHECKSUM_FILENAME)
+        if had_prior
+        else None
+    )
+
+    _atomic_write(target, f"{intended}\n".encode())
+    try:
+        with snapshot_pack(benchmark_dir) as after:
+            if (
+                after.checksum != intended
+                or (after.stored_checksum or "") != intended
+                or _nonchecksum_manifest(after) != before_nonchecksum
+            ):
+                raise SnapshotError(
+                    "source_changed_before_checksum_write",
+                    "pack source changed across the checksum write",
+                )
+    except SnapshotError:
+        if had_prior and prior is not None:
+            _atomic_write(target, prior)
+        else:
+            try:
+                os.unlink(target)
+            except OSError:
+                pass
+        raise
+    return intended

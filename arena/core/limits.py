@@ -48,6 +48,9 @@ SNAPSHOT_MAX_DIRS = 4096
 SNAPSHOT_MAX_TOTAL_BYTES = 256 * 1024 * 1024
 SNAPSHOT_MAX_DEPTH = 32
 SNAPSHOT_MANIFEST_ENTRIES = SNAPSHOT_MAX_FILES
+# Total directory entries (files + dirs) enumerated, enforced WHILE iterating each
+# directory so an enormous name list cannot be materialized before rejection.
+SNAPSHOT_MAX_ENTRIES = SNAPSHOT_MAX_FILES + SNAPSHOT_MAX_DIRS
 
 # --- Parsed-YAML structure caps (checked during parsing, after the byte cap) ---
 # Bound parser amplification that a byte cap alone misses (deep nesting, huge node

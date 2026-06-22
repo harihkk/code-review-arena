@@ -701,6 +701,10 @@ class RunMetadata(BaseModel):
     snapshot_total_bytes: int | None = None
     snapshot_manifest_version: int | None = None
     snapshot_integrity_verified: bool | None = None
+    # Full-seal digest over the complete snapshot manifest (every file AND directory,
+    # including the root pack.sha256, with modes) -- distinct from pack_checksum, which
+    # is the public content checksum. None on old runs.
+    snapshot_manifest_digest: str | None = None
     # Per-status case counts (exact/tolerant/repaired/invalid). Empty on old runs.
     reviewer_parse_status_counts: dict[str, int] = Field(default_factory=dict)
     # Fail-closed comparability signal: False when every case is exact or invalid

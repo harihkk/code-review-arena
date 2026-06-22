@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 
 import pytest
 
@@ -225,72 +226,263 @@ def test_excessive_depth_rejected(tmp_path, monkeypatch):
     assert _reason(e) == "path_too_deep"
 
 
-def test_file_changed_during_copy_detected(tmp_path, monkeypatch):
+class _FakeStat:
+    """A mutable copy of an os.stat_result for deterministic race injection."""
+
+    def __init__(self, st, *, mtime_bump=0):
+        self.st_mode = st.st_mode
+        self.st_dev = st.st_dev
+        self.st_ino = st.st_ino
+        self.st_size = st.st_size
+        self.st_mtime_ns = st.st_mtime_ns + mtime_bump
+        self.st_nlink = st.st_nlink
+
+
+def _fstat_bumping(predicate):
+    """Wrap os.fstat, bumping the mtime of the stat for which predicate(state) is true."""
+    real = os.fstat
+    counters = {"reg": 0, "dir": 0}
+
+    def fake(fd):
+        st = real(fd)
+        if stat.S_ISREG(st.st_mode):
+            counters["reg"] += 1
+        elif stat.S_ISDIR(st.st_mode):
+            counters["dir"] += 1
+        return _FakeStat(st, mtime_bump=1) if predicate(st, counters) else st
+
+    return fake
+
+
+def test_file_changed_before_read_detected(tmp_path, monkeypatch):
+    # The first regular-file fstat (identity-before-read) reports a changed mtime:
+    # the copy must fail before any byte of the replacement is accepted.
     pack = _pack(tmp_path)
-    real_fstat = os.fstat
-    state = {"n": 0}
-
-    class _Stat:
-        def __init__(self, st, bump):
-            self.st_mode = st.st_mode
-            self.st_dev = st.st_dev
-            self.st_ino = st.st_ino
-            self.st_size = st.st_size
-            self.st_mtime_ns = st.st_mtime_ns + bump
-
-    def fake_fstat(fd):
-        st = real_fstat(fd)
-        state["n"] += 1
-        # The "after" fstat (every even call) reports a later mtime -> change detected.
-        return _Stat(st, 1 if state["n"] % 2 == 0 else 0)
-
-    monkeypatch.setattr(snap_mod.os, "fstat", fake_fstat)
+    fake = _fstat_bumping(lambda st, c: stat.S_ISREG(st.st_mode) and c["reg"] == 1)
+    monkeypatch.setattr(snap_mod.os, "fstat", fake)
     with pytest.raises(SnapshotError) as e:
         with snapshot_pack(pack):
             pass
     assert _reason(e) == "file_changed_during_copy"
 
 
-def test_tree_addition_during_copy_detected(tmp_path, monkeypatch):
+def test_file_changed_during_copy_detected(tmp_path, monkeypatch):
+    # The second regular-file fstat (post-read) reports a changed mtime.
     pack = _pack(tmp_path)
-    real = snap_mod._copy_tree
+    fake = _fstat_bumping(lambda st, c: stat.S_ISREG(st.st_mode) and c["reg"] == 2)
+    monkeypatch.setattr(snap_mod.os, "fstat", fake)
+    with pytest.raises(SnapshotError) as e:
+        with snapshot_pack(pack):
+            pass
+    assert _reason(e) == "file_changed_during_copy"
 
-    def wrapper(src_dir, dst_dir, prefix, depth, state):
-        real(src_dir, dst_dir, prefix, depth, state)
-        if prefix == "":  # after the whole tree is copied, a file appears at the source
-            (pack / "sneaked_in.py").write_text("X = 1\n")
 
-    monkeypatch.setattr(snap_mod, "_copy_tree", wrapper)
+@pytest.mark.skipif(not snap_mod._DIR_FD, reason="descriptor-anchored traversal only")
+def test_root_changed_during_traversal_detected(tmp_path, monkeypatch):
+    # The opened root descriptor's identity no longer matches the discovered root.
+    pack = _pack(tmp_path)
+    fake = _fstat_bumping(lambda st, c: stat.S_ISDIR(st.st_mode) and c["dir"] == 1)
+    monkeypatch.setattr(snap_mod.os, "fstat", fake)
     with pytest.raises(SnapshotError) as e:
         with snapshot_pack(pack):
             pass
     assert _reason(e) == "tree_changed_during_copy"
 
 
-def test_tree_removal_during_copy_detected(tmp_path, monkeypatch):
+@pytest.mark.skipif(not snap_mod._DIR_FD, reason="descriptor-anchored traversal only")
+def test_directory_identity_changed_during_traversal_detected(tmp_path, monkeypatch):
+    # The first child directory opened relative to its parent fd has a changed identity.
     pack = _pack(tmp_path)
-    real = snap_mod._copy_tree
-    victim = pack / "manifest.yaml"
-
-    def wrapper(src_dir, dst_dir, prefix, depth, state):
-        real(src_dir, dst_dir, prefix, depth, state)
-        if prefix == "" and victim.exists():
-            victim.unlink()
-
-    monkeypatch.setattr(snap_mod, "_copy_tree", wrapper)
+    fake = _fstat_bumping(lambda st, c: stat.S_ISDIR(st.st_mode) and c["dir"] == 2)
+    monkeypatch.setattr(snap_mod.os, "fstat", fake)
     with pytest.raises(SnapshotError) as e:
         with snapshot_pack(pack):
             pass
     assert _reason(e) == "tree_changed_during_copy"
 
 
-def test_snapshot_mutation_after_sealing_detected(tmp_path):
+def _copy_tree_then(pack, mutate):
+    """Monkeypatch wrapper: run the real copy, then mutate the source tree."""
+    real = snap_mod._copy_tree
+
+    def wrapper(source, dst_root, root_info):
+        result = real(source, dst_root, root_info)
+        mutate(pack)
+        return result
+
+    return wrapper
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda pack: (pack / "sneaked_in.py").write_text("X = 1\n"),  # file added
+        lambda pack: (pack / "manifest.yaml").unlink(),  # file removed
+        lambda pack: (pack / "empty_added").mkdir(),  # empty dir added
+        lambda pack: __import__("shutil").rmtree(
+            pack / "money_discount_rounding_001"
+        ),  # dir removed
+    ],
+    ids=["file_added", "file_removed", "empty_dir_added", "dir_removed"],
+)
+def test_source_tree_change_during_copy_detected(tmp_path, monkeypatch, mutate):
+    pack = _pack(tmp_path)
+    monkeypatch.setattr(snap_mod, "_copy_tree", _copy_tree_then(pack, mutate))
+    with pytest.raises(SnapshotError) as e:
+        with snapshot_pack(pack):
+            pass
+    assert _reason(e) == "tree_changed_during_copy"
+
+
+def test_empty_directory_is_in_the_manifest_and_compared(tmp_path):
+    # An empty directory is part of the full seal: it appears in the manifest.
+    pack = _pack(tmp_path)
+    (pack / "empty_dir").mkdir()
+    with snapshot_pack(pack) as snap:
+        dirs = {e.path for e in snap.manifest if e.kind == "dir"}
+    assert "empty_dir" in dirs
+
+
+# -- write handling and destination verification -------------------------------
+
+
+def test_partial_writes_are_completed(tmp_path, monkeypatch):
+    # A short os.write (one byte at a time) must be looped to completion, not lost.
+    pack = _pack(tmp_path)
+    real_write = os.write
+
+    def one_byte(fd, data):
+        return real_write(fd, bytes(data[:1]))
+
+    monkeypatch.setattr(snap_mod.os, "write", one_byte)
+    with snapshot_pack(pack) as snap:
+        snap.verify()  # every file copied completely despite short writes
+
+
+def test_zero_progress_write_fails(tmp_path, monkeypatch):
+    pack = _pack(tmp_path)
+    monkeypatch.setattr(snap_mod.os, "write", lambda fd, data: 0)
+    with pytest.raises(SnapshotError) as e:
+        with snapshot_pack(pack):
+            pass
+    assert _reason(e) == "destination_write_failed"
+
+
+def test_destination_truncation_detected(tmp_path, monkeypatch):
+    pack = _pack(tmp_path)
+    real_write_all = snap_mod._write_all
+
+    def drop_last(fd, data):
+        real_write_all(fd, data[:-1] if len(data) > 1 else data)
+
+    monkeypatch.setattr(snap_mod, "_write_all", drop_last)
+    with pytest.raises(SnapshotError) as e:
+        with snapshot_pack(pack):
+            pass
+    assert _reason(e) == "destination_verification_failed"
+
+
+def test_destination_content_mismatch_detected(tmp_path, monkeypatch):
+    pack = _pack(tmp_path)
+    real_write_all = snap_mod._write_all
+
+    def corrupt(fd, data):
+        real_write_all(fd, bytes(b ^ 0x01 for b in data))
+
+    monkeypatch.setattr(snap_mod, "_write_all", corrupt)
+    with pytest.raises(SnapshotError) as e:
+        with snapshot_pack(pack):
+            pass
+    assert _reason(e) == "destination_verification_failed"
+
+
+def test_destination_mode_mismatch_detected(tmp_path, monkeypatch):
+    pack = _pack(tmp_path)
+    real_chmod = os.chmod
+
+    def wrong_mode(path, mode):
+        # Corrupt only file modes; directories keep 0o755 so traversal still works.
+        return real_chmod(path, mode if os.path.isdir(path) else 0o600)
+
+    monkeypatch.setattr(snap_mod.os, "chmod", wrong_mode)
+    with pytest.raises(SnapshotError) as e:
+        with snapshot_pack(pack):
+            pass
+    assert _reason(e) == "destination_verification_failed"
+
+
+# -- full snapshot seal verification -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        lambda root: (root / "injected.py").write_text("X = 1\n"),  # file added
+        lambda root: (root / "manifest.yaml").unlink(),  # file removed
+        lambda root: (root / "manifest.yaml").write_text("name: x\ncases: []\n"),  # file modified
+        lambda root: (root / "empty_added").mkdir(),  # empty dir added
+        lambda root: (root / "manifest.yaml").chmod(0o600),  # mode changed
+    ],
+    ids=["add_file", "remove_file", "modify_file", "add_empty_dir", "mode_change"],
+)
+def test_full_seal_detects_snapshot_tampering(tmp_path, tamper):
     pack = _pack(tmp_path)
     with pytest.raises(SnapshotError) as e:
         with snapshot_pack(pack) as snap:
-            (snap.root / "injected.py").write_text("X = 1\n")  # tamper after sealing
-            # context-exit verify() recomputes the checksum and rejects the drift
+            tamper(snap.root)
     assert _reason(e) == "snapshot_changed_after_sealing"
+
+
+def test_full_seal_detects_root_checksum_modification(tmp_path):
+    pack = _pack(tmp_path)
+    with pytest.raises(SnapshotError) as e:
+        with snapshot_pack(pack) as snap:
+            # The root pack.sha256 is excluded from the PUBLIC checksum but is part of
+            # the full seal, so modifying it must still be detected.
+            (snap.root / "pack.sha256").write_text("deadbeef\n")
+    assert _reason(e) == "snapshot_changed_after_sealing"
+
+
+# -- bounded enumeration -------------------------------------------------------
+
+
+def test_enumeration_stops_at_the_entry_bound(tmp_path, monkeypatch):
+    # A fake scandir that yields far more entries than the cap; traversal must stop
+    # at the bound rather than consuming the whole (here, counted) iterator.
+    pack = _pack(tmp_path)
+    monkeypatch.setattr(limits, "SNAPSHOT_MAX_ENTRIES", 5)
+    consumed = {"n": 0}
+
+    class _Entry:
+        def __init__(self, name):
+            self.name = name
+
+        def stat(self, follow_symlinks=True):
+            st = os.stat(__file__)
+            return _FakeStat(st)
+
+    class _It:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            consumed["n"] += 1
+            if consumed["n"] > 100000:
+                raise AssertionError("iterator consumed past the bound")
+            return _Entry(f"f{consumed['n']:06d}.py")
+
+    monkeypatch.setattr(snap_mod.os, "scandir", lambda arg: _It())
+    with pytest.raises(SnapshotError) as e:
+        with snapshot_pack(pack):
+            pass
+    assert _reason(e) == "entry_count_exceeded"
+    assert consumed["n"] <= limits.SNAPSHOT_MAX_ENTRIES + 1
 
 
 # --------------------------------------------------------------------------- #
@@ -360,3 +552,68 @@ def test_old_run_without_snapshot_metadata_loads():
     )
     assert run.metadata.snapshot_file_count is None
     assert run.metadata.snapshot_integrity_verified is None
+
+
+# --------------------------------------------------------------------------- #
+# Secure checksum writing (snapshot-verified, atomic, with rollback)          #
+# --------------------------------------------------------------------------- #
+
+
+def test_write_checksum_success_and_idempotent(tmp_path):
+    from arena.benchmark.pack_hash import stored_checksum, write_checksum
+
+    pack = _pack(tmp_path)
+    (pack / "pack.sha256").unlink()  # start with no stored checksum
+    written = write_checksum(pack)
+    assert stored_checksum(pack) == written
+    with snapshot_pack(pack) as snap:
+        assert snap.checksum == written
+    assert write_checksum(pack) == written  # idempotent
+
+
+def test_write_checksum_rolls_back_to_prior_on_source_change(tmp_path, monkeypatch):
+    import arena.benchmark.pack_hash as ph
+
+    pack = _pack(tmp_path)
+    prior = (pack / "pack.sha256").read_text()
+    real = ph._atomic_write
+
+    def mutate_after_write(target, data):
+        real(target, data)
+        (pack / "snuck_in.py").write_text("Y = 1\n")  # non-checksum source change
+
+    monkeypatch.setattr(ph, "_atomic_write", mutate_after_write)
+    with pytest.raises(SnapshotError) as e:
+        ph.write_checksum(pack)
+    assert _reason(e) == "source_changed_before_checksum_write"
+    assert (pack / "pack.sha256").read_text() == prior  # prior artifact restored
+
+
+def test_write_checksum_removes_new_artifact_on_source_change(tmp_path, monkeypatch):
+    import arena.benchmark.pack_hash as ph
+
+    pack = _pack(tmp_path)
+    (pack / "pack.sha256").unlink()  # no prior artifact
+    real = ph._atomic_write
+
+    def mutate_after_write(target, data):
+        real(target, data)
+        (pack / "snuck_in.py").write_text("Y = 1\n")
+
+    monkeypatch.setattr(ph, "_atomic_write", mutate_after_write)
+    with pytest.raises(SnapshotError) as e:
+        ph.write_checksum(pack)
+    assert _reason(e) == "source_changed_before_checksum_write"
+    assert not (pack / "pack.sha256").exists()  # newly created stale artifact removed
+
+
+def test_manifest_digest_is_deterministic_and_distinct_from_checksum():
+    from pathlib import Path
+
+    source = Path("benchmark_sets/audit_v2")
+    with snapshot_pack(source) as a:
+        digest_a, checksum_a = a.manifest_digest, a.checksum
+    with snapshot_pack(source) as b:
+        assert b.manifest_digest == digest_a  # deterministic
+        assert b.checksum == checksum_a
+    assert digest_a != checksum_a  # full seal is a distinct identity

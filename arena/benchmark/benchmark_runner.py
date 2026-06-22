@@ -14,7 +14,7 @@ from typing import Literal
 
 from arena import __version__
 from arena.benchmark.case_loader import build_context, load_manifest
-from arena.benchmark.snapshot import PackSnapshot, snapshot_pack
+from arena.benchmark.snapshot import SNAPSHOT_MANIFEST_VERSION, PackSnapshot, snapshot_pack
 from arena.core.config import (
     PROMPT_VERSION,
     database_path,
@@ -673,7 +673,8 @@ def _run_on_snapshot(
             pack_digest_externally_verified=expected_pack_sha256 is not None,
             snapshot_file_count=snapshot.file_count,
             snapshot_total_bytes=snapshot.total_bytes,
-            snapshot_manifest_version=1,
+            snapshot_manifest_version=SNAPSHOT_MANIFEST_VERSION,
+            snapshot_manifest_digest=snapshot.manifest_digest,
             snapshot_integrity_verified=True,
             reviewer_parse_status_counts=parse_status_counts,
             non_exact_output_used=non_exact_output_used,
@@ -760,6 +761,8 @@ def _write_run_manifest(
         "pack_digest_externally_verified": run.metadata.pack_digest_externally_verified,
         "snapshot_file_count": run.metadata.snapshot_file_count,
         "snapshot_total_bytes": run.metadata.snapshot_total_bytes,
+        "snapshot_manifest_version": run.metadata.snapshot_manifest_version,
+        "snapshot_manifest_digest": run.metadata.snapshot_manifest_digest,
         "snapshot_integrity_verified": run.metadata.snapshot_integrity_verified,
         "reviewer_parse_status_counts": run.metadata.reviewer_parse_status_counts,
         "non_exact_output_used": run.metadata.non_exact_output_used,
