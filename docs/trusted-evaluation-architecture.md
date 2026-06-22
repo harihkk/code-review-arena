@@ -1,4 +1,4 @@
-# Trusted Evaluation Architecture (v0.2; Phase 1A, 1B and 1C landed, 1D pending)
+# Trusted Evaluation Architecture (v0.2; Phase 1A-1D landed)
 
 This is the living design document for the v0.2 milestone. The goal is not "no bugs";
 it is enforceable invariants so that any unknown, incomplete, tampered, or untrusted
@@ -48,9 +48,10 @@ official rankings.
 - Pack boundary: Phase 1. Phase 1A (strict portable paths/ids), Phase 1B (strict
   bounded external schemas, pre-parse byte limits, bounded YAML/JSON structure, exact
   reviewer-output contract with development-only salvage, contextual reviewer-path
-  admission, comparability metadata) and Phase 1C (immutable pack snapshot: every
-  pack consumer reads a sealed, mutation-checked copy, not the mutable source) have
-  landed. Git-authoritative patch application is Phase 1D.
+  admission, comparability metadata), Phase 1C (immutable pack snapshot: every
+  pack consumer reads a sealed, mutation-checked copy, not the mutable source) and
+  Phase 1D (Git-authoritative patch application: the actual post-application Git tree,
+  not handwritten diff parsing, decides what changed) have landed.
 - Run validity: Phase 2.
 - Reviewer boundary: Phase 3.
 - Execution boundary: Phase 4.
@@ -67,9 +68,12 @@ official rankings.
   anchor is still a pinned, out-of-band expected digest (`--expected-pack-sha256`).
 - Docker "verified path" is documented but not exercised end to end in CI.
 - Per-bug repair attribution is suite-level (overstated for multi-bug cases).
-- Git-authoritative patch application (temp repo + `git apply --check`) remains Phase 1D.
-  Snapshot mutation detection bounds the source filesystem at copy time but cannot prove
+- Snapshot mutation detection bounds the source filesystem at copy time but cannot prove
   the absence of every concurrent-modification race; it fails closed when one is detected.
+- Git-authoritative patch application (Phase 1D) makes the post-application Git tree the
+  security and scoring authority, but it does NOT sandbox the reviewer process and does not
+  make a self-reported run official; run-validity, execution and attestation phases remain
+  pending.
 
 ---
 
@@ -106,15 +110,15 @@ checksum artifact, size/count bounded, validated) -> all loading / certification
 / scoring / execution read ONLY the snapshot -> snapshot cleaned at end`. We never hash one
 tree and execute another.
 
-### Patch enforcement (target)
+### Patch enforcement (landed in Phase 1D)
 
-Make the post-application git tree authoritative rather than the handwritten parser: init a
-temp git repo on the baseline, `git apply --check`, apply atomically (no partial `--reject`
-for scoring), read actual changed/added/renamed/deleted paths via NUL-delimited git output,
-validate each with `SafeRelativePath`, reject protected-file changes and unsafe modes on the
-resulting tree, rescan the workspace, and on any violation discard the whole workspace with
-a structured reason. The same pipeline applies to candidate, reference, alternate-valid, and
-known-wrong patches.
+The post-application git tree is authoritative, not the handwritten parser: a temp git repo
+is built on the baseline, `git apply --check --index` preflights, the identical bytes apply
+atomically (no partial `--reject`), and the actual changed/added/renamed/deleted paths are
+read via NUL-delimited git output, each validated with `SafeRelativePath`, with protected-file
+changes and unsafe modes rejected on the resulting tree, the workspace rescanned, and any
+violation discarding the whole workspace with a structured reason. The same pipeline applies
+to candidate, reference, alternate-valid, and known-wrong patches. See "Phase 1D" below.
 
 ### Files expected to change
 
@@ -199,8 +203,11 @@ location (e.g. `input.after_dir`, `ground_truth.bugs.0.files.0.path`,
   temp tree; every pack consumer reads only the snapshot. The pack checksum now covers every
   regular file except the root `pack.sha256`, so the earlier `unhashable_content` admission
   guard was removed.
-- 1D git-result patch pipeline (temp repo + git apply --check + NUL-delimited paths):
-  pending.
+- 1D git-result patch pipeline (temp repo + git apply --check + NUL-delimited paths): DONE.
+  One shared `arena/patching/git_pipeline.py` transaction applies every patch class inside an
+  isolated Git repo and reads the authoritative result from Git; `PatchApplier` and
+  `fixed_solution` are wrappers over it, and no `git apply`/`--reject`/handwritten security
+  gate remains outside it. See "Phase 1D" below.
 
 ---
 
@@ -421,4 +428,86 @@ the reviewer process, and an internally consistent snapshot does not make a self
 official (the external trust anchor remains a pinned out-of-band digest). The descriptor
 fallback cannot fully close the anchoring window on platforms without `dir_fd`, and no
 filesystem API can prevent a source change after a command returns; both fail closed on
-detection. Git-authoritative patch semantics remain Phase 1D.
+detection. Git-authoritative patch application landed in Phase 1D (below).
+
+---
+
+## Phase 1D: Git-authoritative patch application
+
+### The problem
+
+Patch security and scoring depended partly on handwritten parsing of reviewer diff text
+(`touched_files`/`referenced_paths` over `+++`/rename headers, plus string checks for unsafe
+paths and modes). A diff's headers are not the same as what Git actually changes (misleading
+content lines, omitted extended headers, forged rename headers, quoted paths), so the parser
+could disagree with reality. Application also used `git apply` (with `--reject`) directly in
+the workspace under host Git configuration.
+
+### One shared transaction
+
+`arena/patching/git_pipeline.py` applies every patch class -- candidate repairs, the
+canonical `reference.patch`, certification/determinism reference solutions, and any
+patch-based input -- through a single transaction, so a fix protects them all. `PatchApplier`
+and `fixed_solution` are thin wrappers; no `git apply`, `--reject`, or handwritten security
+gate remains outside the pipeline.
+
+### Isolated Git environment
+
+Every Git subprocess runs with a private empty `HOME`/`XDG_CONFIG_HOME`, an empty
+`GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` plus `GIT_CONFIG_NOSYSTEM=1` and `GIT_ATTR_NOSYSTEM=1`,
+an empty `core.hooksPath`, no pager/editor/credential prompts, `protocol.allow=never`,
+`commit.gpgsign=false`, `core.autocrlf=false`, a fixed `C` locale, a bounded timeout and
+output (the process group is killed on timeout on POSIX), and `GIT_CEILING_DIRECTORIES` so no
+repository above the workspace is discovered. Host `~/.gitconfig`, system config, aliases,
+filters, hooks, external-diff and signing are never consulted.
+
+### Workspace and metadata isolation
+
+Each transaction copies the accepted snapshot subtree into a fresh private workspace and
+rejects any `.git`, symlink or special entry before Git runs. Git metadata lives in a `.git`
+inside that workspace during the transaction and is removed before the workspace is returned,
+so candidate code and tests never see `.git`, the index, the patch input (fed via stdin, never
+written to the workspace) or Git object storage. A failed transaction deletes the workspace
+entirely; only a successful, source-only workspace is preserved for tests and validators.
+
+### Atomic apply and authoritative result
+
+A baseline tree is built (`git add` from the exact copied bytes; transforms are caught by the
+later index/worktree equivalence check). The patch preflights with
+`git apply --check --index --whitespace=nowarn -` and, only on success, applies the identical
+bytes with `git apply --index --whitespace=nowarn -` -- atomically, with no `--reject` and no
+partial result. After application the status must be clean (no untracked, unmerged, or
+worktree/index divergence), the result tree id is recorded, and the authoritative changes are
+read with `git diff --raw -z --no-renames --full-index baseline result` (rename detection
+disabled, so a rename is an explicit delete + add and both endpoints are checked). Object IDs
+are not assumed to be 40 hex; the object format is recorded.
+
+### Path, mode, protection and equivalence policy
+
+Every changed path and every path in the complete resulting index is UTF-8 decoded strictly
+and validated under `SafeRelativePath` (rejecting traversal, absolute/UNC/drive, backslashes,
+control chars, dot-prefixed, `.git`, Windows-reserved, trailing dot/space, over-length), with
+NFC / case-fold / case-folded-NFC collision rejection across the full index. Protected paths
+(test-collection control files, plus `.git`/`.gitmodules`/`.gitattributes`) are enforced on
+the actual added/modified/deleted/renamed paths. Only `100644`/`100755` modes are allowed;
+`120000` (symlink) and `160000` (gitlink) and unknown modes are rejected. The workspace is
+rescanned to reject symlinks, special files and hardlink aliases, and the workspace file set
+must equal the index file set (index/worktree equivalence). The handwritten parser remains
+only for non-authoritative diagnostics.
+
+### Evidence and compatibility
+
+`PatchApplyResult` and `CaseResult` gain optional, defaulted authoritative-evidence fields
+(patch SHA-256, Git version, object format, baseline/result tree ids, added/deleted paths,
+mode changes); `touched_files` and `patch_error` now reflect the actual Git result. Old saved
+runs load unchanged, `RUN_SCHEMA_VERSION` is not bumped, and the private Git directory path is
+never persisted. The reference patch goes through the same policy as a candidate, with no
+special trust: a reference patch that fails or violates policy makes the case uncertifiable.
+
+### Honest scope
+
+Git determines what actually changed; handwritten parsing is diagnostic only. An invalid or
+rejected patch remains a scored failure, not a crash. Phase 1D does NOT isolate the reviewer
+process and does not make a self-reported run official; later run-validity, execution and
+attestation phases remain pending. Patch application is POSIX-bounded like the rest of pack
+execution; the Git index is the portable mode authority.
