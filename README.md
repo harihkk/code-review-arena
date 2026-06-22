@@ -1,69 +1,17 @@
 # Code Review Arena
 
-Execution-backed benchmark for AI code-review agents.
+A local benchmark for automated code-review systems.
 
 [![CI](https://github.com/harihkk/code-review-arena/actions/workflows/ci.yml/badge.svg)](https://github.com/harihkk/code-review-arena/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 
-## About
+Code Review Arena checks two things:
 
-Code Review Arena measures whether an AI review agent can find a seeded bug in a pull
-request and actually fix it. It applies each suggested patch in an isolated workspace,
-runs the required tests and validators, and scores detection separately from validation,
-so a sharp-looking comment is never mistaken for a working repair. Everything runs
-locally and the harness is model-agnostic.
+- Did the reviewer find the seeded defect?
+- Did its proposed patch actually work?
 
-## How it works
-
-Each case is a seeded pull request with one or more known bugs, the files a fix should
-touch, and the checks a fix must pass. The reviewer payload is blind: case id, stack,
-the diff, and a bounded set of relevant files, with no title, description, category,
-severity, or any ground truth, and no pre-patch test or static-analysis output (whose
-failing assertions would disclose the expected values). `--reveal-metadata` and
-`--reveal-test-output` exist only for debugging or an openly test-assisted run, which is
-recorded as such in the run metadata. The reviewer returns its findings and an optional
-patch, and the harness takes it from there:
-
-```
-diff + files  ->  reviewer  ->  patch  ->  apply in workspace  ->  tests  ->  validators  ->  score
-```
-
-Every full run produces two headline numbers (the report also breaks repair down
-into review-accuracy, repair-success, and trustworthiness dimensions):
-
-| Metric | What it measures |
-|---|---|
-| `detection_f_beta` | The reviewer found the seeded bugs (file granularity; line precision is reported separately as `localization_rate`) |
-| `validated_case_rate` | Its patch applied, passed the required tests, and satisfied the validators (the primary full-mode metric) |
-
-The gap between them is the whole point. On `audit_v1` the `control:keyword_gamer`
-control detects all ten bugs (`detection_f_beta=1.000`) yet validates none of its
-patches (`validated_case_rate=0.000`), while `reference-patch` validates all ten.
-`arena audit-report` and the dashboard show that gap per reviewer.
-
-Signals are labeled by their strength: test execution and patch application are
-execution-backed evidence; structural validators and concept matching are deterministic
-heuristics (comment-stripped lexical and AST checks, not semantic understanding) and are
-documented as such.
-
-## Integrity and security model
-
-The harness assumes reviewers and benchmark packs may be adversarial:
-
-- Patches cannot touch the case's tests, any `conftest.py`/pytest config, or per-case
-  `protected_paths`; absolute or `..` diff paths are rejected before `git apply` runs.
-- Fixture test commands run with an allowlisted environment (no inherited shell
-  secrets; `ARENA_PASSTHROUGH_ENV` forwards named variables explicitly) and POSIX
-  resource limits (CPU, file size, open files, processes).
-- `arena pack-hash --write` pins a pack's content checksum; runs record it and warn on
-  mismatch. `arena lint-cases` flags ground-truth vocabulary leaking into the diff,
-  comments, or test names.
-- Every run writes `run_manifest.json` (harness version, git SHA, pack checksum,
-  sanitized reviewer config, budgets, timings) so published numbers are auditable.
-- The API server executes runs as bounded background jobs; local execution over HTTP
-  requires a server-side opt-in, and `ARENA_API_TOKEN` adds token auth. It is not
-  hardened for public exposure.
+The harness applies patches in disposable workspaces, runs the required tests and validators, and reports detection separately from validated repair.
 
 ## Quickstart
 
@@ -75,44 +23,59 @@ source .venv/bin/activate
 python -m pip install -e ".[dev]"
 
 arena validate benchmark_sets/audit_v1
-arena run benchmark_sets/audit_v1 --reviewer reference-patch --mode full --allow-local-execution
-arena leaderboard runs/ --metric validated_case_rate --beta 1.0 --include-unverified
+arena run benchmark_sets/audit_v1 \
+  --reviewer reference-patch \
+  --mode full \
+  --allow-local-execution
+
+arena leaderboard runs/ \
+  --metric validated_case_rate \
+  --include-unverified
 ```
 
-Two patch-backed packs ship today: `benchmark_sets/audit_v1` (domain-shaped review
-failures) and `benchmark_sets/audit_v2` (a second batch of certified logic-defect cases).
-Swap either path into the commands above.
+`--allow-local-execution` runs fixture-owned commands on the host. Use it only with packs you trust. These runs are marked as trusted-local and are excluded from the default leaderboard.
 
-`--allow-local-execution` opts into the fixture-owned test commands that run in copied
-workspaces. Use it only with fixtures you trust. Runs that execute this way are marked
-trusted-local and are excluded from the leaderboard unless you pass `--include-unverified`.
+## How it works
 
-### Docker backend (the verified path)
+Each case contains a seeded defect, the files visible to the reviewer, and the checks a repair must pass.
 
-Docker is the standard, isolation-backed way to run case tests. Build the sandbox image
-once (it holds only Python and the packs' pinned test dependencies, no arena source):
-
-```bash
-bash scripts/build_bench_image.sh        # builds the arena-bench:1 image
+```text
+diff + files -> reviewer -> proposed patch -> tests and validators -> score
 ```
 
-Point a pack at it with `default_docker_image: arena-bench:1` in its `manifest.yaml`, or
-set `docker_image` on a case. The executor never pulls a missing image (the name comes
-from the pack), so the image must be built first; otherwise execution-backed runs cleanly
-skip and report `invalid`. Docker-backed runs are leaderboard-eligible without
-`--include-unverified`.
+Reviewer input is blind by default. It does not include ground truth, severity, category, or failing test output unless a development flag explicitly enables that data.
 
-## Benchmark your own model
+Exact JSON is the default reviewer contract. Deterministic salvage is available for development, but salvaged runs are excluded from the default leaderboard.
 
-The built-in reviewers are the deterministic controls and `reference-patch`. To score a
-real model, wrap it in any local command that reads the case JSON and prints review JSON,
-then point `custom-command` at it. The payload is blind (no ground truth and no
-descriptive metadata), so a reviewer cannot pass on metadata alone.
+## Main metrics
+
+| Metric | Meaning |
+|---|---|
+| `detection_f_beta` | How well the reviewer found the seeded defects |
+| `validated_case_rate` | How often the proposed repair applied and passed the required checks |
+| `patch_apply_rate` | How often required patches applied cleanly |
+| `test_pass_rate` | How often required tests passed |
+| `false_positives_per_case` | Unsupported findings per case |
+
+The gap between detection and validated repair is intentional. A reviewer can describe the right problem and still submit a broken patch.
+
+## Included packs
+
+| Pack | Cases | Purpose |
+|---|---:|---|
+| `benchmark_sets/v1` | 10 | Baseline scoring cases |
+| `benchmark_sets/audit_v1` | 10 | Patch-required review failures |
+| `benchmark_sets/audit_v2` | 10 | Certified logic-defect cases |
+
+## Run your own reviewer
+
+A custom reviewer is any local command that reads the case payload and prints review JSON.
 
 ```bash
-arena schema                       # the JSON contract your wrapper must emit
+arena schema
+
 arena verify-reviewer benchmark_sets/audit_v1 \
-  --command "python scripts/fake_reviewer.py --case {case_json}"   # one-case dry run
+  --command "python scripts/fake_reviewer.py --case {case_json}"
 
 arena run benchmark_sets/audit_v1 \
   --reviewer custom-command \
@@ -121,101 +84,58 @@ arena run benchmark_sets/audit_v1 \
   --allow-local-execution
 ```
 
-`scripts/fake_reviewer.py` is a working example to copy. The placeholders `{case_json}`,
-`{diff_file}`, `{case_id}`, and `{workspace}` are expanded per case. `--max-wall-seconds`
-and `--max-cost` cap a run; `--enable-repair` opts into a deterministic salvage of
-almost-valid JSON (logged on the response).
+`scripts/fake_reviewer.py` is a small working example. Supported placeholders include `{case_json}`, `{diff_file}`, `{case_id}`, and `{workspace}`.
+
+## Docker execution
+
+Docker is the standard execution path for comparable full-mode runs.
+
+```bash
+bash scripts/build_bench_image.sh
+```
+
+Set `default_docker_image: arena-bench:1` in a pack manifest, or set `docker_image` on an individual case. The executor does not pull missing images automatically.
 
 ## Reports and dashboard
 
 ```bash
-arena audit-report runs/ --output docs/reports/audit-v1-results.md   # build the report from saved runs
+arena audit-report runs/ --output docs/reports/audit-v1-results.md
+arena serve
 
-arena serve            # local API
 cd dashboard
 npm install
-npm run dev            # dashboard at http://localhost:3000
+npm run dev
 ```
 
-Main dashboard routes are `/leaderboard`, `/reports/audit-v1`, `/reports/audit-v2`, `/cases`,
-`/methodology`, and `/docs`. For a full walk-through from a fresh clone, see
-[docs/DEMO.md](docs/DEMO.md).
+See [docs/DEMO.md](docs/DEMO.md) for a fresh-clone walkthrough.
 
-## Reference
+## Integrity model
 
-Benchmark packs:
+The harness treats reviewer output and benchmark packs as untrusted input.
 
-| Pack | Cases | Purpose | Validation |
-|---|---:|---|---|
-| `benchmark_sets/v1` | 10 | Baseline harness cases | review scoring + validation |
-| `benchmark_sets/audit_v1` | 10 | Patch-required audit cases | patch apply + tests + validators |
-| `benchmark_sets/audit_v2` | 10 | Certified logic-defect cases | patch apply + tests + validators |
+- Pack paths, schemas, and raw input sizes are validated before use.
+- Unsafe patch paths and protected-file changes are rejected.
+- Docker runs use bounded resources and no network access.
+- Every run records its pack checksum, configuration, timings, and execution metadata.
+- Only complete Docker-backed runs with an externally verified pack digest are included in the default leaderboard.
 
-Metrics:
-
-| Metric | Meaning |
-|---|---|
-| `validated_case_rate` | Primary full-mode score: validated cases over eligible cases |
-| `detection_f_beta` | Found and localized seeded bugs |
-| `patch_apply_rate` | Required patches that applied cleanly |
-| `test_pass_rate` | Required regression-test runs that passed |
-| `structural_pass_rate` | Required structural validator checks that passed |
-| `false_positives_per_case` | Unsupported findings per evaluated case |
-
-Control reviewers (deterministic harness checks, not external model results):
-
-| Reviewer | Role |
-|---|---|
-| `reference-patch` | Loads committed known-good `reference.patch` artifacts |
-| `control:perfect_patch` | Harness success control |
-| `control:keyword_gamer` | Detection-only adversarial control |
-| `control:bad_patch` | Detects bugs but supplies failing fixes |
-| `control:detects_no_patch` | Detects bugs without a patch |
-| `control:malformed_patch` | Supplies invalid patch output |
-| `custom-command` | Runs your local reviewer command over structured input and output |
-
-`mock:<mode>` remains a deprecated alias for `control:<mode>` for one release.
-
-Audit Pack v1 cases:
-
-| Category | Seeded bug |
-|---|---|
-| Security | FastAPI tenant admin bypass |
-| Security | SQL ownership leak |
-| Security | JWT audience and issuer validation |
-| Distributed systems | Kafka duplicate event |
-| Distributed systems | Out-of-order event |
-| RAG safety | Fabricated citation |
-| RAG safety | Prompt injection policy override |
-| Concurrency | Async race |
-| Reliability | Idempotency tenant scope |
-| API correctness | Pagination cursor bug |
+See [SECURITY.md](SECURITY.md) for the security model and reporting instructions.
 
 ## Development
 
 ```bash
-make check                      # full gate: lint, typecheck, tests, pack validation, contamination
-cd dashboard && npm run build   # dashboard build gate
+make check
+cd dashboard && npm run build
 ```
-
-See [docs/](docs/README.md) for architecture, metrics, the reviewer interface, case
-authoring, and the audit report.
 
 ## Limitations
 
-- The packs are curated and small (30 cases across `v1`, `audit_v1`, and `audit_v2`).
-- Concept matching is lexical (curated keywords), not semantic; well-paraphrased
-  findings can be under-credited. Execution metrics do not have this problem.
-- Structural validators are comment-stripped heuristics: hand-authored, may reject
-  alternate valid repairs, and string literals are not stripped. Tests are the gate.
-- Passing tests is execution evidence, not proof of complete correctness.
-- This is a local audit harness, not a large-scale public ranking.
+- The included packs are curated and small.
+- Concept matching and structural validators are deterministic heuristics.
+- Passing tests is evidence under the tested conditions, not proof of complete correctness.
+- This is a local evaluation harness, not a public ranking service.
 
-## Contributing and security
-
-[CONTRIBUTING.md](CONTRIBUTING.md) covers the local setup, the `make check` gate,
-and how to author a benchmark case correctly. To report a vulnerability, see
-[SECURITY.md](SECURITY.md).
+More detail is available in [docs/](docs/README.md).
 
 ## License
 
