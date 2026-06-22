@@ -5,7 +5,7 @@ import { AppShell } from "../components/AppShell";
 
 export const metadata: Metadata = {
   title: "Code Review Arena",
-  description: "Execution-backed benchmark for AI code-review agents.",
+  description: "Local benchmark for automated code-review systems.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
