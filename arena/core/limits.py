@@ -121,8 +121,10 @@ STATIC_ANALYSIS_OUTPUT_BYTES = 512 * 1024
 # --- Git-authoritative patch application (Phase 1D) ---
 # A single git plumbing invocation is short-lived and childless; these bound its
 # wall time and output. The changed-file cap mirrors the snapshot file cap.
-GIT_TIMEOUT_SECONDS = 60
-GIT_OUTPUT_BYTES = 4 * 1024 * 1024
+GIT_TIMEOUT_SECONDS = 60  # default per-invocation wall-clock budget
+GIT_TIMEOUT_SECONDS_MIN = 1
+GIT_TIMEOUT_SECONDS_MAX = 3600
+GIT_OUTPUT_BYTES = 4 * 1024 * 1024  # per-stream cap, enforced WHILE reading
 GIT_MAX_CHANGED_FILES = SNAPSHOT_MAX_FILES
 
 # --- Reviewer output ---

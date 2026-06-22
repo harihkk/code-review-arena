@@ -12,13 +12,13 @@ One shared transaction is used for every patch class (candidate repairs, the
 canonical reference.patch, certification/determinism reference solutions, and any
 patch-based mutation input), so a fix here protects them all.
 
-Isolation: each transaction runs in a fresh private workspace copied from the
-accepted Phase 1C snapshot subtree. Git metadata lives in a `.git` inside that
-private workspace during the transaction and is removed before the workspace is
-returned, so candidate code and tests never see `.git`, the index, the patch
-input, or Git object storage. Every Git subprocess runs with a private empty
-HOME, no system/global config, an empty hooks directory, no pager/editor/prompt,
-no credential helpers, a fixed C locale, and a bounded timeout and output.
+Byte-exactness is proven, not assumed: every baseline index blob is required to
+equal the exact worktree bytes (raw, filters disabled) and so is every final index
+blob, so an attribute/encoding/eol/ident/clean-filter conversion cannot slip a
+different tree past `git status`. Git subprocess output is bounded WHILE it is read
+(the process group is killed at the ceiling), not after buffering. Protected-path
+matching is portable and case-insensitive. Git metadata is removed fail-closed and
+its removal verified before the workspace is returned.
 
 Scope: Git determines what actually changed; handwritten parsing is diagnostic
 only. This does NOT isolate the reviewer process and does not make a self-reported
@@ -29,27 +29,34 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shutil
 import stat
 import subprocess
 import tempfile
+import threading
 import time
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from arena.core import limits
 from arena.security.paths import _relative_path_error  # portable relative-path policy
 
 GIT = "git"
-# Diagnostics are bounded so unbounded Git output never lands in errors/evidence.
 _DIAG_LEN = 2048
+_READ_CHUNK = 65536
 
 # Regular-file modes Arena accepts in a result tree. 120000 is a symlink, 160000 a
 # gitlink/submodule; both are rejected, as is any other/unknown mode.
 _ALLOWED_MODES = frozenset({"100644", "100755"})
 _SYMLINK_MODE = "120000"
 _GITLINK_MODE = "160000"
+# Form-level validity for Git machine output (policy is applied separately).
+_OCTAL_MODE = re.compile(r"\A[0-7]{6}\Z")
+_KNOWN_MODES = frozenset({"000000", "100644", "100755", "120000", "160000"})
+_RAW_STATUS = frozenset({"A", "M", "D", "T", "R", "C"})
 
 # Files that influence test collection or execution regardless of location; a patch
 # may never create, modify, rename into/out of, or delete them. Git metadata control
@@ -98,6 +105,7 @@ class GitPatchResult:
 
     applied: bool
     reason: str | None = None
+    diagnostic: str | None = None
     patch_sha256: str | None = None
     git_version: str | None = None
     object_format: str | None = None
@@ -111,13 +119,12 @@ class GitPatchResult:
     mode_changes: tuple[str, ...] = ()
     protected_violations: tuple[str, ...] = ()
     unsafe_paths: tuple[str, ...] = ()
-    diagnostic: str | None = None
     duration_ms: int = 0
     workspace: Path | None = None
 
 
 # --------------------------------------------------------------------------- #
-# Isolated Git invocation                                                     #
+# Isolated, bounded Git invocation                                            #
 # --------------------------------------------------------------------------- #
 
 
@@ -148,30 +155,23 @@ def _git_env(home: Path, empty_config: Path, ceiling: Path) -> dict[str, str]:
 
 def _git_config(hooks_dir: Path) -> list[str]:
     """Deterministic repository config passed as ``-c`` flags (highest precedence)."""
-    return [
-        "-c",
+    pairs = [
         f"core.hooksPath={hooks_dir}",
-        "-c",
         "core.pager=",
-        "-c",
         "core.autocrlf=false",
-        "-c",
         "core.safecrlf=false",
-        "-c",
         "core.fsmonitor=false",
-        "-c",
         "core.attributesfile=",
-        "-c",
         "commit.gpgsign=false",
-        "-c",
         "gc.auto=0",
-        "-c",
         "protocol.allow=never",
-        "-c",
         "core.editor=true",
-        "-c",
         "advice.detachedHead=false",
     ]
+    flags: list[str] = []
+    for pair in pairs:
+        flags.extend(["-c", pair])
+    return flags
 
 
 @dataclass
@@ -179,10 +179,19 @@ class _GitContext:
     cwd: Path
     env: dict[str, str]
     config: list[str]
+    timeout: float
+    scrub: tuple[str, ...] = ()  # private absolute paths to strip from diagnostics
 
 
 def _run_git(ctx: _GitContext, args: list[str], *, stdin: bytes = b"") -> tuple[int, bytes, bytes]:
-    """Run one bounded, isolated Git command; return (returncode, stdout, stderr)."""
+    """Run one isolated Git command with output bounded WHILE it is read.
+
+    stdout/stderr are consumed by reader threads that retain at most
+    ``GIT_OUTPUT_BYTES + 1`` bytes each; when either stream exceeds the ceiling the
+    whole process group is terminated immediately rather than after buffering. A
+    writer thread delivers the exact stdin bytes (no pipe deadlock). Distinguishes
+    git_timeout, git_output_too_large and a normal nonzero exit.
+    """
     command = [GIT, *ctx.config, *args]
     popen_kwargs: dict[str, object] = {
         "cwd": str(ctx.cwd),
@@ -190,6 +199,7 @@ def _run_git(ctx: _GitContext, args: list[str], *, stdin: bytes = b"") -> tuple[
         "stdin": subprocess.PIPE,
         "stdout": subprocess.PIPE,
         "stderr": subprocess.PIPE,
+        "bufsize": 0,
     }
     if os.name == "posix":
         popen_kwargs["start_new_session"] = True
@@ -197,12 +207,66 @@ def _run_git(ctx: _GitContext, args: list[str], *, stdin: bytes = b"") -> tuple[
         process = subprocess.Popen(command, **popen_kwargs)  # type: ignore[call-overload]
     except FileNotFoundError as exc:
         raise _GitRunError("git_unavailable", "git executable not found") from exc
+
+    cap = limits.GIT_OUTPUT_BYTES
+    buffers: dict[int, bytearray] = {1: bytearray(), 2: bytearray()}
+    overflow = threading.Event()
+    lock = threading.Lock()
+
+    def reader(stream: Any, key: int) -> None:
+        try:
+            while True:
+                chunk = stream.read(_READ_CHUNK)
+                if not chunk:
+                    return
+                with lock:
+                    buffers[key].extend(chunk)
+                    too_big = len(buffers[key]) > cap or len(buffers[1]) + len(buffers[2]) > cap
+                if too_big:
+                    overflow.set()
+                    _terminate(process)  # kill the group; stop accepting output now
+                    return
+        except (OSError, ValueError):
+            return
+        finally:
+            try:
+                stream.close()
+            except OSError:
+                pass
+
+    def writer() -> None:
+        try:
+            if stdin:
+                process.stdin.write(stdin)
+        except (OSError, ValueError):
+            pass
+        finally:
+            try:
+                process.stdin.close()
+            except OSError:
+                pass
+
+    threads = [
+        threading.Thread(target=reader, args=(process.stdout, 1), daemon=True),
+        threading.Thread(target=reader, args=(process.stderr, 2), daemon=True),
+        threading.Thread(target=writer, daemon=True),
+    ]
+    for thread in threads:
+        thread.start()
     try:
-        out, err = process.communicate(input=stdin, timeout=limits.GIT_TIMEOUT_SECONDS)
+        process.wait(timeout=ctx.timeout)
     except subprocess.TimeoutExpired as exc:
         _terminate(process)
+        for thread in threads:
+            thread.join(2)
         raise _GitRunError("git_timeout", "git command timed out") from exc
-    if len(out) > limits.GIT_OUTPUT_BYTES or len(err) > limits.GIT_OUTPUT_BYTES:
+    for thread in threads:
+        thread.join(5)
+    if overflow.is_set():
+        raise _GitRunError("git_output_too_large", "git produced too much output")
+    with lock:
+        out, err = bytes(buffers[1]), bytes(buffers[2])
+    if len(out) > cap or len(err) > cap:
         raise _GitRunError("git_output_too_large", "git produced too much output")
     return process.returncode, out, err
 
@@ -215,16 +279,12 @@ def _terminate(process: subprocess.Popen) -> None:
             process.kill()
     except (ProcessLookupError, OSError):
         pass
-    try:
-        process.communicate(timeout=5)
-    except (subprocess.TimeoutExpired, ValueError):
-        pass
 
 
 def _git_checked(ctx: _GitContext, args: list[str], reason: str, *, stdin: bytes = b"") -> bytes:
     rc, out, err = _run_git(ctx, args, stdin=stdin)
     if rc != 0:
-        raise _GitRunError(reason, _text(err) or _text(out))
+        raise _GitRunError(reason, _scrub(ctx, _text(err) or _text(out)))
     return out
 
 
@@ -232,8 +292,17 @@ def _text(data: bytes) -> str:
     return data.decode("utf-8", errors="replace").strip()
 
 
+def _scrub(ctx: _GitContext, text: str) -> str:
+    """Strip private absolute paths (workspace, HOME, Git metadata) from diagnostics."""
+    cleaned = text
+    for secret in ctx.scrub:
+        if secret:
+            cleaned = cleaned.replace(secret, "<private>")
+    return cleaned[:_DIAG_LEN]
+
+
 # --------------------------------------------------------------------------- #
-# Workspace preparation                                                       #
+# Workspace preparation and baseline path validation                         #
 # --------------------------------------------------------------------------- #
 
 
@@ -245,12 +314,11 @@ def _prepare_workspace(source_dir: Path, destination: Path) -> None:
     if destination.exists():
         shutil.rmtree(destination, ignore_errors=True)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    # The source is a vetted Phase 1C snapshot subtree; copy without following links.
     shutil.copytree(source_dir, destination, symlinks=True)
     for current, dirnames, filenames in os.walk(destination):
         rel_root = Path(current)
         for name in [*dirnames, *filenames]:
-            if name == ".git":
+            if name.casefold() == ".git":
                 raise _GitRunError("baseline_index_failed", "source contains a .git entry")
             info = (rel_root / name).lstat()
             if stat.S_ISLNK(info.st_mode):
@@ -259,24 +327,56 @@ def _prepare_workspace(source_dir: Path, destination: Path) -> None:
                 raise _GitRunError("baseline_index_failed", "source contains a special file")
 
 
+def _validate_baseline_paths(destination: Path) -> None:
+    """Reject any unsafe baseline path (incl. dot-prefixed control files) before Git add.
+
+    Validating the complete baseline path set first means a ``.gitattributes`` or other
+    repository-control file is rejected before it could influence Git.
+    """
+    for current, _dirnames, filenames in os.walk(destination):
+        for name in filenames:
+            relative = (Path(current) / name).relative_to(destination).as_posix()
+            if _relative_path_error(relative) is not None:
+                raise _GitRunError("baseline_index_failed", "baseline contains an unsafe path")
+
+
 # --------------------------------------------------------------------------- #
-# Authoritative parsing                                                       #
+# Strict parsing of Git machine output                                        #
 # --------------------------------------------------------------------------- #
+
+
+def _sha_len(object_format: str) -> int:
+    return 64 if object_format == "sha256" else 40
+
+
+def _is_hex_sha(value: str, length: int) -> bool:
+    return len(value) == length and all(c in "0123456789abcdef" for c in value)
 
 
 def _decode_path(raw: bytes) -> str:
     try:
-        return raw.decode("utf-8")
+        path = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise _GitRunError("unsafe_result_path", "git reported an undecodable path") from exc
+    if not path:
+        raise _GitRunError("git_output_invalid", "git reported an empty path")
+    return path
 
 
-def _parse_raw_z(data: bytes) -> list[GitChange]:
-    """Parse ``git diff --raw -z`` records (rename detection disabled upstream)."""
+def _split_z(data: bytes) -> list[bytes]:
+    if data and not data.endswith(b"\0"):
+        raise _GitRunError("git_output_invalid", "git output is not NUL-terminated")
     parts = data.split(b"\0")
     if parts and parts[-1] == b"":
         parts.pop()
+    return parts
+
+
+def _parse_raw_z(data: bytes, object_format: str = "sha1") -> list[GitChange]:
+    """Parse ``git diff --raw -z`` records strictly (rename detection disabled upstream)."""
+    parts = _split_z(data)
     changes: list[GitChange] = []
+    seen_new: set[str] = set()
     index = 0
     while index < len(parts):
         meta = parts[index]
@@ -289,7 +389,17 @@ def _parse_raw_z(data: bytes) -> list[GitChange]:
         if len(fields) != 5:
             raise _GitRunError("git_output_invalid", "malformed raw-diff metadata")
         old_mode, new_mode, old_sha, new_sha, status = fields
+        if not (_OCTAL_MODE.match(old_mode) and _OCTAL_MODE.match(new_mode)):
+            raise _GitRunError("git_output_invalid", "malformed mode in raw diff")
+        # `git diff --raw` abbreviates object ids (and --full-index does not expand them
+        # in raw mode), so validate they are hex but not a fixed length; the authoritative
+        # full-length object ids come from `git ls-files -s` (checked there).
+        for sha in (old_sha, new_sha):
+            if not sha or any(c not in "0123456789abcdef" for c in sha):
+                raise _GitRunError("git_output_invalid", "malformed object id in raw diff")
         letter = status[:1]
+        if letter not in _RAW_STATUS:
+            raise _GitRunError("git_output_invalid", f"unknown raw-diff status {status!r}")
         if letter in {"R", "C"}:
             if index + 2 >= len(parts):
                 raise _GitRunError("git_output_invalid", "truncated rename record")
@@ -306,20 +416,23 @@ def _parse_raw_z(data: bytes) -> list[GitChange]:
         else:
             if index + 1 >= len(parts):
                 raise _GitRunError("git_output_invalid", "truncated raw-diff record")
-            path = _decode_path(parts[index + 1])
-            change = GitChange(letter, old_mode, new_mode, old_sha, new_sha, None, path)
+            change = GitChange(
+                letter, old_mode, new_mode, old_sha, new_sha, None, _decode_path(parts[index + 1])
+            )
             index += 2
+        if change.new_path in seen_new:
+            raise _GitRunError("git_output_invalid", "duplicate change record")
+        seen_new.add(change.new_path)
         changes.append(change)
     return changes
 
 
-def _parse_ls_files_z(data: bytes) -> list[tuple[str, str, str]]:
-    """Parse ``git ls-files -s -z`` into (mode, sha, path); reject unmerged stages."""
-    parts = data.split(b"\0")
-    if parts and parts[-1] == b"":
-        parts.pop()
+def _parse_ls_files_z(data: bytes, object_format: str = "sha1") -> list[tuple[str, str, str]]:
+    """Parse ``git ls-files -s -z`` into (mode, sha, path); reject unmerged/duplicate."""
+    sha_len = _sha_len(object_format)
     entries: list[tuple[str, str, str]] = []
-    for record in parts:
+    seen: set[str] = set()
+    for record in _split_z(data):
         try:
             meta, raw_path = record.split(b"\t", 1)
         except ValueError as exc:
@@ -328,30 +441,44 @@ def _parse_ls_files_z(data: bytes) -> list[tuple[str, str, str]]:
             mode, sha, stage = meta.decode("ascii").split()
         except (UnicodeDecodeError, ValueError) as exc:
             raise _GitRunError("git_output_invalid", "malformed ls-files metadata") from exc
+        if not _OCTAL_MODE.match(mode) or mode not in _KNOWN_MODES:
+            raise _GitRunError("git_output_invalid", "malformed ls-files mode")
+        if not _is_hex_sha(sha, sha_len):
+            raise _GitRunError("git_output_invalid", "malformed ls-files object id")
         if stage != "0":
             raise _GitRunError("unmerged_index", "the index has unmerged stages")
-        entries.append((mode, sha, _decode_path(raw_path)))
+        path = _decode_path(raw_path)
+        if path in seen:
+            raise _GitRunError("git_output_invalid", "duplicate index path")
+        seen.add(path)
+        entries.append((mode, sha, path))
     return entries
 
 
 # --------------------------------------------------------------------------- #
-# Result policy                                                               #
+# Result policy: portable protected paths, modes, collisions                  #
 # --------------------------------------------------------------------------- #
 
 
-def _normalized_key(path: str) -> str:
-    return unicodedata.normalize("NFC", path).casefold()
+def _norm(component: str) -> str:
+    return unicodedata.normalize("NFC", component).casefold()
 
 
-def _is_protected(path: str, protected: list[str]) -> bool:
-    parts = path.split("/")
-    if any(part in PROTECTED_BASENAMES for part in parts):
+def is_protected(path: str, protected: list[str]) -> bool:
+    """Portable, case-insensitive, normalization-aware, component-wise protection."""
+    parts = [_norm(part) for part in path.replace("\\", "/").split("/") if part]
+    basenames = {_norm(name) for name in PROTECTED_BASENAMES}
+    if any(part in basenames for part in parts):
         return True
     for rule in protected:
-        normalized = rule.strip("/")
-        if normalized and (path == normalized or path.startswith(normalized + "/")):
+        rule_parts = [_norm(part) for part in rule.replace("\\", "/").strip("/").split("/") if part]
+        if rule_parts and parts[: len(rule_parts)] == rule_parts:
             return True
     return False
+
+
+def _normalized_key(path: str) -> str:
+    return _norm(path)
 
 
 def _changed_paths(change: GitChange) -> list[str]:
@@ -359,48 +486,6 @@ def _changed_paths(change: GitChange) -> list[str]:
     if change.old_path is not None:
         paths.append(change.old_path)
     return paths
-
-
-# --------------------------------------------------------------------------- #
-# Filesystem equivalence                                                      #
-# --------------------------------------------------------------------------- #
-
-
-def _scan_workspace_files(destination: Path) -> set[str]:
-    """Return relative POSIX paths of regular files; reject symlinks/special entries."""
-    found: set[str] = set()
-    for current, dirnames, filenames in os.walk(destination):
-        if ".git" in dirnames:
-            dirnames.remove(".git")  # never descend into Git metadata
-        for name in filenames:
-            path = Path(current) / name
-            info = path.lstat()
-            if stat.S_ISLNK(info.st_mode):
-                raise _GitRunError("unsafe_result_entry", "result contains a symlink")
-            if not stat.S_ISREG(info.st_mode):
-                raise _GitRunError("unsafe_result_entry", "result contains a special file")
-            if info.st_nlink > 1:
-                raise _GitRunError("unsafe_result_entry", "result contains a hardlink alias")
-            found.add(path.relative_to(destination).as_posix())
-    return found
-
-
-def _check_status_clean(ctx: _GitContext) -> None:
-    """Reject untracked files or any worktree/index divergence after application."""
-    out = _git_checked(
-        ctx, ["status", "--porcelain", "-z", "--untracked-files=all"], "git_output_invalid"
-    )
-    for record in out.split(b"\0"):
-        if not record:
-            continue
-        code = record[:2]
-        if code == b"??":
-            raise _GitRunError("untracked_output", "patch produced an untracked file")
-        if b"U" in code:
-            raise _GitRunError("unmerged_index", "the index has unmerged stages")
-        # Second column non-space means the worktree differs from the index.
-        if len(code) >= 2 and code[1:2] != b" ":
-            raise _GitRunError("index_worktree_mismatch", "worktree differs from the index")
 
 
 def _validate_result(
@@ -414,7 +499,6 @@ def _validate_result(
     deleted: list[str] = []
     mode_changes: list[str] = []
 
-    # Mode and per-change path/protection policy on the AUTHORITATIVE changes.
     for change in changes:
         for mode in (change.old_mode, change.new_mode):
             if mode == _SYMLINK_MODE:
@@ -426,7 +510,7 @@ def _validate_result(
         for path in _changed_paths(change):
             if _relative_path_error(path) is not None:
                 unsafe.append(path)
-            if _is_protected(path, protected):
+            if is_protected(path, protected):
                 protected_hits.append(path)
         if change.status == "A":
             added.append(change.new_path)
@@ -435,7 +519,7 @@ def _validate_result(
         elif change.status == "T":
             mode_changes.append(change.new_path)
             modified.append(change.new_path)
-        else:  # M and any residual R/C destination
+        else:
             modified.append(change.new_path)
         if change.old_mode != change.new_mode and "000000" not in (
             change.old_mode,
@@ -450,14 +534,17 @@ def _validate_result(
             "protected_path_changed", "; ".join(sorted(set(protected_hits)))[:_DIAG_LEN]
         )
 
-    # The COMPLETE resulting index must be path-safe and collision-free, not only the
-    # changed subset (a benign-looking change can collide with an existing entry).
+    # The COMPLETE resulting index must be path-safe, mode-safe and collision-free.
     seen: dict[str, str] = {}
     for mode, _sha, path in index:
         if mode == _SYMLINK_MODE or mode == _GITLINK_MODE or mode not in _ALLOWED_MODES:
             raise _GitRunError("unsafe_result_mode", f"index entry has unsupported mode {mode}")
         if _relative_path_error(path) is not None:
             raise _GitRunError("unsafe_result_path", "index contains an unsafe path")
+        if is_protected(path, protected) and any(
+            path == c.new_path or path == c.old_path for c in changes
+        ):
+            raise _GitRunError("protected_path_changed", "index change touches a protected path")
         key = _normalized_key(path)
         if key in seen and seen[key] != path:
             raise _GitRunError("path_collision", "index paths collide under normalization")
@@ -467,20 +554,114 @@ def _validate_result(
 
 
 # --------------------------------------------------------------------------- #
+# Exact byte-equivalence and filesystem scan                                  #
+# --------------------------------------------------------------------------- #
+
+
+def _raw_blob_id(ctx: _GitContext, relative: str) -> str:
+    """Git blob object id of the exact worktree bytes, with all filters disabled."""
+    out = _git_checked(
+        ctx, ["hash-object", "--no-filters", "--", relative], "index_worktree_mismatch"
+    )
+    return _text(out)
+
+
+def _verify_index_bytes(
+    ctx: _GitContext, index: list[tuple[str, str, str]], object_format: str, reason: str
+) -> None:
+    """Require every index blob to equal the exact (no-filter) worktree bytes + mode.
+
+    Independent of ``git status`` (which can use the same check-in conversions as the
+    index), so an attribute/eol/ident/clean-filter transform cannot pass unnoticed.
+    """
+    sha_len = _sha_len(object_format)
+    for mode, sha, path in index:
+        if mode not in _ALLOWED_MODES:
+            raise _GitRunError(reason, f"index entry has unsupported mode {mode}")
+        if _relative_path_error(path) is not None:
+            raise _GitRunError(reason, "index contains an unsafe path")
+        if not _is_hex_sha(sha, sha_len):
+            raise _GitRunError(reason, "index object id has the wrong length/format")
+        worktree_file = ctx.cwd / path
+        info = worktree_file.lstat()
+        if not stat.S_ISREG(info.st_mode):
+            raise _GitRunError(reason, "index entry is not a regular worktree file")
+        expected_exec = mode == "100755"
+        actual_exec = bool(info.st_mode & stat.S_IXUSR)
+        if os.name == "posix" and expected_exec != actual_exec:
+            raise _GitRunError(reason, "worktree mode disagrees with the index")
+        if _raw_blob_id(ctx, path) != sha:
+            raise _GitRunError(reason, "worktree bytes differ from the index blob")
+
+
+def _scan_workspace_files(destination: Path) -> set[str]:
+    """Securely scan the workspace: regular files only, no symlink/special/.git/hardlink."""
+    found: set[str] = set()
+    for current, dirnames, filenames in os.walk(destination, followlinks=False):
+        for dirname in dirnames:
+            if dirname.casefold() == ".git":
+                raise _GitRunError("unsafe_result_entry", "git metadata remains in the workspace")
+            info = (Path(current) / dirname).lstat()
+            if stat.S_ISLNK(info.st_mode):
+                raise _GitRunError("unsafe_result_entry", "result contains a symlinked directory")
+            if not stat.S_ISDIR(info.st_mode):
+                raise _GitRunError("unsafe_result_entry", "result contains a special directory")
+        for name in filenames:
+            if name.casefold() == ".git":
+                raise _GitRunError("unsafe_result_entry", "git metadata remains in the workspace")
+            path = Path(current) / name
+            info = path.lstat()
+            if stat.S_ISLNK(info.st_mode):
+                raise _GitRunError("unsafe_result_entry", "result contains a symlink")
+            if not stat.S_ISREG(info.st_mode):
+                raise _GitRunError("unsafe_result_entry", "result contains a special file")
+            if info.st_nlink > 1:
+                raise _GitRunError("unsafe_result_entry", "result contains a hardlink alias")
+            if _relative_path_error(path.relative_to(destination).as_posix()) is not None:
+                raise _GitRunError("unsafe_result_path", "result contains an unsafe path")
+            found.add(path.relative_to(destination).as_posix())
+    return found
+
+
+def _remove_git_metadata(destination: Path) -> None:
+    """Remove .git fail-closed and verify no .git (any case) remains."""
+    git_dir = destination / ".git"
+    try:
+        if git_dir.exists():
+            shutil.rmtree(git_dir)
+    except OSError as exc:
+        raise _GitRunError("git_metadata_cleanup_failed", "could not remove git metadata") from exc
+    for entry in destination.iterdir():
+        if entry.name.casefold() == ".git":
+            raise _GitRunError("git_metadata_cleanup_failed", "git metadata still present")
+
+
+# --------------------------------------------------------------------------- #
 # The transaction                                                             #
 # --------------------------------------------------------------------------- #
 
 
 def apply_patch(
-    *, source_dir: Path, patch_text: str, protected_paths: list[str], destination: Path
+    *,
+    source_dir: Path,
+    patch_text: str,
+    protected_paths: list[str],
+    destination: Path,
+    timeout: float = limits.GIT_TIMEOUT_SECONDS,
 ) -> GitPatchResult:
     """Apply a patch to a private copy of ``source_dir``, authoritatively.
 
     On success the returned ``workspace`` is ``destination`` with the resulting
     source tree and no ``.git``. On any failure the destination is removed and the
-    result carries a stable ``reason``. Patch-policy failures are results, not raised
-    exceptions, so a run never crashes on a bad patch.
+    result carries a stable ``reason`` plus a bounded ``diagnostic``. Patch-policy
+    failures are results, not raised exceptions, so a run never crashes on a bad
+    patch. ``timeout`` bounds each Git invocation and is range-checked.
     """
+    if not (limits.GIT_TIMEOUT_SECONDS_MIN <= timeout <= limits.GIT_TIMEOUT_SECONDS_MAX):
+        raise ValueError(
+            f"git timeout must be in [{limits.GIT_TIMEOUT_SECONDS_MIN}, "
+            f"{limits.GIT_TIMEOUT_SECONDS_MAX}] seconds, got {timeout}"
+        )
     started = time.perf_counter()
     if not patch_text or not patch_text.strip():
         return GitPatchResult(applied=False, reason="no_patch_provided", duration_ms=_ms(started))
@@ -499,28 +680,37 @@ def apply_patch(
         cwd=destination,
         env=_git_env(home, meta / "empty.gitconfig", destination.parent),
         config=_git_config(hooks),
+        timeout=timeout,
+        scrub=(str(destination), str(meta), str(home), str(destination.parent)),
     )
+    git_version: str | None = None
+    object_format: str | None = None
     try:
         _prepare_workspace(source_dir, destination)
-        version_out = _git_checked(ctx, ["version"], "git_unavailable")
-        git_version = _text(version_out)
+        _validate_baseline_paths(destination)
+        git_version = _text(_git_checked(ctx, ["version"], "git_unavailable"))
         _git_checked(ctx, ["init", "-q"], "git_initialization_failed")
         object_format = _text(
             _git_checked(ctx, ["rev-parse", "--show-object-format"], "git_initialization_failed")
         )
         _git_checked(ctx, ["add", "-A"], "baseline_index_failed")
+        # Prove the baseline tree is the EXACT accepted bytes (no filter conversion).
+        baseline_index = _parse_ls_files_z(
+            _git_checked(ctx, ["ls-files", "-s", "-z"], "baseline_index_failed"), object_format
+        )
+        _verify_index_bytes(ctx, baseline_index, object_format, "baseline_index_failed")
         baseline_tree = _text(_git_checked(ctx, ["write-tree"], "baseline_index_failed"))
 
         preflight_rc, _o, preflight_err = _run_git(
             ctx, ["apply", "--check", "--index", "--whitespace=nowarn", "-"], stdin=patch_bytes
         )
         if preflight_rc != 0:
-            raise _GitRunError("patch_preflight_failed", _text(preflight_err))
+            raise _GitRunError("patch_preflight_failed", _scrub(ctx, _text(preflight_err)))
         apply_rc, _o2, apply_err = _run_git(
             ctx, ["apply", "--index", "--whitespace=nowarn", "-"], stdin=patch_bytes
         )
         if apply_rc != 0:
-            raise _GitRunError("patch_apply_failed", _text(apply_err))
+            raise _GitRunError("patch_apply_failed", _scrub(ctx, _text(apply_err)))
 
         _check_status_clean(ctx)
         result_tree = _text(_git_checked(ctx, ["write-tree"], "result_tree_verification_failed"))
@@ -529,35 +719,35 @@ def apply_patch(
             ["diff", "--raw", "-z", "--no-renames", "--full-index", baseline_tree, result_tree],
             "git_output_invalid",
         )
-        changes = _parse_raw_z(raw)
+        changes = _parse_raw_z(raw, object_format)
         if len(changes) > limits.GIT_MAX_CHANGED_FILES:
             raise _GitRunError("git_output_too_large", "too many changed files")
-        index = _parse_ls_files_z(_git_checked(ctx, ["ls-files", "-s", "-z"], "git_output_invalid"))
+        index = _parse_ls_files_z(
+            _git_checked(ctx, ["ls-files", "-s", "-z"], "git_output_invalid"), object_format
+        )
         if len(index) > limits.GIT_MAX_CHANGED_FILES:
             raise _GitRunError("git_output_too_large", "index too large")
 
         added, modified, deleted, mode_changes, touched = _validate_result(
             changes, index, protected_paths
         )
-
-        # Filesystem equivalence: every workspace file is tracked, none extra, none
-        # is a symlink/special/hardlink, and the worktree matches the index.
-        workspace_files = _scan_workspace_files(destination)
-        index_paths = {path for _m, _s, path in index}
-        if workspace_files != index_paths:
-            raise _GitRunError("index_worktree_mismatch", "workspace and index file sets differ")
-        # Re-verify the result tree is stable.
+        # Prove the result tree is the EXACT worktree bytes (independent of git status).
+        _verify_index_bytes(ctx, index, object_format, "index_worktree_mismatch")
         if (
             _text(_git_checked(ctx, ["write-tree"], "result_tree_verification_failed"))
             != result_tree
         ):
             raise _GitRunError("result_tree_verification_failed", "result tree changed")
 
-        # Success: remove Git metadata so the returned workspace is source-only.
-        shutil.rmtree(destination / ".git", ignore_errors=True)
+        # Remove Git metadata (fail closed, verified), then securely rescan and require
+        # the workspace file set to equal the index path set.
+        index_paths = {path for _m, _s, path in index}
+        _remove_git_metadata(destination)
+        if _scan_workspace_files(destination) != index_paths:
+            raise _GitRunError("index_worktree_mismatch", "workspace and index file sets differ")
+
         return GitPatchResult(
             applied=True,
-            reason=None,
             patch_sha256=patch_sha,
             git_version=git_version,
             object_format=object_format,
@@ -577,8 +767,10 @@ def apply_patch(
         return GitPatchResult(
             applied=False,
             reason=exc.reason,
-            patch_sha256=patch_sha,
             diagnostic=exc.diagnostic or None,
+            patch_sha256=patch_sha,
+            git_version=git_version,
+            object_format=object_format,
             protected_violations=(
                 tuple(exc.diagnostic.split("; ")) if exc.reason == "protected_path_changed" else ()
             ),
@@ -589,6 +781,27 @@ def apply_patch(
         )
     finally:
         shutil.rmtree(meta, ignore_errors=True)
+
+
+def _check_status_clean(ctx: _GitContext) -> None:
+    """Defense in depth: reject untracked files or worktree/index divergence.
+
+    Byte-exact equivalence is proven separately by _verify_index_bytes; this catches
+    untracked/unmerged entries that the index manifest would not list.
+    """
+    out = _git_checked(
+        ctx, ["status", "--porcelain", "-z", "--untracked-files=all"], "git_output_invalid"
+    )
+    for record in out.split(b"\0"):
+        if not record:
+            continue
+        code = record[:2]
+        if code == b"??":
+            raise _GitRunError("untracked_output", "patch produced an untracked file")
+        if b"U" in code:
+            raise _GitRunError("unmerged_index", "the index has unmerged stages")
+        if len(code) >= 2 and code[1:2] != b" ":
+            raise _GitRunError("index_worktree_mismatch", "worktree differs from the index")
 
 
 def _ms(started: float) -> int:

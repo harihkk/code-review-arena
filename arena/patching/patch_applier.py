@@ -8,9 +8,9 @@ goes through that one pipeline.
 
 from __future__ import annotations
 
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
-from arena.patching.git_pipeline import PROTECTED_BASENAMES, apply_patch
+from arena.patching.git_pipeline import PROTECTED_BASENAMES, apply_patch, is_protected
 from arena.patching.patch_models import PatchApplyRequest, PatchApplyResult
 from arena.security.paths import validate_case_id
 
@@ -20,16 +20,11 @@ __all__ = ["PROTECTED_BASENAMES", "PatchApplier", "is_protected_path"]
 def is_protected_path(path: str, protected_paths: list[str]) -> bool:
     """True when a path is a protected file or sits under a protected prefix.
 
-    Retained for early, non-authoritative diagnostics; the Git pipeline performs the
-    final, authoritative protected-path enforcement on the actual changed paths.
+    Retained for early, non-authoritative diagnostics; delegates to the pipeline's
+    portable, case-insensitive matcher so diagnostics and the final authoritative
+    enforcement use identical semantics.
     """
-    if PurePosixPath(path).name in PROTECTED_BASENAMES:
-        return True
-    for rule in protected_paths:
-        normalized = rule.strip("/")
-        if normalized and (path == normalized or path.startswith(normalized + "/")):
-            return True
-    return False
+    return is_protected(path, protected_paths)
 
 
 class PatchApplier:
@@ -48,6 +43,7 @@ class PatchApplier:
             patch_text=request.patch_text or "",
             protected_paths=list(request.protected_paths),
             destination=workspace,
+            timeout=self.timeout_seconds,
         )
         return PatchApplyResult(
             case_id=request.case_id,
@@ -55,6 +51,7 @@ class PatchApplier:
             applied=result.applied,
             error=result.reason if not result.applied else None,
             reason=result.reason,
+            git_diagnostic=result.diagnostic,
             touched_files=list(result.touched_files),
             touched_protected=list(result.protected_violations),
             unsafe_paths=list(result.unsafe_paths),

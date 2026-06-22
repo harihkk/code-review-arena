@@ -426,6 +426,7 @@ def _evaluate_case(
             "patch_object_format": patch.object_format,
             "patch_baseline_tree": patch.baseline_tree,
             "patch_result_tree": patch.result_tree,
+            "git_diagnostic": patch.git_diagnostic,
             "patch_added": patch.added,
             "patch_deleted": patch.deleted,
             "patch_mode_changes": patch.mode_changes,

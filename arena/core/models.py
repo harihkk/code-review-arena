@@ -654,6 +654,9 @@ class CaseResult(BaseModel):
     patch_object_format: str | None = None
     patch_baseline_tree: str | None = None
     patch_result_tree: str | None = None
+    # Bounded, human-readable Git diagnostic; never contains patch bytes, file
+    # contents, secrets, or private paths. `patch_error` stays the machine reason.
+    git_diagnostic: str | None = None
     patch_added: list[str] = Field(default_factory=list)
     patch_deleted: list[str] = Field(default_factory=list)
     patch_mode_changes: list[str] = Field(default_factory=list)

@@ -31,6 +31,7 @@ class PatchApplyResult(BaseModel):
     duration_ms: int
     # Authoritative Git evidence (Phase 1D); optional/defaulted for compatibility.
     reason: str | None = None
+    git_diagnostic: str | None = None
     patch_sha256: str | None = None
     git_version: str | None = None
     object_format: str | None = None
