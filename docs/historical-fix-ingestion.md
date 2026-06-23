@@ -48,36 +48,77 @@ for the exact shape; unknown fields fail.
 ## Local, offline threat model
 
 The source repository's mutable working tree is **ignored completely**: the
-importer reads committed objects only (`git ls-tree`, `git cat-file`, and `git
-diff` between two commits), reusing the Phase 1D isolated Git environment (private
-empty HOME/config, no system/global config, no hooks, no pager/editor/credentials,
-no network, fixed locale, bounded incremental output, timeout and process-group
-cleanup). It never runs `checkout`, `clone`, `fetch`, build scripts, or repository
-code. Commit ids must be full object ids (40 hex for SHA-1, 64 for SHA-256);
-abbreviated ids, branch names, tags, and non-commit objects are rejected, as are
-unrelated histories and a fixed commit that is not descended from the buggy commit.
+importer reads committed objects only (`git ls-tree`, `git cat-file`, and a
+tree-object `diff-tree --raw` comparison), reusing the Phase 1D isolated Git
+environment (private empty HOME/config, no system/global config, no hooks, no
+pager/editor/credentials, no network, fixed locale, bounded incremental output,
+timeout and process-group cleanup). Every source command additionally sets
+`GIT_NO_REPLACE_OBJECTS=1` (replacement refs are ignored, not followed),
+`GIT_NO_LAZY_FETCH=1` (a missing object fails offline instead of fetching) and
+`GIT_LITERAL_PATHSPECS=1`. It never runs `checkout`, `clone`, `fetch`, build
+scripts, or repository code.
 
-## Changed-path classification
+Commit ids must be full object ids (40 hex for SHA-1, 64 for SHA-256); abbreviated
+ids, branch names, tags, and non-commit objects are rejected, as are unrelated
+histories and a fixed commit that is not descended from the buggy commit. Truncated
+or rewritten ancestry cannot support deterministic range admission, so a **shallow
+repository** (`shallow_repository`) and a nonempty graft file
+(`repository_history_override`) are both rejected.
 
-Every path changed between `B` and `F` must be classified as either selected
-**source** (copied into `before/` and `after/`, and diffed into `reference.patch`/
-`pr.diff`) or selected **tests** (copied from `F` into `tests/`, and excluded from
-the diffs because benchmark tests are protected evidence, not reviewer-editable
-content). A changed path outside both selections, or an overlap between source and
-tests, fails loudly -- the importer never silently omits a historical change.
-Symlinks, gitlinks/submodules, special modes, binary changes, unsafe or colliding
-paths, and oversized inputs are rejected.
+## Patches are generated in a fresh repository
 
-## Deterministic provenance
+`pr.diff` and `reference.patch` are **not** generated inside the source repository.
+The importer reads the exact selected blob bytes at B and F, stages them into a
+brand-new private repository (empty local/global/system config, empty
+`info/attributes`, no worktree, no hooks/filters/external-diff/textconv/replacement
+refs), proves each staged blob equals the exact source bytes, and diffs the two
+trees there with explicit deterministic flags (`--text --no-color --no-ext-diff
+--no-textconv --no-renames --default-prefix --full-index --unified=3
+--diff-algorithm=myers --no-indent-heuristic`). As a result the source repository's
+`.gitattributes`, `.git/info/attributes`, local diff configuration (for example
+`diff.noprefix`, custom prefixes, an alternate algorithm), replacement refs, current
+branch and HEAD, and worktree-vs-bare form **cannot** change the generated patches.
+Both patches are still proven to reproduce their target trees through the Phase 1D
+Git-authoritative pipeline.
 
-The same repository objects and spec produce **byte-identical** output and the
-same `pack.sha256` on every run. Each case carries a strict `provenance.json`
-recording the mode (`reverse_fix`), optional source label, Git object format, the
-full buggy/fixed/merge-base ids, the selected source paths and tests root, the
-classified changed paths, and the SHA-256 of both generated diffs. It deliberately
-omits generation time, username, hostname, and any absolute repository/output/temp
-path. Output is staged and atomically renamed, so a failed import leaves no partial
-pack, and the importer refuses to overwrite an existing output directory.
+## Changed-path classification and selection
+
+Changed paths come from a **tree-object comparison** (`diff-tree --raw`) and exact
+selected-tree maps, never a textual source diff. Every path changed between `B` and
+`F` must be classified as selected **source** (copied into `before/` and `after/`,
+and diffed) or selected **tests** (copied from `F` into `tests/`, excluded from the
+diffs because benchmark tests are protected evidence). A changed path outside both
+selections, or a source/tests overlap, fails loudly -- nothing is silently omitted.
+Binary or non-UTF-8 source changes are decided from the exact changed bytes and
+rejected; symlinks, gitlinks/submodules, special modes, unsafe or colliding paths,
+and oversized inputs are rejected.
+
+Each source selector is admitted **individually** (no silent deduplication):
+duplicate selectors, ancestor/descendant overlaps, and a selector matching no file
+in either `B` or `F` are rejected, while a selector that exists in only one commit
+remains a valid addition or deletion. `tests_root`, when supplied, must be a
+nonempty directory disjoint from every source selector; if tests are required
+(`run_tests` or `tests_required`) a missing, empty, or file-valued tests root fails.
+
+## Deterministic provenance and publication
+
+The same committed objects and spec produce **byte-identical** output and the same
+`pack.sha256` on every run, regardless of the source working tree, untracked or
+dirty `.gitattributes`, `.git/info/attributes`, local diff configuration,
+replacement refs, current branch/HEAD, or worktree-vs-bare form. Each case carries a
+strict, bounded `provenance.json` (schema version `2`) recording the mode
+(`reverse_fix`), a validated `owner/repository`-style source label, Git object
+format, diff-policy version, the full buggy/fixed/merge-base ids, the selected
+source paths and tests root, the expanded buggy/fixed source files and fixed test
+files, and the exact changed source and test paths, plus the SHA-256 of both
+generated diffs. It deliberately omits generation time, username, hostname, and any
+absolute repository/output/temporary path or local Git config. Every generated file
+is written through a shared exclusive complete-write helper that verifies byte
+count, content and mode. Publication is **no-overwrite**: the output directory is
+claimed atomically (`mkdir`) and the validated contents are moved in, rejecting an
+existing file, empty directory or symlink (re-checked immediately before
+publishing). A failed import removes its staging directory and never publishes a
+partial pack. The report distinguishes buggy, fixed and union source file counts.
 
 ## Import does not certify
 
@@ -97,8 +138,13 @@ arena certify-pack <candidate-pack>
 ## Limitations of this first version
 
 - Local repositories only; no hosted GitHub/GitLab ingestion or network access.
+- Shallow clones and grafted/replaced histories are rejected (they cannot support
+  deterministic range admission); the source must have complete local ancestry.
 - Binary source changes are rejected; only UTF-8 text diffs are supported.
 - Each invocation imports exactly one case from one commit pair.
+- A ground-truth bug must live in the buggy tree, so a fix that only **adds** new
+  source files cannot express those additions as reviewable bugs and is reported as
+  an uncovered change. Modifications and deletions are fully supported.
 - A fix that changes a Phase 1D protected file (for example `pyproject.toml` or a
   `conftest.py`) cannot be reproduced as a reviewer-editable repair and is rejected.
 - An imported case is a **candidate only**. It is not production-ready, certified,
