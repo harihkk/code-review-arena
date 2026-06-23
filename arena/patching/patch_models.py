@@ -29,6 +29,18 @@ class PatchApplyResult(BaseModel):
     workspace_path: str
     patch_text: str
     duration_ms: int
+    # Authoritative Git evidence (Phase 1D); optional/defaulted for compatibility.
+    reason: str | None = None
+    git_diagnostic: str | None = None
+    patch_sha256: str | None = None
+    git_version: str | None = None
+    object_format: str | None = None
+    baseline_tree: str | None = None
+    result_tree: str | None = None
+    added: list[str] = Field(default_factory=list)
+    modified: list[str] = Field(default_factory=list)
+    deleted: list[str] = Field(default_factory=list)
+    mode_changes: list[str] = Field(default_factory=list)
 
 
 class PatchValidationResult(BaseModel):

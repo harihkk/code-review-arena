@@ -40,6 +40,10 @@ def source_dir(tmp_path: Path) -> Path:
 
 
 def test_patch_touching_tests_dir_is_rejected(tmp_path, source_dir):
+    # The protected file exists, so the patch applies cleanly and the AUTHORITATIVE
+    # Git result (not the patch text) is what gets rejected as a protected change.
+    (source_dir / "tests").mkdir()
+    (source_dir / "tests" / "test_main.py").write_text("assert value == 2\n", encoding="utf-8")
     hostile = (
         "--- a/tests/test_main.py\n"
         "+++ b/tests/test_main.py\n"
@@ -49,8 +53,8 @@ def test_patch_touching_tests_dir_is_rejected(tmp_path, source_dir):
     )
     result = _apply(tmp_path, source_dir, hostile, protected_paths=["tests"])
     assert result.applied is False
-    assert result.touched_protected == ["tests/test_main.py"]
-    assert "patch_touched_protected_files" in (result.error or "")
+    assert result.reason == "protected_path_changed"
+    assert "tests/test_main.py" in result.touched_protected
 
 
 def test_patch_creating_conftest_is_rejected_anywhere(tmp_path, source_dir):
@@ -63,16 +67,16 @@ def test_patch_creating_conftest_is_rejected_anywhere(tmp_path, source_dir):
 def test_patch_with_path_traversal_is_rejected(tmp_path, source_dir):
     hostile = "--- a/../../escape.py\n+++ b/../../escape.py\n@@ -1 +1 @@\n-x\n+y\n"
     result = _apply(tmp_path, source_dir, hostile)
+    # Git itself refuses to apply a traversal path; the path guard is a backstop.
     assert result.applied is False
-    assert result.unsafe_paths == ["../../escape.py"]
-    assert "patch_unsafe_paths" in (result.error or "")
+    assert result.reason in {"patch_preflight_failed", "unsafe_result_path"}
 
 
 def test_patch_with_absolute_path_is_rejected(tmp_path, source_dir):
     hostile = "--- /etc/passwd\n+++ /etc/passwd\n@@ -1 +1 @@\n-x\n+y\n"
     result = _apply(tmp_path, source_dir, hostile)
     assert result.applied is False
-    assert "/etc/passwd" in result.unsafe_paths
+    assert result.reason in {"patch_preflight_failed", "unsafe_result_path"}
 
 
 def test_unsafe_paths_cover_renames():
@@ -92,9 +96,9 @@ def test_patch_creating_a_symlink_is_rejected(tmp_path, source_dir):
         "+/etc/passwd\n"
     )
     result = _apply(tmp_path, source_dir, hostile)
+    # Authoritative: the resulting Git mode is 120000 (a symlink), which is rejected.
     assert result.applied is False
-    assert "patch_unsafe_paths" in (result.error or "")
-    assert any("120000" in entry for entry in result.unsafe_paths)
+    assert result.reason in {"unsafe_result_mode", "unsafe_result_entry"}
 
 
 def test_protected_path_rules():
