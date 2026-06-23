@@ -386,6 +386,14 @@ def test_output_overwrite_refused(tmp_path):
     assert e.value.reason == "output_exists"
 
 
+def test_import_spec_rejects_unknown_fields(tmp_path):
+    repo, b, f = _make(tmp_path)
+    bad = _SPEC + "surprise_field: true\n"
+    with pytest.raises(ImportFixError) as e:
+        _run(tmp_path, repo, b, f, spec=_spec_file(tmp_path, bad))
+    assert e.value.reason == "invalid_spec"
+
+
 def test_cli_help_smoke():
     from typer.testing import CliRunner
 
