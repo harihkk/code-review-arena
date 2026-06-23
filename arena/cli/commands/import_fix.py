@@ -48,8 +48,11 @@ def import_fix_command(
                     "fixed_commit": result.fixed_commit,
                     "merge_base": result.merge_base,
                     "object_format": result.object_format,
+                    "buggy_source_file_count": result.buggy_source_file_count,
+                    "fixed_source_file_count": result.fixed_source_file_count,
+                    "union_source_file_count": result.union_source_file_count,
                     "source_file_count": result.source_file_count,
-                    "test_file_count": result.test_file_count,
+                    "fixed_test_file_count": result.fixed_test_file_count,
                     "repair_changed_paths": result.repair_changed_paths,
                     "test_changed_paths": result.test_changed_paths,
                     "pack_checksum": result.pack_checksum,
@@ -67,8 +70,11 @@ def import_fix_command(
     typer.echo(f"  buggy commit:       {result.buggy_commit}")
     typer.echo(f"  fixed commit:       {result.fixed_commit}")
     typer.echo(f"  object format:      {result.object_format}")
-    typer.echo(f"  source files:       {result.source_file_count}")
-    typer.echo(f"  test files:         {result.test_file_count}")
+    typer.echo(
+        f"  source files:       buggy={result.buggy_source_file_count} "
+        f"fixed={result.fixed_source_file_count} union={result.union_source_file_count}"
+    )
+    typer.echo(f"  test files:         {result.fixed_test_file_count}")
     typer.echo(f"  repair changed:     {', '.join(result.repair_changed_paths) or '(none)'}")
     typer.echo(f"  test changed:       {', '.join(result.test_changed_paths) or '(none)'}")
     typer.echo(f"  pack checksum:      {result.pack_checksum}")

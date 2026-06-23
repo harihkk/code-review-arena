@@ -9,6 +9,7 @@ checkout/clone/fetch, repository code, or reads the mutable working tree.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import tempfile
@@ -31,6 +32,14 @@ from arena.security.paths import _relative_path_error
 
 _FULL_OID = {"sha1": re.compile(r"\A[0-9a-f]{40}\Z"), "sha256": re.compile(r"\A[0-9a-f]{64}\Z")}
 _ALLOWED_TREE_MODES = frozenset({"100644", "100755"})
+
+# Source reads must depend only on committed objects: ignore replacement refs, never
+# lazily fetch a missing object over the network, and treat pathspecs literally.
+_SOURCE_ENV = {
+    "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_NO_LAZY_FETCH": "1",
+    "GIT_LITERAL_PATHSPECS": "1",
+}
 
 
 @dataclass
@@ -65,25 +74,28 @@ def open_repo(repo_path: Path) -> Iterator[Repo]:
     (meta / "empty.gitconfig").write_text("", encoding="utf-8")
     ctx = _GitContext(
         cwd=repo_path,
-        env=_git_env(home, meta / "empty.gitconfig", repo_path),
+        env={**_git_env(home, meta / "empty.gitconfig", repo_path), **_SOURCE_ENV},
         config=_git_config(hooks),
         timeout=limits.GIT_TIMEOUT_SECONDS,
         scrub=(str(meta), str(home)),
     )
     try:
-        rc, out, _err = _run_git(ctx, ["rev-parse", "--is-inside-work-tree", "--git-dir"])
-        if rc != 0:
-            # Could be a bare repository; confirm it is a Git repository of some kind.
-            brc, _bo, _be = _run_git(ctx, ["rev-parse", "--git-dir"])
-            if brc != 0:
-                raise ImportFixError("not_a_git_repository", f"not a Git repository: {repo_path}")
-        object_format = _text(
-            _git(Repo(ctx, "sha1"), ["rev-parse", "--show-object-format"], "git_failed")
-        )
+        brc, _bo, _be = _run_git(ctx, ["rev-parse", "--git-dir"])
+        if brc != 0:
+            raise ImportFixError("not_a_git_repository", f"not a Git repository: {repo_path}")
+        probe = Repo(ctx, "sha1")
+        object_format = _text(_git(probe, ["rev-parse", "--show-object-format"], "git_failed"))
         if object_format not in _FULL_OID:
             raise ImportFixError(
                 "unsupported_object_format", f"unsupported format {object_format!r}"
             )
+        # Truncated or rewritten ancestry cannot support deterministic range admission.
+        if _text(_git(probe, ["rev-parse", "--is-shallow-repository"], "git_failed")) == "true":
+            raise ImportFixError("shallow_repository", "shallow repositories are not supported")
+        grafts_rel = _text(_git(probe, ["rev-parse", "--git-path", "info/grafts"], "git_failed"))
+        grafts = Path(grafts_rel) if os.path.isabs(grafts_rel) else repo_path / grafts_rel
+        if grafts.is_file() and grafts.read_text(encoding="utf-8", errors="replace").strip():
+            raise ImportFixError("repository_history_override", "grafted history is not supported")
         yield Repo(ctx, object_format)
     except _GitRunError as exc:
         raise ImportFixError("git_failed", exc.diagnostic or "git failed") from exc
@@ -153,36 +165,16 @@ def cat_blob(repo: Repo, oid: str) -> bytes:
     return _git(repo, ["cat-file", "blob", oid], "file_too_large")
 
 
-def has_binary_change(repo: Repo, old: str, new: str, prefixes: list[str]) -> bool:
-    """True when any changed source path between two commits is binary (numstat '-')."""
-    out = _git(
-        repo, ["diff", "--numstat", "-z", "--no-renames", old, new, "--", *prefixes], "git_failed"
-    )
-    # -z numstat: records are "added\tdeleted\t" then a NUL-separated path (or two for
-    # renames, which are disabled). A binary file reports "-\t-\t".
-    fields = out.split(b"\0")
-    index = 0
-    while index < len(fields):
-        head = fields[index]
-        if not head:
-            index += 1
-            continue
-        try:
-            added, deleted, _rest = head.decode("ascii", errors="replace").split("\t", 2)
-        except ValueError:
-            index += 1
-            continue
-        if added == "-" and deleted == "-":
-            return True
-        index += 1
-    return False
+def changed_tree_paths(repo: Repo, old: str, new: str) -> set[str]:
+    """Every repo-relative path changed between two commit trees (renames off).
 
-
-def changed_paths(repo: Repo, old: str, new: str) -> set[str]:
-    """Every repo-relative path changed between two commits (whole tree, renames off)."""
+    Uses ``git diff-tree --raw`` -- a tree-object comparison (status/mode/object id),
+    not a textual diff -- so repository attributes, local diff configuration and
+    replacement refs cannot affect the classification authority.
+    """
     from arena.patching.git_pipeline import _parse_raw_z
 
-    out = _git(repo, ["diff", "--raw", "-z", "--no-renames", old, new], "git_failed")
+    out = _git(repo, ["diff-tree", "--raw", "-z", "--no-renames", "-r", old, new], "git_failed")
     try:
         changes = _parse_raw_z(out, repo.object_format)
     except _GitRunError as exc:
@@ -193,22 +185,3 @@ def changed_paths(repo: Repo, old: str, new: str) -> set[str]:
         if change.old_path is not None:
             paths.add(change.old_path)
     return paths
-
-
-def diff_text(repo: Repo, old: str, new: str, prefixes: list[str]) -> bytes:
-    """A textual unified diff old->new restricted to ``prefixes`` (renames disabled)."""
-    return _git(
-        repo,
-        [
-            "diff",
-            "--no-color",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--no-renames",
-            old,
-            new,
-            "--",
-            *prefixes,
-        ],
-        "git_failed",
-    )

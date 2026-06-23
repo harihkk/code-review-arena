@@ -102,6 +102,42 @@ _SPEC = textwrap.dedent("""\
     validation: {patch_required: true, tests_required: true}
 """)
 
+# A spec declaring two bug files: the fix modifies src/calc.py and deletes src/legacy.py.
+# Both files exist in the buggy tree, so both are valid reviewable ground-truth bugs.
+_SPEC_TWO_FILES = textwrap.dedent("""\
+    schema_version: "1"
+    pack: {version: "1", name: imported_fixes}
+    case:
+      id: calc_combine_sign_001
+      title: Combine used subtraction
+      category: correctness
+      severity: high
+      stack: [python]
+      description: combine subtracted instead of summing.
+    source_paths: [src]
+    tests_root: tests
+    ground_truth:
+      bugs:
+        - id: bug-1
+          summary: wrong arithmetic operator
+          files:
+            - path: src/calc.py
+              line_ranges: [{start: 1, end: 2}]
+          concepts: [arithmetic]
+          must_mention: [operator]
+          acceptable_fix_keywords: [plus]
+        - id: bug-2
+          summary: a retired module should not ship
+          files:
+            - path: src/legacy.py
+              line_ranges: [{start: 1, end: 1}]
+          concepts: [cleanup]
+          must_mention: [stale]
+          acceptable_fix_keywords: [remove]
+    execution: {run_tests: true, test_command: "pytest -q tests", timeout_seconds: 30}
+    validation: {patch_required: true, tests_required: true}
+""")
+
 
 def _make(tmp_path, *, object_format="sha1", buggy=None, fixed=None, with_tests=True, modes=None):
     repo = _repo(tmp_path, object_format=object_format)
@@ -317,7 +353,7 @@ def test_source_plus_tests_change(tmp_path):
         "fix",
     )
     r = _run(tmp_path, repo, b, f, out="spt")
-    assert r.source_file_count >= 1 and r.test_file_count >= 1
+    assert r.union_source_file_count >= 1 and r.fixed_test_file_count >= 1
     assert "src/calc.py" in r.repair_changed_paths
     assert any(p.startswith("tests/") for p in r.test_changed_paths)
 
@@ -428,3 +464,352 @@ def test_generated_case_is_execution_valid(tmp_path):
     case = run.case_results[0]
     assert case.patch_applied is True
     assert case.tests_passed is True
+
+
+# --------------------------------------------------------------------------- #
+# Repository-metadata isolation: mutations must not change output             #
+# --------------------------------------------------------------------------- #
+
+
+def _config(repo, key, value):
+    _git(repo, "config", key, value)
+
+
+def _replace_source_blob(repo, b):
+    orig = _git(repo, "rev-parse", f"{b}:src/calc.py")
+    alt = subprocess.run(
+        ["git", "-C", str(repo), "hash-object", "-w", "--stdin"],
+        input="def combine(a, b):\n    return 999\n",
+        capture_output=True,
+        text=True,
+        env=_ENV,
+    ).stdout.strip()
+    _git(repo, "replace", orig, alt)
+
+
+_METADATA_MUTATIONS = {
+    "dirty_source": lambda r, b: (r / "src" / "calc.py").write_text("DIRTY\n"),
+    "untracked_file": lambda r, b: (r / "untracked.py").write_text("junk\n"),
+    "worktree_gitattributes": lambda r, b: (r / ".gitattributes").write_text("*.py binary\n"),
+    "info_attributes_binary": lambda r, b: (
+        (r / ".git" / "info").mkdir(exist_ok=True),
+        (r / ".git" / "info" / "attributes").write_text("src/calc.py binary\n"),
+    ),
+    "diff_noprefix": lambda r, b: _config(r, "diff.noprefix", "true"),
+    "custom_src_prefix": lambda r, b: _config(r, "diff.srcPrefix", "CUSTOM_A/"),
+    "custom_dst_prefix": lambda r, b: _config(r, "diff.dstPrefix", "CUSTOM_B/"),
+    "diff_algorithm": lambda r, b: _config(r, "diff.algorithm", "histogram"),
+    "indent_heuristic": lambda r, b: _config(r, "diff.indentHeuristic", "true"),
+    "head_moved": lambda r, b: _git(r, "checkout", "-q", "-b", "elsewhere"),
+    "replace_blob": _replace_source_blob,
+}
+
+
+@pytest.mark.parametrize("name", sorted(_METADATA_MUTATIONS), ids=lambda n: n)
+def test_repository_metadata_does_not_affect_output(tmp_path, name):
+    repo, b, f = _make(tmp_path)
+    spec = _spec_file(tmp_path)
+    _run(tmp_path, repo, b, f, out="base", spec=spec)
+    base = _tree(tmp_path / "base")
+    _METADATA_MUTATIONS[name](repo, b)
+    _run(tmp_path, repo, b, f, out="mut", spec=spec)
+    assert _tree(tmp_path / "mut") == base
+
+
+def test_bare_repository_matches_worktree(tmp_path):
+    repo, b, f = _make(tmp_path)
+    spec = _spec_file(tmp_path)
+    _run(tmp_path, repo, b, f, out="work", spec=spec)
+    bare = tmp_path / "bare.git"
+    subprocess.run(
+        ["git", "clone", "--bare", "-q", str(repo), str(bare)],
+        capture_output=True,
+        text=True,
+        env=_ENV,
+        check=True,
+    )
+    import_fix(
+        repo_path=bare,
+        buggy_commit=b,
+        fixed_commit=f,
+        spec_path=spec,
+        output=tmp_path / "bare_out",
+        source_label="acme/calc",
+    )
+    assert _tree(tmp_path / "bare_out") == _tree(tmp_path / "work")
+
+
+# --------------------------------------------------------------------------- #
+# History-integrity rejections                                                #
+# --------------------------------------------------------------------------- #
+
+
+def test_graft_file_rejected(tmp_path):
+    repo, b, f = _make(tmp_path)
+    (repo / ".git" / "info").mkdir(exist_ok=True)
+    (repo / ".git" / "info" / "grafts").write_text(f + "\n")
+    with pytest.raises(ImportFixError) as e:
+        _run(tmp_path, repo, b, f)
+    assert e.value.reason == "repository_history_override"
+
+
+def test_shallow_repository_rejected(tmp_path):
+    repo, b, f = _make(tmp_path)
+    shallow = tmp_path / "shallow"
+    subprocess.run(
+        ["git", "clone", "--depth", "1", "-q", "file://" + str(repo), str(shallow)],
+        capture_output=True,
+        text=True,
+        env=_ENV,
+        check=True,
+    )
+    head = _git(shallow, "rev-parse", "HEAD")
+    with pytest.raises(ImportFixError) as e:
+        import_fix(
+            repo_path=shallow,
+            buggy_commit=head,
+            fixed_commit=head,
+            spec_path=_spec_file(tmp_path),
+            output=tmp_path / "out",
+            source_label="acme/calc",
+        )
+    assert e.value.reason == "shallow_repository"
+
+
+# --------------------------------------------------------------------------- #
+# Selector and tests-root validation                                          #
+# --------------------------------------------------------------------------- #
+
+
+def test_duplicate_selector_rejected(tmp_path):
+    repo, b, f = _make(tmp_path)
+    bad = _SPEC.replace("source_paths: [src]", "source_paths: [src, src]")
+    with pytest.raises(ImportFixError) as e:
+        _run(tmp_path, repo, b, f, spec=_spec_file(tmp_path, bad))
+    assert e.value.reason == "duplicate_selector"
+
+
+def test_overlapping_selector_rejected(tmp_path):
+    repo, b, f = _make(tmp_path)
+    bad = _SPEC.replace("source_paths: [src]", "source_paths: [src, src/calc.py]")
+    with pytest.raises(ImportFixError) as e:
+        _run(tmp_path, repo, b, f, spec=_spec_file(tmp_path, bad))
+    assert e.value.reason == "overlapping_selector"
+
+
+def test_missing_selector_among_valid_rejected(tmp_path):
+    repo, b, f = _make(tmp_path)
+    bad = _SPEC.replace("source_paths: [src]", "source_paths: [src, nonexistent]")
+    with pytest.raises(ImportFixError) as e:
+        _run(tmp_path, repo, b, f, spec=_spec_file(tmp_path, bad))
+    assert e.value.reason == "selected_path_missing"
+
+
+def _deletion_repo(tmp_path):
+    # B has calc.py (buggy) + legacy.py; the fix repairs calc.py and deletes legacy.py.
+    repo = _repo(tmp_path)
+    b = _commit(
+        repo,
+        {
+            "src/calc.py": "def combine(a, b):\n    return a - b\n",
+            "src/legacy.py": "RETIRED = 1\n",
+            **_TEST,
+        },
+        "buggy",
+    )
+    (repo / "src" / "legacy.py").unlink()  # the fix removes the retired module
+    (repo / "src" / "calc.py").write_text("def combine(a, b):\n    return a + b\n", newline="")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "fix")
+    return repo, b, _git(repo, "rev-parse", "HEAD")
+
+
+def test_deletion_repair_supported(tmp_path):
+    # A source file present only in B (deleted by the fix) is a valid, coverable change.
+    repo, b, f = _deletion_repo(tmp_path)
+    r = _run(tmp_path, repo, b, f, spec=_spec_file(tmp_path, _SPEC_TWO_FILES))
+    assert "src/legacy.py" in r.repair_changed_paths
+    assert r.buggy_source_file_count > r.fixed_source_file_count
+
+
+def test_added_file_change_is_classified_uncovered(tmp_path):
+    # A file added only in F is a repair path but cannot be a buggy-tree bug, so an
+    # import that does not (and cannot) declare it fails loudly rather than silently.
+    repo = _repo(tmp_path)
+    b = _commit(repo, {"src/calc.py": "def combine(a, b):\n    return a - b\n", **_TEST}, "buggy")
+    f = _commit(
+        repo,
+        {
+            "src/calc.py": "def combine(a, b):\n    return a + b\n",
+            "src/added.py": "HELPER = 1\n",
+            **_TEST,
+        },
+        "fix",
+    )
+    with pytest.raises(ImportFixError) as e:
+        _run(tmp_path, repo, b, f)
+    assert e.value.reason == "semantic_change_uncovered"
+
+
+def test_file_valued_tests_root_rejected(tmp_path):
+    repo = _repo(tmp_path)
+    files_b = {"src/calc.py": "def combine(a, b):\n    return a - b\n", "t.py": "x = 1\n"}
+    files_f = {"src/calc.py": "def combine(a, b):\n    return a + b\n", "t.py": "x = 1\n"}
+    b = _commit(repo, files_b, "buggy")
+    f = _commit(repo, files_f, "fix")
+    bad = _SPEC.replace("tests_root: tests", "tests_root: t.py")
+    with pytest.raises(ImportFixError) as e:
+        _run(tmp_path, repo, b, f, spec=_spec_file(tmp_path, bad))
+    assert e.value.reason in {"tests_root_not_directory", "tests_root_empty"}
+
+
+def test_missing_tests_root_rejected(tmp_path):
+    repo = _repo(tmp_path)
+    b = _commit(repo, {"src/calc.py": "def combine(a, b):\n    return a - b\n"}, "buggy")
+    f = _commit(repo, {"src/calc.py": "def combine(a, b):\n    return a + b\n"}, "fix")
+    # run_tests/tests_required true but no tests_root in the repo at all
+    bad = _SPEC.replace("tests_root: tests", "tests_root: tests_dir_that_does_not_exist")
+    with pytest.raises(ImportFixError) as e:
+        _run(tmp_path, repo, b, f, spec=_spec_file(tmp_path, bad))
+    assert e.value.reason == "tests_root_empty"
+
+
+def test_tests_required_without_tests_root_rejected(tmp_path):
+    repo, b, f = _make(tmp_path)
+    bad = _SPEC.replace("tests_root: tests\n", "")
+    with pytest.raises(ImportFixError) as e:
+        _run(tmp_path, repo, b, f, spec=_spec_file(tmp_path, bad))
+    assert e.value.reason == "tests_root_missing"
+
+
+# --------------------------------------------------------------------------- #
+# Publication and write integrity                                             #
+# --------------------------------------------------------------------------- #
+
+
+def test_existing_empty_output_rejected(tmp_path):
+    repo, b, f = _make(tmp_path)
+    (tmp_path / "out").mkdir()
+    with pytest.raises(ImportFixError) as e:
+        _run(tmp_path, repo, b, f, out="out")
+    assert e.value.reason == "output_exists"
+
+
+def test_existing_nonempty_output_rejected(tmp_path):
+    repo, b, f = _make(tmp_path)
+    (tmp_path / "out").mkdir()
+    (tmp_path / "out" / "keep.txt").write_text("important\n")
+    with pytest.raises(ImportFixError) as e:
+        _run(tmp_path, repo, b, f, out="out")
+    assert e.value.reason == "output_exists"
+    assert (tmp_path / "out" / "keep.txt").read_text() == "important\n"  # untouched
+
+
+def test_output_symlink_rejected(tmp_path):
+    repo, b, f = _make(tmp_path)
+    (tmp_path / "real").mkdir()
+    os.symlink(tmp_path / "real", tmp_path / "out")
+    with pytest.raises(ImportFixError) as e:
+        _run(tmp_path, repo, b, f, out="out")
+    assert e.value.reason == "output_exists"
+
+
+def test_zero_progress_write_fails_closed(tmp_path, monkeypatch):
+    # Unit test of the shared complete-write helper: a handle that never advances must
+    # fail closed. (Patching the global os.fdopen for a full import would break the Git
+    # subprocesses, so this exercises the helper directly.)
+    import arena.importer.historical_fix as hf
+
+    class _Stuck:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def write(self, _data):
+            return 0  # never makes progress
+
+        def flush(self):
+            pass
+
+        def fileno(self):
+            return 0
+
+    monkeypatch.setattr(hf.os, "fdopen", lambda *a, **k: _Stuck())
+    with pytest.raises(ImportFixError) as e:
+        hf._write_exact(tmp_path / "artifact.txt", b"some bytes", 0o644)
+    assert e.value.reason == "output_write_failure"
+
+
+def test_destination_appearing_before_publish(tmp_path, monkeypatch):
+    repo, b, f = _make(tmp_path)
+    import arena.importer.historical_fix as hf
+
+    real_scan = hf.scan_benchmark
+
+    def racing_scan(path):
+        result = real_scan(path)
+        (tmp_path / "out").mkdir()  # destination appears during validation
+        return result
+
+    monkeypatch.setattr(hf, "scan_benchmark", racing_scan)
+    with pytest.raises(ImportFixError) as e:
+        _run(tmp_path, repo, b, f, out="out")
+    assert e.value.reason == "output_exists"
+
+
+# --------------------------------------------------------------------------- #
+# Provenance and report counts                                                #
+# --------------------------------------------------------------------------- #
+
+
+def test_provenance_shape_and_evidence(tmp_path):
+    import json
+
+    repo, b, f = _make(tmp_path)
+    _run(tmp_path, repo, b, f)
+    prov = json.loads((tmp_path / "out" / "calc_combine_sign_001" / "provenance.json").read_text())
+    assert prov["provenance_schema_version"] == "2"
+    assert prov["mode"] == "reverse_fix"
+    assert prov["source_label"] == "acme/calc"
+    assert prov["diff_policy_version"]
+    assert prov["buggy_commit"] == b and prov["fixed_commit"] == f
+    for key in (
+        "buggy_source_files",
+        "fixed_source_files",
+        "fixed_test_files",
+        "changed_source_paths",
+        "changed_test_paths",
+    ):
+        assert key in prov
+    assert "src/calc.py" in prov["changed_source_paths"]
+    # Volatile / private fields must never appear.
+    text = json.dumps(prov)
+    for forbidden in ("hostname", "username", "time", str(repo), str(tmp_path)):
+        assert forbidden not in text
+
+
+@pytest.mark.parametrize(
+    "label", ["bad label", "http://x/y", "/abs/path", "a/b/c/d/e", "owner:repo", "..", ""]
+)
+def test_invalid_source_label_rejected(tmp_path, label):
+    repo, b, f = _make(tmp_path)
+    with pytest.raises(ImportFixError):
+        import_fix(
+            repo_path=repo,
+            buggy_commit=b,
+            fixed_commit=f,
+            spec_path=_spec_file(tmp_path),
+            output=tmp_path / "out",
+            source_label=label,
+        )
+
+
+def test_union_source_counts(tmp_path):
+    repo, b, f = _deletion_repo(tmp_path)
+    r = _run(tmp_path, repo, b, f, spec=_spec_file(tmp_path, _SPEC_TWO_FILES))
+    assert r.buggy_source_file_count == 2  # calc.py + legacy.py
+    assert r.fixed_source_file_count == 1  # legacy.py deleted
+    assert r.union_source_file_count == 2
+    assert r.source_file_count == r.union_source_file_count

@@ -10,8 +10,12 @@ repository, generate a one-case candidate pack:
     tests/           = selected test content at F
 
 This is a SYNTHETIC reverse-review case derived from a real historical fix; it is
-not the original bug-introducing pull request. Generation is deterministic, local,
-offline, non-AI, and does not execute repository code or certify the result.
+not the original bug-introducing pull request. Generation reads committed objects
+only (replacement refs ignored, lazy fetching disabled, shallow/grafted history
+rejected), derives changes by comparing exact trees, and generates the patches in
+a fresh isolated repository, so the source working tree, local config, attributes
+and history overrides cannot affect the output. It does not execute repository
+code or certify the result, and the same B/F/spec produce byte-identical output.
 """
 
 from __future__ import annotations
@@ -31,11 +35,16 @@ from arena.benchmark.dataset_validator import validate_dataset
 from arena.benchmark.pack_hash import write_checksum
 from arena.core import limits
 from arena.core.errors import ImportFixError
+from arena.importer import diff_repo
 from arena.importer import git_objects as g
 from arena.importer.import_spec import ImportSpec, load_import_spec
+from arena.importer.provenance import (
+    DIFF_POLICY_VERSION,
+    PROVENANCE_SCHEMA_VERSION,
+    Provenance,
+    validate_source_label,
+)
 from arena.patching.git_pipeline import apply_patch
-
-PROVENANCE_SCHEMA_VERSION = "1"
 
 
 @dataclass
@@ -46,8 +55,10 @@ class ImportResult:
     fixed_commit: str
     merge_base: str
     object_format: str
-    source_file_count: int
-    test_file_count: int
+    buggy_source_file_count: int
+    fixed_source_file_count: int
+    union_source_file_count: int
+    fixed_test_file_count: int
     repair_changed_paths: list[str] = field(default_factory=list)
     test_changed_paths: list[str] = field(default_factory=list)
     pack_checksum: str = ""
@@ -55,83 +66,101 @@ class ImportResult:
     contamination_ok: bool = False
     certification: str = "not run"
 
+    @property
+    def source_file_count(self) -> int:
+        """Compatibility alias, explicitly defined as the union source file count."""
+        return self.union_source_file_count
+
 
 def _under(path: str, prefix: str) -> bool:
     return path == prefix or path.startswith(prefix + "/")
 
 
-def _materialize(
-    repo: g.Repo, tree: dict[str, tuple[str, str]], dest_root: Path, counters: dict
-) -> None:
-    for path, (mode, oid) in sorted(tree.items()):
-        data = g.cat_blob(repo, oid)
-        counters["files"] += 1
-        counters["bytes"] += len(data)
-        if counters["files"] > limits.IMPORT_MAX_FILES:
-            raise ImportFixError("output_write_failure", "too many files in the generated pack")
-        if counters["bytes"] > limits.IMPORT_MAX_TOTAL_BYTES:
-            raise ImportFixError("output_write_failure", "generated pack exceeds the byte limit")
-        target = dest_root / path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(fd, "wb") as handle:
-                handle.write(data)
-        except OSError as exc:
-            raise ImportFixError(
-                "output_write_failure", "could not write a generated file"
-            ) from exc
-        os.chmod(target, 0o755 if mode == "100755" else 0o644)
-        if target.lstat().st_size != len(data) or target.read_bytes() != data:
-            raise ImportFixError("output_write_failure", "written file did not verify")
-
-
-def _decode_diff(raw: bytes, label: str) -> str:
+def _write_exact(path: Path, data: bytes, mode: int) -> None:
+    """Exclusive create + complete write + verify size, bytes and mode."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        return raw.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise ImportFixError("invalid_diff_encoding", f"{label} is not valid UTF-8") from exc
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except OSError as exc:
+        raise ImportFixError("output_write_failure", "could not create a generated file") from exc
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            view = memoryview(data)
+            while view:
+                written = handle.write(view)
+                if not written:
+                    raise ImportFixError("output_write_failure", "zero-progress write")
+                view = view[written:]
+            handle.flush()
+            os.fsync(handle.fileno())
+    except OSError as exc:
+        raise ImportFixError("output_write_failure", "could not write a generated file") from exc
+    os.chmod(path, mode)
+    info = path.lstat()
+    if info.st_size != len(data) or path.read_bytes() != data:
+        raise ImportFixError("output_write_failure", "written file did not verify")
+    if (info.st_mode & 0o777) != mode and os.name == "posix":
+        raise ImportFixError("output_write_failure", "written file mode did not verify")
 
 
-def _tree_files(root: Path) -> dict[str, bytes]:
-    out: dict[str, bytes] = {}
-    for current, _dirs, files in os.walk(root):
-        for name in files:
-            p = Path(current) / name
-            out[p.relative_to(root).as_posix()] = p.read_bytes()
-    return out
+def _validate_source_selectors(raw_selectors: list[str], present: set[str]) -> None:
+    """Reject duplicate, overlapping, or unmatched source selectors (no silent dedup)."""
+    if len(raw_selectors) != len(set(raw_selectors)):
+        raise ImportFixError("duplicate_selector", "source_paths has a duplicate selector")
+    unique = sorted(set(raw_selectors))
+    for a in unique:
+        for b in unique:
+            if a != b and (_under(a, b) or _under(b, a)):
+                raise ImportFixError("overlapping_selector", f"selectors overlap: {a!r} and {b!r}")
+    for selector in unique:
+        if not any(p == selector or _under(p, selector) for p in present):
+            raise ImportFixError(
+                "selected_path_missing", f"source selector matches no file: {selector!r}"
+            )
 
 
-def _verify_reproduces(source_dir: Path, patch_text: str, expected_dir: Path, reason: str) -> None:
-    """Apply patch_text to source_dir via the Phase 1D pipeline; require == expected_dir."""
-    with tempfile.TemporaryDirectory(prefix="arena-import-verify-") as tmp:
-        dest = Path(tmp) / "ws"
-        result = apply_patch(
-            source_dir=source_dir, patch_text=patch_text, protected_paths=[], destination=dest
-        )
-        if not result.applied or result.workspace is None:
-            raise ImportFixError(reason, f"authoritative apply failed: {result.reason}")
-        if _tree_files(result.workspace) != _tree_files(expected_dir):
-            raise ImportFixError(reason, "patched tree does not match the expected commit tree")
+def _selected_tree_bytes(
+    repo: g.Repo, tree: dict[str, tuple[str, str]]
+) -> dict[str, tuple[str, bytes]]:
+    """Read exact blob bytes for every entry (each blob is bounded by the Git runner)."""
+    return {path: (mode, g.cat_blob(repo, oid)) for path, (mode, oid) in tree.items()}
 
 
-def _build_documents(
-    spec: ImportSpec,
-    *,
-    buggy: str,
-    fixed: str,
-    base: str,
-    object_format: str,
-    source_label: str | None,
-    repair_paths: list[str],
-    test_paths: list[str],
-    pr_diff_sha: str,
-    reference_sha: str,
-    has_tests: bool,
-) -> tuple[str, str, str]:
-    """Return (manifest_yaml, case_yaml, provenance_json) as deterministic text."""
+def _enforce_total_bounds(*trees: dict[str, tuple[str, bytes]]) -> None:
+    files = sum(len(t) for t in trees)
+    total = sum(len(data) for t in trees for _mode, data in t.values())
+    if files > limits.IMPORT_MAX_FILES or total > limits.IMPORT_MAX_TOTAL_BYTES:
+        raise ImportFixError("output_write_failure", "generated pack exceeds file/byte limits")
+
+
+def _require_text(files: dict[str, tuple[str, bytes]], changed: set[str]) -> None:
+    """Reject a binary changed source blob (NUL byte or non-UTF-8), from exact bytes."""
+    for path in changed:
+        mode_data = files.get(path)
+        if mode_data is None:
+            continue  # deleted in this side; the other side is checked too
+        _mode, data = mode_data
+        if b"\x00" in data:
+            raise ImportFixError("binary_change", f"binary source change is not supported: {path}")
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ImportFixError("binary_change", f"non-UTF-8 source change: {path}") from exc
+
+
+def _source_changes(
+    buggy: dict[str, tuple[str, bytes]], fixed: dict[str, tuple[str, bytes]]
+) -> set[str]:
+    """Paths whose (mode, bytes) differ between the selected buggy and fixed trees."""
+    changed: set[str] = set()
+    for path in set(buggy) | set(fixed):
+        if buggy.get(path) != fixed.get(path):
+            changed.add(path)
+    return changed
+
+
+def _build_case_yaml(spec: ImportSpec, has_tests: bool) -> str:
     case = spec.to_case()
-    # Validate the assembled case once here so a bad spec fails before any write.
     ground_truth = spec.ground_truth.model_dump(mode="json")
     ground_truth.pop("primary_bug", None)
     input_doc = {"diff": "pr.diff", "before_dir": "before", "after_dir": "after"}
@@ -151,26 +180,51 @@ def _build_documents(
         "validation": spec.validation.model_dump(mode="json"),
         "metrics": spec.metrics.model_dump(mode="json"),
     }
-    manifest_doc = {"version": spec.pack.version, "name": spec.pack.name, "cases": [case.id]}
-    provenance = {
-        "provenance_schema_version": PROVENANCE_SCHEMA_VERSION,
-        "mode": "reverse_fix",
-        "source_label": source_label,
-        "object_format": object_format,
-        "buggy_commit": buggy,
-        "fixed_commit": fixed,
-        "merge_base": base,
-        "source_paths": sorted(spec.source_paths),
-        "tests_root": spec.tests_root,
-        "repair_changed_paths": sorted(repair_paths),
-        "test_changed_paths": sorted(test_paths),
-        "pr_diff_sha256": pr_diff_sha,
-        "reference_patch_sha256": reference_sha,
-    }
-    manifest_yaml = yaml.safe_dump(manifest_doc, sort_keys=True, default_flow_style=False)
-    case_yaml = yaml.safe_dump(case_doc, sort_keys=True, default_flow_style=False)
-    provenance_json = json.dumps(provenance, sort_keys=True, indent=2) + "\n"
-    return manifest_yaml, case_yaml, provenance_json
+    return yaml.safe_dump(case_doc, sort_keys=True, default_flow_style=False)
+
+
+def _verify_reproduces(
+    source_dir: Path, patch_text: str, expected: dict[str, bytes], reason: str
+) -> None:
+    """Apply patch via the Phase 1D pipeline; require the result to equal ``expected``."""
+    with tempfile.TemporaryDirectory(prefix="arena-import-verify-") as tmp:
+        dest = Path(tmp) / "ws"
+        result = apply_patch(
+            source_dir=source_dir, patch_text=patch_text, protected_paths=[], destination=dest
+        )
+        if not result.applied or result.workspace is None:
+            raise ImportFixError(reason, f"authoritative apply failed: {result.reason}")
+        produced = {
+            p.relative_to(result.workspace).as_posix(): p.read_bytes()
+            for p in result.workspace.rglob("*")
+            if p.is_file()
+        }
+        if produced != expected:
+            raise ImportFixError(reason, "patched tree does not match the expected commit tree")
+
+
+def _publish(staging: Path, output: Path) -> None:
+    """No-overwrite publish: claim ``output`` atomically with mkdir, then move contents in."""
+    parent = output.parent
+    if not (parent.is_dir() and not parent.is_symlink()):
+        raise ImportFixError("output_write_failure", "output parent is not a real directory")
+    try:
+        os.lstat(output)
+        raise ImportFixError("output_exists", f"output already exists: {output}")
+    except FileNotFoundError:
+        pass
+    try:
+        os.mkdir(output)  # atomic no-clobber claim; fails if anything exists there
+    except FileExistsError as exc:
+        raise ImportFixError("output_exists", f"output already exists: {output}") from exc
+    try:
+        for entry in sorted(staging.iterdir()):
+            os.rename(entry, output / entry.name)
+    except OSError as exc:
+        shutil.rmtree(output, ignore_errors=True)
+        raise ImportFixError(
+            "output_write_failure", "could not publish the candidate pack"
+        ) from exc
 
 
 def import_fix(
@@ -184,19 +238,18 @@ def import_fix(
 ) -> ImportResult:
     """Generate a deterministic reverse-fix candidate pack. See module docstring."""
     output = Path(output)
-    if output.exists():
+    if output.exists() or output.is_symlink():
         raise ImportFixError("output_exists", f"output already exists: {output}")
-    if source_label is not None and len(source_label) > limits.IMPORT_SOURCE_LABEL_LEN:
-        raise ImportFixError("invalid_spec", "source label is too long")
+    if source_label is not None:
+        validate_source_label(source_label)
     spec = load_import_spec(Path(spec_path))
-    if spec.execution.run_tests and not spec.tests_root:
-        raise ImportFixError(
-            "selected_path_missing", "run_tests is set but no tests_root was given"
-        )
 
-    source_paths = sorted(set(spec.source_paths))
+    raw_selectors = list(spec.source_paths)
+    source_paths = sorted(set(raw_selectors))
     tests_root = spec.tests_root
-    # Source and test selections must be disjoint.
+    needs_tests = spec.execution.run_tests or spec.validation.tests_required
+    if needs_tests and not tests_root:
+        raise ImportFixError("tests_root_missing", "tests are required but no tests_root was given")
     if tests_root is not None:
         for sp in source_paths:
             if _under(sp, tests_root) or _under(tests_root, sp):
@@ -213,58 +266,57 @@ def import_fix(
         if not g.is_ancestor(repo, buggy, fixed):
             raise ImportFixError("fixed_not_descendant", "fixed commit is not descended from buggy")
 
-        after_src = g.read_tree(repo, buggy, source_paths)  # B
-        before_src = g.read_tree(repo, fixed, source_paths)  # F
-        if not after_src and not before_src:
-            raise ImportFixError("selected_path_missing", "no source files matched the selection")
-        # Tests come from the fixed commit; their tests_root-relative paths are placed
-        # under the case's tests/ directory (the contents of tests_root, not the prefix).
+        after_tree = g.read_tree(repo, buggy, source_paths)  # B selected source
+        before_tree = g.read_tree(repo, fixed, source_paths)  # F selected source
+        present = set(after_tree) | set(before_tree)
+        _validate_source_selectors(raw_selectors, present)
+
+        # Tests come from the fixed commit; tests_root must be a nonempty directory.
         tests_tree = g.read_tree(repo, fixed, [tests_root]) if tests_root else {}
+        if tests_root is not None:
+            if tests_root in tests_tree and len(tests_tree) == 1:
+                raise ImportFixError("tests_root_not_directory", "tests_root is a single file")
+            if not tests_tree:
+                raise ImportFixError("tests_root_empty", "tests_root contains no files")
         tests_materialize: dict[str, tuple[str, str]] = {}
         if tests_root is not None:
             for path, mode_oid in tests_tree.items():
-                if path == tests_root:
-                    rel = Path(tests_root).name
-                elif path.startswith(tests_root + "/"):
-                    rel = path[len(tests_root) + 1 :]
-                else:  # pragma: no cover - ls-tree is restricted to the prefix
-                    raise ImportFixError("selected_path_missing", "unexpected test path")
+                rel = path[len(tests_root) + 1 :] if path.startswith(tests_root + "/") else path
                 tests_materialize[rel] = mode_oid
 
-        # Classify every change B->F as selected-source or selected-tests; nothing silent.
-        all_changed = g.changed_paths(repo, buggy, fixed)
-        repair_paths: list[str] = []
-        test_paths: list[str] = []
-        unclassified: list[str] = []
-        for path in sorted(all_changed):
+        after_src = _selected_tree_bytes(repo, after_tree)  # B bytes
+        before_src = _selected_tree_bytes(repo, before_tree)  # F bytes
+        test_files = _selected_tree_bytes(repo, tests_materialize)  # F test bytes
+        _enforce_total_bounds(after_src, before_src, test_files)
+
+        # Source changes from exact tree comparison; binary/text from exact bytes.
+        repair_set = _source_changes(after_src, before_src)
+        _require_text(after_src, repair_set)
+        _require_text(before_src, repair_set)
+
+        # Whole-tree change classification (tree comparison, attribute-independent).
+        for path in sorted(g.changed_tree_paths(repo, buggy, fixed)):
             in_source = any(_under(path, sp) for sp in source_paths)
             in_tests = tests_root is not None and _under(path, tests_root)
             if in_source and in_tests:
                 raise ImportFixError("source_test_overlap", f"changed path is in both: {path}")
-            if in_source:
-                repair_paths.append(path)
-            elif in_tests:
-                test_paths.append(path)
-            else:
-                unclassified.append(path)
-        if unclassified:
-            raise ImportFixError(
-                "changed_path_unclassified",
-                "changed paths outside source/tests selection: " + ", ".join(unclassified[:20]),
-            )
-        if g.has_binary_change(repo, buggy, fixed, source_paths):
-            raise ImportFixError("binary_change", "binary source change is not supported")
-
-        reference_patch = _decode_diff(
-            g.diff_text(repo, buggy, fixed, source_paths), "reference.patch"
+            if not in_source and not in_tests:
+                raise ImportFixError("changed_path_unclassified", f"unclassified change: {path}")
+        test_changed = sorted(
+            p
+            for p in g.changed_tree_paths(repo, buggy, fixed)
+            if tests_root and _under(p, tests_root)
         )
-        pr_diff = _decode_diff(g.diff_text(repo, fixed, buggy, source_paths), "pr.diff")
+
+        # Patches generated in a fresh isolated repo (never inside the source repo).
+        reference_patch, pr_diff = diff_repo.generate_patches(
+            repo.object_format, after_src, before_src
+        )
         reference_sha = hashlib.sha256(reference_patch.encode("utf-8")).hexdigest()
         pr_diff_sha = hashlib.sha256(pr_diff.encode("utf-8")).hexdigest()
 
-        # Ground-truth admission against the buggy after/ tree and the synthetic review.
+        # Ground-truth admission against the buggy tree and the synthetic review.
         bug_files = {f.path for bug in spec.ground_truth.bugs for f in bug.files}
-        repair_set = set(repair_paths)
         for bug in spec.ground_truth.bugs:
             for gt_file in bug.files:
                 if gt_file.path not in after_src:
@@ -284,18 +336,39 @@ def import_fix(
                 "repair paths not covered by any declared bug: " + ", ".join(uncovered[:20]),
             )
 
+        provenance = Provenance(
+            provenance_schema_version=PROVENANCE_SCHEMA_VERSION,
+            mode="reverse_fix",
+            source_label=source_label,
+            object_format=repo.object_format,  # type: ignore[arg-type]
+            diff_policy_version=DIFF_POLICY_VERSION,
+            buggy_commit=buggy,
+            fixed_commit=fixed,
+            merge_base=base,
+            source_paths=source_paths,
+            tests_root=tests_root,
+            buggy_source_files=sorted(after_src),
+            fixed_source_files=sorted(before_src),
+            fixed_test_files=sorted(tests_materialize),
+            changed_source_paths=sorted(repair_set),
+            changed_test_paths=test_changed,
+            pr_diff_sha256=pr_diff_sha,
+            reference_patch_sha256=reference_sha,
+        )
+
         staging = Path(tempfile.mkdtemp(prefix=".arena-import-", dir=str(output.parent)))
         try:
             case_dir = staging / spec.case.id
             after_dir = case_dir / "after"
             before_dir = case_dir / "before"
-            counters = {"files": 0, "bytes": 0}
-            _materialize(repo, after_src, after_dir, counters)
-            _materialize(repo, before_src, before_dir, counters)
-            if tests_materialize:
-                _materialize(repo, tests_materialize, case_dir / "tests", counters)
+            for path, (mode, data) in after_src.items():
+                _write_exact(after_dir / path, data, 0o755 if mode == "100755" else 0o644)
+            for path, (mode, data) in before_src.items():
+                _write_exact(before_dir / path, data, 0o755 if mode == "100755" else 0o644)
+            for rel, (mode, data) in test_files.items():
+                _write_exact(case_dir / "tests" / rel, data, 0o755 if mode == "100755" else 0o644)
 
-            # Validate ground-truth line ranges against the materialized buggy files.
+            # Ground-truth line ranges against the materialized buggy files.
             for bug in spec.ground_truth.bugs:
                 for gt_file in bug.files:
                     line_count = len(
@@ -309,41 +382,45 @@ def import_fix(
                                 f"({line_count} lines)",
                             )
 
-            (case_dir / "reference.patch").write_text(reference_patch, encoding="utf-8")
-            (case_dir / "pr.diff").write_text(pr_diff, encoding="utf-8")
-            manifest_yaml, case_yaml, provenance_json = _build_documents(
-                spec,
-                buggy=buggy,
-                fixed=fixed,
-                base=base,
-                object_format=repo.object_format,
-                source_label=source_label,
-                repair_paths=repair_paths,
-                test_paths=test_paths,
-                pr_diff_sha=pr_diff_sha,
-                reference_sha=reference_sha,
-                has_tests=bool(tests_tree),
+            _write_exact(case_dir / "reference.patch", reference_patch.encode("utf-8"), 0o644)
+            _write_exact(case_dir / "pr.diff", pr_diff.encode("utf-8"), 0o644)
+            _write_exact(
+                staging / "manifest.yaml",
+                yaml.safe_dump(
+                    {"version": spec.pack.version, "name": spec.pack.name, "cases": [spec.case.id]},
+                    sort_keys=True,
+                    default_flow_style=False,
+                ).encode("utf-8"),
+                0o644,
             )
-            (staging / "manifest.yaml").write_text(manifest_yaml, encoding="utf-8")
-            (case_dir / "case.yaml").write_text(case_yaml, encoding="utf-8")
-            (case_dir / "provenance.json").write_text(provenance_json, encoding="utf-8")
+            _write_exact(
+                case_dir / "case.yaml",
+                _build_case_yaml(spec, bool(tests_materialize)).encode("utf-8"),
+                0o644,
+            )
+            _write_exact(
+                case_dir / "provenance.json",
+                (
+                    json.dumps(provenance.model_dump(mode="json"), sort_keys=True, indent=2) + "\n"
+                ).encode("utf-8"),
+                0o644,
+            )
 
-            # Authoritative reproduction proof through the Phase 1D pipeline.
+            # Prove both diffs reproduce their target trees through the Phase 1D pipeline.
+            fixed_bytes = {p: d for p, (_m, d) in before_src.items()}
+            buggy_bytes = {p: d for p, (_m, d) in after_src.items()}
             _verify_reproduces(
-                after_dir, reference_patch, before_dir, "reference_patch_verification_failed"
+                after_dir, reference_patch, fixed_bytes, "reference_patch_verification_failed"
             )
-            _verify_reproduces(before_dir, pr_diff, after_dir, "pr_diff_verification_failed")
+            _verify_reproduces(before_dir, pr_diff, buggy_bytes, "pr_diff_verification_failed")
 
             checksum = write_checksum(staging)
             errors = validate_dataset(staging)
             if errors:
                 raise ImportFixError("generated_pack_invalid", "; ".join(errors)[:512])
-            warnings = scan_benchmark(staging)
-            if warnings:
-                raise ImportFixError(
-                    "contamination_detected", f"{len(warnings)} contamination warning(s)"
-                )
-            os.replace(staging, output)
+            if scan_benchmark(staging):
+                raise ImportFixError("contamination_detected", "contamination warnings present")
+            _publish(staging, output)
         except BaseException:
             shutil.rmtree(staging, ignore_errors=True)
             raise
@@ -355,10 +432,12 @@ def import_fix(
         fixed_commit=fixed,
         merge_base=base,
         object_format=repo.object_format,
-        source_file_count=len(after_src),
-        test_file_count=len(tests_tree),
-        repair_changed_paths=sorted(repair_paths),
-        test_changed_paths=sorted(test_paths),
+        buggy_source_file_count=len(after_src),
+        fixed_source_file_count=len(before_src),
+        union_source_file_count=len(present),
+        fixed_test_file_count=len(tests_materialize),
+        repair_changed_paths=sorted(repair_set),
+        test_changed_paths=test_changed,
         pack_checksum=checksum,
         validation_ok=True,
         contamination_ok=True,
