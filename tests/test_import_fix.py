@@ -395,13 +395,17 @@ def test_import_spec_rejects_unknown_fields(tmp_path):
 
 
 def test_cli_help_smoke():
+    import re
+
     from typer.testing import CliRunner
 
     from arena.cli.main import app
 
-    result = CliRunner().invoke(app, ["import-fix", "--help"])
+    # Wide width so Rich does not truncate option names; strip ANSI before matching.
+    result = CliRunner().invoke(app, ["import-fix", "--help"], env={"COLUMNS": "200"})
     assert result.exit_code == 0
-    assert "--buggy-commit" in result.output and "--fixed-commit" in result.output
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+    assert "buggy" in plain and "fixed" in plain and "spec" in plain
 
 
 @pytest.mark.skipif(os.name != "posix", reason="local execution is POSIX-only")
