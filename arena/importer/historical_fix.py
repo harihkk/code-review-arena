@@ -217,7 +217,19 @@ def import_fix(
         before_src = g.read_tree(repo, fixed, source_paths)  # F
         if not after_src and not before_src:
             raise ImportFixError("selected_path_missing", "no source files matched the selection")
+        # Tests come from the fixed commit; their tests_root-relative paths are placed
+        # under the case's tests/ directory (the contents of tests_root, not the prefix).
         tests_tree = g.read_tree(repo, fixed, [tests_root]) if tests_root else {}
+        tests_materialize: dict[str, tuple[str, str]] = {}
+        if tests_root is not None:
+            for path, mode_oid in tests_tree.items():
+                if path == tests_root:
+                    rel = Path(tests_root).name
+                elif path.startswith(tests_root + "/"):
+                    rel = path[len(tests_root) + 1 :]
+                else:  # pragma: no cover - ls-tree is restricted to the prefix
+                    raise ImportFixError("selected_path_missing", "unexpected test path")
+                tests_materialize[rel] = mode_oid
 
         # Classify every change B->F as selected-source or selected-tests; nothing silent.
         all_changed = g.changed_paths(repo, buggy, fixed)
@@ -280,8 +292,8 @@ def import_fix(
             counters = {"files": 0, "bytes": 0}
             _materialize(repo, after_src, after_dir, counters)
             _materialize(repo, before_src, before_dir, counters)
-            if tests_tree:
-                _materialize(repo, tests_tree, case_dir / "tests", counters)
+            if tests_materialize:
+                _materialize(repo, tests_materialize, case_dir / "tests", counters)
 
             # Validate ground-truth line ranges against the materialized buggy files.
             for bug in spec.ground_truth.bugs:
