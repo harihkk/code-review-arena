@@ -6,7 +6,7 @@ description: 'FrozenError declared its message and args as class attributes inst
 
   '
 execution:
-  docker_image: arena-realfix-pilot:1
+  docker_image: arena-realfix-seed:0
   run_static_analysis: false
   run_tests: true
   static_analysis_command: null

@@ -1,6 +1,6 @@
-version: realfix_pilot_v1
-name: RealFix Pilot v1
-default_docker_image: arena-realfix-pilot:1
+version: realfix_seed_v0
+name: RealFix Seed v0
+default_docker_image: arena-realfix-seed:0
 cases:
   - attrs_frozen_error_message_001
   - click_shared_default_precedence_001

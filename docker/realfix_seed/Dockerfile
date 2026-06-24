@@ -1,4 +1,4 @@
-# RealFix Pilot v1 hermetic test image: arena-realfix-pilot:1
+# RealFix Seed v0 hermetic test image: arena-realfix-seed:0
 # Carries no Arena source and no benchmark source. Cases bind-mount their
 # materialized tree at /workspace and run with --network none. PYTHONPATH=/workspace/src
 # makes src-layout packages (e.g. src/click) importable from the materialized source.

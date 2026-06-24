@@ -1,4 +1,4 @@
-# RealFix Pilot v1 test runtime — pinned. Built into arena-realfix-pilot:1.
+# RealFix Seed v0 test runtime — pinned. Built into arena-realfix-seed:0.
 # pytest: universal test runner for the pilot's pure-Python cases.
 # hypothesis: import-time dependency of some repositories' test modules (e.g. attrs);
 #   the admitted cases target non-property tests, so it is never exercised for randomness.
