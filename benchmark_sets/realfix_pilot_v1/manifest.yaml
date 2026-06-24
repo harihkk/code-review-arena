@@ -1,0 +1,7 @@
+version: realfix_pilot_v1
+name: RealFix Pilot v1
+default_docker_image: arena-realfix-pilot:1
+cases:
+  - attrs_frozen_error_message_001
+  - click_shared_default_precedence_001
+  - rich_table_padding_width_001
