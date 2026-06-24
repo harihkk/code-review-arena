@@ -124,9 +124,12 @@ STATIC_ANALYSIS_OUTPUT_BYTES = 512 * 1024
 # --- Historical-fix importer ---
 # Per-file materialization and diff output are read through the bounded Git runner,
 # so a single object is capped at GIT_OUTPUT_BYTES; whole-import file/byte counts
-# reuse the snapshot caps. Source label is a stable "owner/repo"-style string.
+# reuse the snapshot caps and are enforced INCREMENTALLY while blobs are loaded, so
+# an oversized selection is rejected before it is all read into memory. Source label
+# is a stable "owner/repo"-style string.
 IMPORT_MAX_FILES = SNAPSHOT_MAX_FILES
 IMPORT_MAX_TOTAL_BYTES = SNAPSHOT_MAX_TOTAL_BYTES
+IMPORT_MAX_FILE_BYTES = PACK_FILE_BYTES
 IMPORT_SOURCE_PATHS = 256
 IMPORT_SOURCE_LABEL_LEN = 256
 

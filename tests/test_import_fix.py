@@ -309,7 +309,7 @@ def test_oversized_pack_rejected(tmp_path, monkeypatch):
     monkeypatch.setattr(limits, "IMPORT_MAX_FILES", 1)
     with pytest.raises(ImportFixError) as e:
         _run(tmp_path, repo, b, f)
-    assert e.value.reason == "output_write_failure"
+    assert e.value.reason == "import_limit_exceeded"
 
 
 # --------------------------------------------------------------------------- #
@@ -813,3 +813,237 @@ def test_union_source_counts(tmp_path):
     assert r.fixed_source_file_count == 1  # legacy.py deleted
     assert r.union_source_file_count == 2
     assert r.source_file_count == r.union_source_file_count
+
+
+# --------------------------------------------------------------------------- #
+# Incremental import budget                                                   #
+# --------------------------------------------------------------------------- #
+
+
+def test_file_count_rejected_before_reading_blobs(tmp_path, monkeypatch):
+    # The output-file-count limit is enforced before any blob is read.
+    repo, b, f = _make(tmp_path)
+    import arena.importer.git_objects as go
+
+    calls = []
+    real = go.cat_blob
+    monkeypatch.setattr(go, "cat_blob", lambda repo, oid: (calls.append(oid), real(repo, oid))[1])
+    monkeypatch.setattr(limits, "IMPORT_MAX_FILES", 1)  # 3 output files exceed this
+    with pytest.raises(ImportFixError) as e:
+        _run(tmp_path, repo, b, f)
+    assert e.value.reason == "import_limit_exceeded"
+    assert calls == []  # rejected before reading a single blob
+
+
+def test_byte_limit_rejected_during_loading_stops_early(tmp_path, monkeypatch):
+    # The byte budget is enforced incrementally; later blobs are never requested.
+    repo = _repo(tmp_path)
+    files = {f"src/m{i}.py": f"DATA_{i} = '{'x' * 80}'\n" for i in range(4)}
+    files.update(_TEST)
+    b = _commit(repo, files, "buggy")
+    files2 = dict(files)
+    files2["src/m0.py"] = f"DATA_0 = '{'y' * 80}'\n"
+    f = _commit(repo, files2, "fix")
+    import arena.importer.git_objects as go
+
+    calls = []
+    real = go.cat_blob
+    monkeypatch.setattr(go, "cat_blob", lambda repo, oid: (calls.append(oid), real(repo, oid))[1])
+    monkeypatch.setattr(limits, "IMPORT_MAX_TOTAL_BYTES", 120)  # ~1 of the ~92-byte files fits
+    with pytest.raises(ImportFixError) as e:
+        _run(tmp_path, repo, b, f)
+    assert e.value.reason == "import_limit_exceeded"
+    # 4 distinct source files + 1 test exist; loading stopped well before reading them all.
+    assert 0 < len(calls) < 5
+
+
+def test_per_file_limit_rejected(tmp_path, monkeypatch):
+    repo, b, f = _make(tmp_path)
+    monkeypatch.setattr(limits, "IMPORT_MAX_FILE_BYTES", 4)  # below the calc.py blob size
+    with pytest.raises(ImportFixError) as e:
+        _run(tmp_path, repo, b, f)
+    assert e.value.reason == "import_limit_exceeded"
+
+
+# --------------------------------------------------------------------------- #
+# Output-parent preflight                                                     #
+# --------------------------------------------------------------------------- #
+
+
+def test_output_parent_missing(tmp_path):
+    repo, b, f = _make(tmp_path)
+    with pytest.raises(ImportFixError) as e:
+        import_fix(
+            repo_path=repo,
+            buggy_commit=b,
+            fixed_commit=f,
+            spec_path=_spec_file(tmp_path),
+            output=tmp_path / "nope" / "out",
+            source_label="acme/calc",
+        )
+    assert e.value.reason == "output_parent_missing"
+
+
+def test_output_parent_is_file(tmp_path):
+    repo, b, f = _make(tmp_path)
+    (tmp_path / "afile").write_text("x")
+    with pytest.raises(ImportFixError) as e:
+        import_fix(
+            repo_path=repo,
+            buggy_commit=b,
+            fixed_commit=f,
+            spec_path=_spec_file(tmp_path),
+            output=tmp_path / "afile" / "out",
+            source_label="acme/calc",
+        )
+    assert e.value.reason == "output_parent_invalid"
+
+
+def test_output_parent_is_symlink(tmp_path):
+    repo, b, f = _make(tmp_path)
+    (tmp_path / "real").mkdir()
+    os.symlink(tmp_path / "real", tmp_path / "link")
+    with pytest.raises(ImportFixError) as e:
+        import_fix(
+            repo_path=repo,
+            buggy_commit=b,
+            fixed_commit=f,
+            spec_path=_spec_file(tmp_path),
+            output=tmp_path / "link" / "out",
+            source_label="acme/calc",
+        )
+    assert e.value.reason == "output_parent_invalid"
+    assert list((tmp_path / "real").iterdir()) == []  # no staging residue
+
+
+def test_staging_creation_failure(tmp_path, monkeypatch):
+    repo, b, f = _make(tmp_path)
+    import arena.importer.historical_fix as hf
+
+    real_mkdtemp = hf.tempfile.mkdtemp
+
+    def selective(*a, **k):
+        # Only the staging call passes dir=<output parent>; leave diff_repo and
+        # the verify TemporaryDirectory (which pass dir positionally as None) alone.
+        if k.get("dir"):
+            raise OSError("cannot create staging")
+        return real_mkdtemp(*a, **k)
+
+    monkeypatch.setattr(hf.tempfile, "mkdtemp", selective)
+    with pytest.raises(ImportFixError) as e:
+        _run(tmp_path, repo, b, f, out="out")
+    assert e.value.reason == "staging_failed"
+    assert not (tmp_path / "out").exists()
+    assert not any(p.name.startswith(".arena-import-") for p in tmp_path.iterdir())
+
+
+# --------------------------------------------------------------------------- #
+# Exact mode reproduction                                                     #
+# --------------------------------------------------------------------------- #
+
+
+def _mode_change_repo(tmp_path, b_mode, f_mode):
+    # The fix changes tool.py's content AND its mode (a content-less diff would be
+    # rejected by normal pack validation, so a realistic case changes both).
+    repo = _repo(tmp_path)
+    b = _commit(
+        repo, {"src/tool.py": "print('hi')\n", **_TEST}, "buggy", modes={"src/tool.py": b_mode}
+    )
+    (repo / "src" / "tool.py").write_text("print('bye')\n", newline="")
+    os.chmod(repo / "src" / "tool.py", f_mode)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "fix")
+    return repo, b, _git(repo, "rev-parse", "HEAD")
+
+
+_MODE_SPEC = textwrap.dedent("""\
+    schema_version: "1"
+    pack: {version: "1", name: imported_fixes}
+    case:
+      id: tool_mode_001
+      title: tool mode
+      category: correctness
+      severity: low
+      stack: [python]
+      description: tool file had the wrong mode.
+    source_paths: [src]
+    tests_root: tests
+    ground_truth:
+      bugs:
+        - id: bug-1
+          summary: wrong file mode
+          files:
+            - path: src/tool.py
+              line_ranges: [{start: 1, end: 1}]
+          concepts: [permissions]
+          must_mention: [executable]
+          acceptable_fix_keywords: [chmod]
+    execution: {run_tests: true, test_command: "pytest -q tests", timeout_seconds: 30}
+    validation: {patch_required: true, tests_required: true}
+""")
+
+
+@pytest.mark.parametrize("b_mode,f_mode", [(0o644, 0o755), (0o755, 0o644)])
+def test_mode_change_reproduces(tmp_path, b_mode, f_mode):
+    repo, b, f = _mode_change_repo(tmp_path, b_mode, f_mode)
+    r = _run(tmp_path, repo, b, f, spec=_spec_file(tmp_path, _MODE_SPEC))
+    assert "src/tool.py" in r.repair_changed_paths
+    case = tmp_path / "out" / "tool_mode_001"
+    # after/ is the buggy tree (mode b_mode); before/ is the fixed tree (mode f_mode).
+    assert bool((case / "after" / "src" / "tool.py").stat().st_mode & 0o111) == (b_mode == 0o755)
+    assert bool((case / "before" / "src" / "tool.py").stat().st_mode & 0o111) == (f_mode == 0o755)
+
+
+def test_verify_reproduces_mode_only_change(tmp_path):
+    # The verifier proves a pure mode-only change (no content change) at the unit level.
+    from arena.importer import diff_repo
+    from arena.importer.historical_fix import _verify_reproduces, _write_exact
+
+    b_tree = {"src/x.sh": ("100644", b"echo hi\n")}
+    f_tree = {"src/x.sh": ("100755", b"echo hi\n")}
+    reference, _pr = diff_repo.generate_patches("sha1", b_tree, f_tree)
+    after = tmp_path / "after"
+    _write_exact(after / "src" / "x.sh", b"echo hi\n", 0o644)
+    _verify_reproduces(after, b_tree, reference, f_tree, "r")  # 644 -> 755 reproduced
+
+
+def test_verify_reproduces_rejects_mode_mismatch(tmp_path):
+    # Bytes reproduce correctly, but a wrong expected mode must fail closed.
+    from arena.importer import diff_repo
+    from arena.importer.historical_fix import _verify_reproduces, _write_exact
+
+    b_tree = {"src/x.py": ("100644", b"A = 1\n")}
+    f_tree = {"src/x.py": ("100644", b"A = 2\n")}
+    reference, _pr = diff_repo.generate_patches("sha1", b_tree, f_tree)
+    after_ok = tmp_path / "after_ok"
+    _write_exact(after_ok / "src" / "x.py", b"A = 1\n", 0o644)
+    _verify_reproduces(after_ok, b_tree, reference, f_tree, "r")  # correct: no raise
+    after_bad = tmp_path / "after_bad"
+    _write_exact(after_bad / "src" / "x.py", b"A = 1\n", 0o644)
+    with pytest.raises(ImportFixError) as e:
+        _verify_reproduces(after_bad, b_tree, reference, {"src/x.py": ("100755", b"A = 2\n")}, "r")
+    assert e.value.reason == "r"
+
+
+def test_unchanged_executable_remains_executable(tmp_path):
+    # tool.sh is executable in both B and F (unchanged); only calc.py is repaired.
+    repo = _repo(tmp_path)
+    b = _commit(
+        repo,
+        {
+            "src/calc.py": "def combine(a, b):\n    return a - b\n",
+            "src/tool.sh": "echo hi\n",
+            **_TEST,
+        },
+        "buggy",
+        modes={"src/tool.sh": 0o755},
+    )
+    (repo / "src" / "calc.py").write_text("def combine(a, b):\n    return a + b\n", newline="")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "fix")
+    f = _git(repo, "rev-parse", "HEAD")
+    r = _run(tmp_path, repo, b, f)  # default _SPEC covers src/calc.py only
+    assert r.repair_changed_paths == ["src/calc.py"]  # tool.sh unchanged, not a repair path
+    case = tmp_path / "out" / "calc_combine_sign_001"
+    assert (case / "after" / "src" / "tool.sh").stat().st_mode & 0o111
+    assert (case / "before" / "src" / "tool.sh").stat().st_mode & 0o111

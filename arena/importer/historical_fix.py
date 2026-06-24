@@ -24,6 +24,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -119,18 +120,56 @@ def _validate_source_selectors(raw_selectors: list[str], present: set[str]) -> N
             )
 
 
-def _selected_tree_bytes(
-    repo: g.Repo, tree: dict[str, tuple[str, str]]
-) -> dict[str, tuple[str, bytes]]:
-    """Read exact blob bytes for every entry (each blob is bounded by the Git runner)."""
-    return {path: (mode, g.cat_blob(repo, oid)) for path, (mode, oid) in tree.items()}
+class _ImportBudget:
+    """A single shared budget across all selected trees, enforced incrementally.
+
+    Blobs are deduplicated by object id so an object shared between the buggy and
+    fixed trees is read and retained once; the byte budget tracks retained (unique)
+    bytes for memory protection, while the file count is the upfront output-file
+    count. At any moment at most the retained set plus the one blob being inspected
+    is held in memory.
+    """
+
+    def __init__(self, repo: g.Repo) -> None:
+        self._repo = repo
+        self._cache: dict[str, bytes] = {}
+        self._retained_bytes = 0
+
+    def load(self, oid: str) -> bytes:
+        cached = self._cache.get(oid)
+        if cached is not None:
+            return cached
+        data = g.cat_blob(self._repo, oid)  # one bounded blob inspected at a time
+        if len(data) > limits.IMPORT_MAX_FILE_BYTES:
+            raise ImportFixError(
+                "import_limit_exceeded", "a selected file exceeds the per-file limit"
+            )
+        if self._retained_bytes + len(data) > limits.IMPORT_MAX_TOTAL_BYTES:
+            raise ImportFixError("import_limit_exceeded", "selection exceeds the total byte limit")
+        self._cache[oid] = data
+        self._retained_bytes += len(data)
+        return data
 
 
-def _enforce_total_bounds(*trees: dict[str, tuple[str, bytes]]) -> None:
-    files = sum(len(t) for t in trees)
-    total = sum(len(data) for t in trees for _mode, data in t.values())
-    if files > limits.IMPORT_MAX_FILES or total > limits.IMPORT_MAX_TOTAL_BYTES:
-        raise ImportFixError("output_write_failure", "generated pack exceeds file/byte limits")
+def _load_selected(
+    repo: g.Repo, trees: list[dict[str, tuple[str, str]]]
+) -> list[dict[str, tuple[str, bytes]]]:
+    """Load every selected tree under one incremental budget (file count, then bytes).
+
+    Rejects an excessive output-file count before reading any blob, then reads blobs
+    one at a time, rejecting as soon as the next blob would exceed the byte budget so
+    later blobs are never requested.
+    """
+    if sum(len(tree) for tree in trees) > limits.IMPORT_MAX_FILES:
+        raise ImportFixError("import_limit_exceeded", "selection exceeds the file-count limit")
+    budget = _ImportBudget(repo)
+    loaded: list[dict[str, tuple[str, bytes]]] = []
+    for tree in trees:
+        out: dict[str, tuple[str, bytes]] = {}
+        for path, (mode, oid) in sorted(tree.items()):
+            out[path] = (mode, budget.load(oid))
+        loaded.append(out)
+    return loaded
 
 
 def _require_text(files: dict[str, tuple[str, bytes]], changed: set[str]) -> None:
@@ -184,9 +223,21 @@ def _build_case_yaml(spec: ImportSpec, has_tests: bool) -> str:
 
 
 def _verify_reproduces(
-    source_dir: Path, patch_text: str, expected: dict[str, bytes], reason: str
+    source_dir: Path,
+    source_tree: dict[str, tuple[str, bytes]],
+    patch_text: str,
+    expected: dict[str, tuple[str, bytes]],
+    reason: str,
 ) -> None:
-    """Apply patch via the Phase 1D pipeline; require the result to equal ``expected``."""
+    """Apply patch via the Phase 1D pipeline; require exact bytes AND Git modes.
+
+    ``source_tree`` and ``expected`` map path -> (mode, bytes). Produced modes are
+    derived from the input modes plus the Phase 1D authoritative change records
+    (GitChange.new_mode / deletions), so the proof is portable; on POSIX the result
+    worktree's executable bit is checked as additional evidence.
+    """
+    expected_bytes = {p: data for p, (_mode, data) in expected.items()}
+    expected_modes = {p: mode for p, (mode, _data) in expected.items()}
     with tempfile.TemporaryDirectory(prefix="arena-import-verify-") as tmp:
         dest = Path(tmp) / "ws"
         result = apply_patch(
@@ -194,13 +245,43 @@ def _verify_reproduces(
         )
         if not result.applied or result.workspace is None:
             raise ImportFixError(reason, f"authoritative apply failed: {result.reason}")
-        produced = {
+        produced_bytes = {
             p.relative_to(result.workspace).as_posix(): p.read_bytes()
             for p in result.workspace.rglob("*")
             if p.is_file()
         }
-        if produced != expected:
-            raise ImportFixError(reason, "patched tree does not match the expected commit tree")
+        if produced_bytes != expected_bytes:
+            raise ImportFixError(reason, "patched tree bytes do not match the expected tree")
+        # Derive produced modes authoritatively: input modes adjusted by Git's changes.
+        produced_modes = {p: mode for p, (mode, _data) in source_tree.items()}
+        for change in result.changes:
+            if change.status == "D":
+                produced_modes.pop(change.old_path or change.new_path, None)
+            else:
+                produced_modes[change.new_path] = change.new_mode
+        if produced_modes != expected_modes:
+            raise ImportFixError(reason, "patched tree modes do not match the expected tree")
+        if os.name == "posix":  # additional, non-authoritative evidence
+            for rel, mode in expected_modes.items():
+                executable = bool((result.workspace / rel).lstat().st_mode & 0o111)
+                if executable != (mode == "100755"):
+                    raise ImportFixError(reason, f"result executable bit mismatch: {rel}")
+
+
+def _validate_output_parent(parent: Path) -> None:
+    """Preflight the output parent before any staging file is created."""
+    try:
+        info = os.lstat(parent)
+    except FileNotFoundError as exc:
+        raise ImportFixError(
+            "output_parent_missing", f"output parent does not exist: {parent}"
+        ) from exc
+    except OSError as exc:
+        raise ImportFixError("output_parent_invalid", "output parent is not accessible") from exc
+    if stat.S_ISLNK(info.st_mode):
+        raise ImportFixError("output_parent_invalid", "output parent is a symlink")
+    if not stat.S_ISDIR(info.st_mode):
+        raise ImportFixError("output_parent_invalid", "output parent is not a directory")
 
 
 def _publish(staging: Path, output: Path) -> None:
@@ -284,10 +365,10 @@ def import_fix(
                 rel = path[len(tests_root) + 1 :] if path.startswith(tests_root + "/") else path
                 tests_materialize[rel] = mode_oid
 
-        after_src = _selected_tree_bytes(repo, after_tree)  # B bytes
-        before_src = _selected_tree_bytes(repo, before_tree)  # F bytes
-        test_files = _selected_tree_bytes(repo, tests_materialize)  # F test bytes
-        _enforce_total_bounds(after_src, before_src, test_files)
+        # Load every selected blob under one incremental budget (dedup by object id).
+        after_src, before_src, test_files = _load_selected(
+            repo, [after_tree, before_tree, tests_materialize]
+        )
 
         # Source changes from exact tree comparison; binary/text from exact bytes.
         repair_set = _source_changes(after_src, before_src)
@@ -356,7 +437,13 @@ def import_fix(
             reference_patch_sha256=reference_sha,
         )
 
-        staging = Path(tempfile.mkdtemp(prefix=".arena-import-", dir=str(output.parent)))
+        _validate_output_parent(output.parent)
+        try:
+            staging = Path(tempfile.mkdtemp(prefix=".arena-import-", dir=str(output.parent)))
+        except OSError as exc:
+            raise ImportFixError(
+                "staging_failed", "could not create the staging directory"
+            ) from exc
         try:
             case_dir = staging / spec.case.id
             after_dir = case_dir / "after"
@@ -406,13 +493,17 @@ def import_fix(
                 0o644,
             )
 
-            # Prove both diffs reproduce their target trees through the Phase 1D pipeline.
-            fixed_bytes = {p: d for p, (_m, d) in before_src.items()}
-            buggy_bytes = {p: d for p, (_m, d) in after_src.items()}
+            # Prove both diffs reproduce their target trees (bytes AND modes) via Phase 1D.
             _verify_reproduces(
-                after_dir, reference_patch, fixed_bytes, "reference_patch_verification_failed"
+                after_dir,
+                after_src,
+                reference_patch,
+                before_src,
+                "reference_patch_verification_failed",
             )
-            _verify_reproduces(before_dir, pr_diff, buggy_bytes, "pr_diff_verification_failed")
+            _verify_reproduces(
+                before_dir, before_src, pr_diff, after_src, "pr_diff_verification_failed"
+            )
 
             checksum = write_checksum(staging)
             errors = validate_dataset(staging)
