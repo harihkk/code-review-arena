@@ -89,9 +89,15 @@ VALID_KWARGS = {
 
 
 def test_unknown_field_sweep_covers_every_external_model():
-    # The sweep below must include every strict external model; this guard fails
-    # if a new _StrictExternal subclass is added without a fixture here.
-    missing = [s.__name__ for s in _StrictExternal.__subclasses__() if s not in VALID_KWARGS]
+    # The sweep below must include every strict external model defined in
+    # arena.core.models; this guard fails if a new core _StrictExternal subclass is
+    # added without a fixture here. Strict models defined elsewhere (for example the
+    # importer's ImportSpec) are covered by their own module's tests.
+    missing = [
+        s.__name__
+        for s in _StrictExternal.__subclasses__()
+        if s.__module__ == "arena.core.models" and s not in VALID_KWARGS
+    ]
     assert not missing, f"external models missing from VALID_KWARGS: {missing}"
 
 

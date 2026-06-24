@@ -121,6 +121,18 @@ STATIC_ANALYSIS_OUTPUT_BYTES = 512 * 1024
 # --- Git-authoritative patch application (Phase 1D) ---
 # A single git plumbing invocation is short-lived and childless; these bound its
 # wall time and output. The changed-file cap mirrors the snapshot file cap.
+# --- Historical-fix importer ---
+# Per-file materialization and diff output are read through the bounded Git runner,
+# so a single object is capped at GIT_OUTPUT_BYTES; whole-import file/byte counts
+# reuse the snapshot caps and are enforced INCREMENTALLY while blobs are loaded, so
+# an oversized selection is rejected before it is all read into memory. Source label
+# is a stable "owner/repo"-style string.
+IMPORT_MAX_FILES = SNAPSHOT_MAX_FILES
+IMPORT_MAX_TOTAL_BYTES = SNAPSHOT_MAX_TOTAL_BYTES
+IMPORT_MAX_FILE_BYTES = PACK_FILE_BYTES
+IMPORT_SOURCE_PATHS = 256
+IMPORT_SOURCE_LABEL_LEN = 256
+
 GIT_TIMEOUT_SECONDS = 60  # default per-invocation wall-clock budget
 GIT_TIMEOUT_SECONDS_MIN = 1
 GIT_TIMEOUT_SECONDS_MAX = 3600

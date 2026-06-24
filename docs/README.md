@@ -25,6 +25,7 @@ Start here, then read by topic.
 - [audit-pack-v2.md](audit-pack-v2.md) - the second batch of certified logic-defect cases
 - [audit-report.md](audit-report.md) - generating the report and dashboard JSON
 - [adding-new-cases.md](adding-new-cases.md) - case layout and validation
+- [historical-fix-ingestion.md](historical-fix-ingestion.md) - import a local fix commit pair into a candidate pack
 - [github-action.md](github-action.md) - continuous integration
 
 ## Project

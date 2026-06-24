@@ -6,6 +6,7 @@ from typing import Literal
 import typer
 
 from arena.cli.commands.audit_report import audit_report as audit_report_command
+from arena.cli.commands.import_fix import import_fix_command
 from arena.cli.commands.leaderboard import leaderboard as leaderboard_command
 from arena.cli.commands.list_cases import list_cases as list_cases_command
 from arena.cli.commands.report import report as report_command
@@ -26,6 +27,34 @@ def list_cases(benchmark_set: Path = typer.Argument(DEFAULT_BENCHMARK_SET)) -> N
 @app.command()
 def validate(benchmark_set: Path = typer.Argument(DEFAULT_BENCHMARK_SET)) -> None:
     validate_command(resolve_benchmark_path(benchmark_set))
+
+
+@app.command("import-fix")
+def import_fix(
+    repo: Path = typer.Option(..., "--repo", help="Local Git repository (worktree or bare)."),
+    buggy_commit: str = typer.Option(..., "--buggy-commit", help="Full buggy commit object id."),
+    fixed_commit: str = typer.Option(..., "--fixed-commit", help="Full fixed commit object id."),
+    spec: Path = typer.Option(..., "--spec", help="Strict import-spec YAML."),
+    output: Path = typer.Option(..., "--output", help="Nonexistent output pack directory."),
+    source_label: str | None = typer.Option(
+        None, "--source-label", help="Stable source label (e.g. owner/repo); never a local path."
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit a machine-readable report."),
+) -> None:
+    """Convert a local buggy/fixed commit pair into a candidate reverse-fix pack.
+
+    Local-only, offline, deterministic, non-AI. Reads committed Git objects only
+    (never the working tree); does not run tests, certify, or publish.
+    """
+    import_fix_command(
+        repo=repo,
+        buggy_commit=buggy_commit,
+        fixed_commit=fixed_commit,
+        spec=spec,
+        output=output,
+        source_label=source_label,
+        json_output=json_output,
+    )
 
 
 @app.command()

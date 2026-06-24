@@ -33,6 +33,19 @@ class SnapshotError(ValidationError):
         self.reason = reason
 
 
+class ImportFixError(ArenaError):
+    """A historical-fix import could not be completed safely.
+
+    Carries a stable ``reason`` code (see arena/importer/historical_fix.py); the
+    message never includes source-file contents or private local paths beyond the
+    repository/output paths the user explicitly supplied.
+    """
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
 class ReviewerError(ArenaError):
     """Raised when a reviewer cannot complete a requested review."""
 
