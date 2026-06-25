@@ -347,6 +347,30 @@ def import_fix(
         if not g.is_ancestor(repo, buggy, fixed):
             raise ImportFixError("fixed_not_descendant", "fixed commit is not descended from buggy")
 
+        # A dot-prefixed source selector must resolve, by committed-tree inspection, to
+        # exactly one regular file (not a hidden directory). Checked before the bulk tree
+        # read so the rejection names the cause precisely rather than as a generic
+        # unsafe-tree-path error from a hidden directory's descendants.
+        for selector in source_paths:
+            if not selector.rsplit("/", 1)[-1].startswith("."):
+                continue
+            kinds = {g.classify_tree_path(repo, commit, selector) for commit in (buggy, fixed)}
+            if "dir" in kinds:
+                raise ImportFixError(
+                    "hidden_directory_selector",
+                    f"dot-prefixed source selector resolves to a directory: {selector!r}",
+                )
+            if "other" in kinds:
+                raise ImportFixError(
+                    "unsupported_selector",
+                    f"dot-prefixed source selector is not a regular file: {selector!r}",
+                )
+            if kinds == {"missing"}:
+                raise ImportFixError(
+                    "selected_path_missing",
+                    f"dot-prefixed source selector matches no file: {selector!r}",
+                )
+
         after_tree = g.read_tree(repo, buggy, source_paths)  # B selected source
         before_tree = g.read_tree(repo, fixed, source_paths)  # F selected source
         present = set(after_tree) | set(before_tree)

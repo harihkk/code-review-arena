@@ -1047,3 +1047,70 @@ def test_unchanged_executable_remains_executable(tmp_path):
     case = tmp_path / "out" / "calc_combine_sign_001"
     assert (case / "after" / "src" / "tool.sh").stat().st_mode & 0o111
     assert (case / "before" / "src" / "tool.sh").stat().st_mode & 0o111
+
+
+# --------------------------------------------------------------------------- #
+# Source-selector file/dir semantics (dot-prefixed selectors)                 #
+# --------------------------------------------------------------------------- #
+
+_SPEC_EXACT_FILE = _SPEC.replace("source_paths: [src]", "source_paths: [src/calc.py]")
+_SPEC_HIDDEN_SEL = _SPEC.replace("source_paths: [src]", "source_paths: [.hidden]")
+_SPEC_MISSING_SEL = _SPEC.replace("source_paths: [src]", "source_paths: [.nope]")
+_SPEC_DOT_TESTS_ROOT = _SPEC.replace("tests_root: tests", "tests_root: .hidden")
+
+
+def _repo_with_dotpaths(tmp_path):
+    repo = _repo(tmp_path)
+    common = {".coveragerc": "[run]\nbranch = False\n", ".hidden/keep.py": "H = 1\n"}
+    b = _commit(repo, {**_BUGGY, **_TEST, **common}, "buggy")
+    f = _commit(repo, {**_FIXED, **_TEST, **common}, "fix")
+    return repo, b, f
+
+
+def test_classify_tree_path_distinguishes_file_dir_missing(tmp_path):
+    from arena.importer.git_objects import classify_tree_path, open_repo
+
+    repo, _b, f = _repo_with_dotpaths(tmp_path)
+    with open_repo(repo) as r:
+        assert classify_tree_path(r, f, ".coveragerc") == "file"  # exact regular file
+        assert classify_tree_path(r, f, "src/calc.py") == "file"  # ordinary exact file
+        assert classify_tree_path(r, f, ".hidden") == "dir"  # hidden directory
+        assert classify_tree_path(r, f, "src") == "dir"  # ordinary directory
+        assert classify_tree_path(r, f, ".nope") == "missing"  # absent
+
+
+def test_exact_file_source_selector_accepted(tmp_path):
+    # 6. ordinary exact-file selector still works end to end.
+    repo, b, f = _make(tmp_path)
+    _run(tmp_path, repo, b, f, spec=_spec_file(tmp_path, _SPEC_EXACT_FILE))
+    case = tmp_path / "out" / "calc_combine_sign_001"
+    assert (case / "after" / "src" / "calc.py").is_file()
+    assert (case / "before" / "src" / "calc.py").is_file()
+
+
+def test_dot_directory_source_selector_rejected(tmp_path):
+    # 2. a final .hidden selector with descendants is rejected as a hidden directory.
+    repo, b, f = _repo_with_dotpaths(tmp_path)
+    with pytest.raises(ImportFixError) as e:
+        _run(tmp_path, repo, b, f, spec=_spec_file(tmp_path, _SPEC_HIDDEN_SEL))
+    assert e.value.reason == "hidden_directory_selector"
+
+
+def test_missing_dot_source_selector_rejected(tmp_path):
+    # 3. a missing final dot-prefixed selector is rejected.
+    repo, b, f = _repo_with_dotpaths(tmp_path)
+    with pytest.raises(ImportFixError) as e:
+        _run(tmp_path, repo, b, f, spec=_spec_file(tmp_path, _SPEC_MISSING_SEL))
+    assert e.value.reason == "selected_path_missing"
+
+
+def test_tests_root_rejects_dot_directory(tmp_path):
+    # A directory-valued importer field (tests_root: SafeDirPath) rejects a
+    # dot-prefixed directory; load_import_spec surfaces it as invalid_spec.
+    from arena.importer.import_spec import load_import_spec
+
+    spec = _spec_file(tmp_path, _SPEC_DOT_TESTS_ROOT)
+    with pytest.raises(ImportFixError) as e:
+        load_import_spec(spec)
+    assert e.value.reason == "invalid_spec"
+    assert "directory path" in str(e.value)

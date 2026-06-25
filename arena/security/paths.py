@@ -7,19 +7,35 @@ those strings become physical path components (``benchmark_dir / case_id``,
 
 Two layers are provided:
 
-- Pydantic-facing types (``SafeRelativePath``, ``SafeCaseId``) whose validators
-  raise ``ValueError`` so a bad value is collected as a normal Pydantic error with
-  an accurate field location (for example ``input.after_dir``).
-- Domain wrappers (``validate_relative_path``, ``validate_case_id``) that raise
-  Arena's ``ValidationError`` for callers at filesystem/I/O boundaries.
+- Pydantic-facing types (``SafeFilePath``, ``SafeDirPath``, ``SafeCaseId``) whose
+  validators raise ``ValueError`` so a bad value is collected as a normal Pydantic
+  error with an accurate field location (for example ``input.after_dir``). There is
+  no generic relative-path type: each field commits to file or directory semantics.
+- Domain wrappers (``validate_relative_path`` for file paths, ``validate_dir_path``
+  for directory paths, ``validate_case_id``) that raise Arena's ``ValidationError``
+  for callers at filesystem/I/O boundaries.
 
 Path policy is a deliberately strict, portable ASCII profile: only ASCII letters,
-digits, ``_``, ``-``, ``.`` and ``/``. We do not support Unicode filenames in pack
-paths (no concrete need), which removes whole classes of confusable and
+digits, ``_``, ``-``, ``.``, ``+`` and ``/``. We do not support Unicode filenames
+in pack paths (no concrete need), which removes whole classes of confusable and
 normalization attacks rather than blacklisting examples. Case-insensitive and
 Unicode-normalization collisions are enforced again at snapshot construction
 (Phase 1C). If Unicode paths ever become a requirement, the exact normalization
 and confusable profile must be defined before relaxing this.
+
+A dot-prefixed component is admitted only as the final leaf filename of a FILE path
+(for example ``tests/.coveragerc``). A directory path (``SafeDirPath``: ``before_dir``,
+``after_dir``, ``tests_dir``, importer ``tests_root``) never admits a dot-prefixed
+component, including a final one, so a hidden directory cannot enter a pack. The
+reserved repository-control names (``.git``, ``.hg``, ``.svn``, ``.gitignore``,
+``.gitattributes``, ``.gitmodules``) are rejected case-insensitively wherever they
+appear, so a VCS-control file cannot influence patch application. The pack checksum
+covers every regular file including hidden leaf files (Phase 1C), so a hidden leaf
+is not outside the digest. A reviewer dotfile finding is admitted only when it
+exactly matches a known reviewer-visible file. A source selector that is
+dot-prefixed must resolve, by committed-tree inspection, to exactly one regular
+file with that path (enforced in the importer). A case id is stricter still (see
+``_check_case_id``): it admits no ``+`` and no leading dot.
 """
 
 from __future__ import annotations
@@ -32,12 +48,13 @@ from pydantic import AfterValidator
 
 from arena.core.errors import ValidationError
 
-# A case id is one path component: a slug, never a relative path.
-# Portable ASCII profile: a single path component may contain only these
-# characters (no separator). Both a relative path (split on "/") and a case id
-# (which is exactly one component, so it becomes a directory name) are checked
-# through the SAME component validator, so their filesystem rules cannot drift.
-_ALLOWED_COMPONENT_CHARS = re.compile(r"\A[A-Za-z0-9_.-]+\Z")
+# Two ASCII component profiles. Ordinary relative-path components admit '+' (e.g.
+# upstream fixture directories such as ``html+django``); a case id, which becomes a
+# physical directory name and an identifier, stays on the narrower profile and
+# admits no '+'. The two share the structural checks in ``_component_common_error``
+# so their filesystem rules cannot drift.
+_ALLOWED_PATH_COMPONENT_CHARS = re.compile(r"\A[A-Za-z0-9_.+-]+\Z")
+_ALLOWED_CASE_ID_CHARS = re.compile(r"\A[A-Za-z0-9_.-]+\Z")
 _MAX_PATH_LENGTH = 1024
 _MAX_COMPONENT_LENGTH = 255
 # A case id becomes a directory name, so it is the strictest: a single component
@@ -51,23 +68,28 @@ _WINDOWS_RESERVED = frozenset(
     | {f"COM{i}" for i in range(1, 10)}
     | {f"LPT{i}" for i in range(1, 10)}
 )
+# Repository-control names whose mere presence can steer a VCS during patch
+# application (``git add``/``apply`` reads ``.gitignore``/``.gitattributes``/
+# ``.gitmodules``; a ``.git`` tree is the repository itself). Rejected wherever they
+# appear -- leaf or directory -- so an upstream tree cannot smuggle one in. Stored
+# case-folded and compared case-folded, so ``.Git``, ``.GITIGNORE``, ``.GitModules``,
+# and any other casing are rejected on a case-insensitive filesystem too.
+_RESERVED_CONTROL_NAMES = frozenset(
+    name.casefold()
+    for name in (".git", ".hg", ".svn", ".gitignore", ".gitattributes", ".gitmodules")
+)
 
 
-def _component_error(component: object) -> str | None:
-    """Return why a single path component is unsafe, or None. Shared by paths and ids."""
+def _component_common_error(component: object) -> str | None:
+    """Structural checks shared by every path component and case id (charset aside)."""
     if not isinstance(component, str) or not component:
         return "empty component"
     if len(component) > _MAX_COMPONENT_LENGTH:
         return f"component longer than {_MAX_COMPONENT_LENGTH} characters"
     if component in {".", ".."}:
         return "'.' and '..' are not valid components"
-    # A dot-prefixed component is excluded by the current pack checksum, so content
-    # under it would not be covered by the pack digest. Reject it until snapshot
-    # hashing (Phase 1C) covers every regular file.
-    if component.startswith("."):
-        return "a component may not start with a dot (it is omitted from the pack checksum)"
-    if not _ALLOWED_COMPONENT_CHARS.match(component):
-        return "only ASCII letters, digits, '_', '-', and '.' are allowed"
+    if component.casefold() in _RESERVED_CONTROL_NAMES:
+        return f"'{component}' is a reserved repository-control name"
     if component.endswith(".") or component.endswith(" "):
         return "a component may not end with a dot or space"
     if component.split(".")[0].upper() in _WINDOWS_RESERVED:
@@ -75,8 +97,77 @@ def _component_error(component: object) -> str | None:
     return None
 
 
+def _path_component_error(component: object, *, is_final: bool) -> str | None:
+    """Return why a relative-path component is unsafe, or None.
+
+    Profile: ASCII letters, digits, ``_``, ``-``, ``.`` and ``+``. A dot-prefixed
+    component is admitted only as an ordinary final leaf filename with a name after
+    the dot (e.g. ``.coveragerc``); dot-prefixed directory components and reserved
+    control names stay rejected.
+    """
+    error = _component_common_error(component)
+    if error is not None:
+        return error
+    assert isinstance(component, str)  # narrowed by _component_common_error
+    if component.startswith("."):
+        if not is_final:
+            return "a dot-prefixed component may only be a final leaf filename"
+        if len(component) < 2:
+            return "a dot-prefixed component must have a name after the dot"
+    if not _ALLOWED_PATH_COMPONENT_CHARS.match(component):
+        return "only ASCII letters, digits, '_', '-', '.', and '+' are allowed"
+    return None
+
+
+def _case_id_component_error(component: object) -> str | None:
+    """Return why a case-id component is unsafe, or None.
+
+    Stricter than a path component: no ``+`` and no leading dot (no hidden/leaf
+    exception), because a case id becomes a physical directory name and identifier.
+    """
+    error = _component_common_error(component)
+    if error is not None:
+        return error
+    assert isinstance(component, str)  # narrowed by _component_common_error
+    if component.startswith("."):
+        return "a case id may not start with a dot"
+    if not _ALLOWED_CASE_ID_CHARS.match(component):
+        return "only ASCII letters, digits, '_', '-', and '.' are allowed"
+    return None
+
+
 def _relative_path_error(value: object) -> str | None:
-    """Return why ``value`` is not a safe portable relative path, or None if it is."""
+    """Return why ``value`` is not a safe portable FILE path, or None if it is.
+
+    File semantics: a dot-prefixed component is admitted only as the final leaf
+    filename. This is the validator for actual file paths, source/patch tree entries,
+    and reviewer/containment checks. Directory-valued fields must use
+    ``_dir_path_error``/``SafeDirPath`` instead, which never admits a dot-prefixed
+    component.
+    """
+    if not isinstance(value, str) or not value:
+        return "empty path"
+    if len(value) > _MAX_PATH_LENGTH:
+        return f"path longer than {_MAX_PATH_LENGTH} characters"
+    if value.startswith("/") or value.endswith("/"):
+        return "leading or trailing '/' is not allowed"
+    components = value.split("/")
+    final_index = len(components) - 1
+    for index, component in enumerate(components):
+        error = _path_component_error(component, is_final=index == final_index)
+        if error is not None:
+            return error
+    return None
+
+
+def _dir_path_error(value: object) -> str | None:
+    """Return why ``value`` is not a safe portable DIRECTORY path, or None if it is.
+
+    Directory semantics: NO dot-prefixed component in any position, including the
+    final one. A hidden directory's contents are easy to overlook in review, so a
+    directory path never admits a dot-prefixed component (whereas a file path admits
+    a final dot-leaf filename like ``.coveragerc``).
+    """
     if not isinstance(value, str) or not value:
         return "empty path"
     if len(value) > _MAX_PATH_LENGTH:
@@ -84,21 +175,39 @@ def _relative_path_error(value: object) -> str | None:
     if value.startswith("/") or value.endswith("/"):
         return "leading or trailing '/' is not allowed"
     for component in value.split("/"):
-        error = _component_error(component)
+        error = _component_common_error(component)
         if error is not None:
             return error
+        assert isinstance(component, str)  # narrowed by _component_common_error
+        if component.startswith("."):
+            return "a directory path may not contain a dot-prefixed component"
+        if not _ALLOWED_PATH_COMPONENT_CHARS.match(component):
+            return "only ASCII letters, digits, '_', '-', '.', and '+' are allowed"
     return None
 
 
-def _check_relative_path(value: str) -> str:
-    """Pydantic-facing validator: raises ValueError so Pydantic records the error."""
+def _check_file_path(value: str) -> str:
+    """Pydantic-facing validator for a file path: raises ValueError on a bad value."""
     error = _relative_path_error(value)
     if error is not None:
-        raise ValueError(f"unsafe path {value!r}: {error}")
+        raise ValueError(f"unsafe file path {value!r}: {error}")
     return value
 
 
-SafeRelativePath = Annotated[str, AfterValidator(_check_relative_path)]
+def _check_dir_path(value: str) -> str:
+    """Pydantic-facing validator for a directory path: raises ValueError on a bad value."""
+    error = _dir_path_error(value)
+    if error is not None:
+        raise ValueError(f"unsafe directory path {value!r}: {error}")
+    return value
+
+
+# A file path admits a final dot-leaf filename; a directory path never admits a
+# dot-prefixed component. There is no generic "relative path" model type: every
+# field commits to file or directory semantics so a dot-prefixed directory cannot
+# slip through a permissive fallback.
+SafeFilePath = Annotated[str, AfterValidator(_check_file_path)]
+SafeDirPath = Annotated[str, AfterValidator(_check_dir_path)]
 
 
 def admit_reviewer_path(value: object, known_paths: frozenset[str] | None = None) -> str:
@@ -121,6 +230,12 @@ def admit_reviewer_path(value: object, known_paths: frozenset[str] | None = None
     With no ``known_paths`` context, the prefix is never stripped. Raises
     ``ValueError`` so the parser can treat a bad or ambiguous path as an invalid
     finding; the raw value is preserved in the reviewer's raw_response for audit.
+
+    A reviewer finding must point to a file, so the syntactic check uses file
+    semantics (a final dot-leaf is allowed). A dot-prefixed leaf is additionally
+    admitted only when it exactly matches a reviewer-visible file in ``known_paths``;
+    without that proof a model could fabricate a dotfile finding the harness never
+    showed it.
     """
     if not isinstance(value, str):
         raise ValueError("finding path must be a string")
@@ -130,32 +245,42 @@ def admit_reviewer_path(value: object, known_paths: frozenset[str] | None = None
     error = _relative_path_error(candidate)
     if error is not None:
         raise ValueError(f"unsafe finding path {value!r}: {error}")
-    if known_paths is None or not candidate.startswith(("a/", "b/")):
-        return candidate
-    stripped = candidate[2:]
-    complete_known = candidate in known_paths
-    stripped_known = (
-        bool(stripped) and _relative_path_error(stripped) is None and stripped in known_paths
-    )
-    if complete_known and stripped_known:
-        raise ValueError(
-            f"ambiguous finding path {value!r}: both prefixed and stripped forms exist"
+    result = candidate
+    if known_paths is not None and candidate.startswith(("a/", "b/")):
+        stripped = candidate[2:]
+        complete_known = candidate in known_paths
+        stripped_known = (
+            bool(stripped) and _relative_path_error(stripped) is None and stripped in known_paths
         )
-    if stripped_known and not complete_known:
-        return stripped
-    return candidate
+        if complete_known and stripped_known:
+            raise ValueError(
+                f"ambiguous finding path {value!r}: both prefixed and stripped forms exist"
+            )
+        if stripped_known and not complete_known:
+            result = stripped
+    if result.rsplit("/", 1)[-1].startswith("."):
+        if known_paths is None:
+            raise ValueError(
+                f"unsafe finding path {value!r}: a dot-prefixed file requires known paths"
+            )
+        if result not in known_paths:
+            raise ValueError(
+                f"unsafe finding path {value!r}: dot-prefixed file is not a known visible file"
+            )
+    return result
 
 
 def _check_case_id(value: str) -> str:
     """Pydantic-facing validator: a case id is exactly one safe path component.
 
-    It becomes a physical directory name, so it goes through the same component
-    policy as a path segment (ASCII profile, no separators, no reserved device
-    names even with an extension, no trailing dot or space, no leading dot) and is
-    additionally required to start with an ASCII alphanumeric and stay within the
-    case-id length bound.
+    It becomes a physical directory name, so it goes through the stricter case-id
+    component policy (narrower ASCII profile with no ``+``, no separators, no
+    reserved device or repository-control names, no trailing dot or space, no
+    leading dot) and is additionally required to start with an ASCII alphanumeric
+    and stay within the case-id length bound. Unlike an ordinary relative-path leaf,
+    a case id never admits a dot-prefixed name.
     """
-    error = _component_error(value)
+    error = _case_id_component_error(value)
     if error is not None:
         raise ValueError(f"unsafe case id {value!r}: {error}")
     if len(value) > _MAX_CASE_ID_LENGTH:
@@ -169,9 +294,21 @@ SafeCaseId = Annotated[str, AfterValidator(_check_case_id)]
 
 
 def validate_relative_path(value: str) -> str:
-    """Domain wrapper for I/O-boundary callers: raises Arena ValidationError."""
+    """Domain wrapper for I/O-boundary callers: file-path semantics, Arena ValidationError.
+
+    Used for containment checks and actual file paths (tree entries, patch paths).
+    Directory-valued callers must use ``validate_dir_path``.
+    """
     try:
-        return _check_relative_path(value)
+        return _check_file_path(value)
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
+
+
+def validate_dir_path(value: str) -> str:
+    """Domain wrapper for directory paths: raises Arena ValidationError (no dot-prefix)."""
+    try:
+        return _check_dir_path(value)
     except ValueError as exc:
         raise ValidationError(str(exc)) from exc
 

@@ -29,7 +29,7 @@ from arena.core.models import (
     ValidationConfig,
     _StrictExternal,
 )
-from arena.security.paths import SafeCaseId, SafeRelativePath
+from arena.security.paths import SafeCaseId, SafeDirPath, SafeFilePath
 
 _Version = Annotated[str, StringConstraints(min_length=1, max_length=limits.IDENTIFIER_LEN)]
 _Title = Annotated[str, StringConstraints(min_length=1, max_length=limits.TITLE_LEN)]
@@ -57,10 +57,8 @@ class ImportSpec(_StrictExternal):
     schema_version: Literal["1"]
     pack: _ImportPack
     case: _ImportCase
-    source_paths: list[SafeRelativePath] = Field(
-        min_length=1, max_length=limits.IMPORT_SOURCE_PATHS
-    )
-    tests_root: SafeRelativePath | None = None
+    source_paths: list[SafeFilePath] = Field(min_length=1, max_length=limits.IMPORT_SOURCE_PATHS)
+    tests_root: SafeDirPath | None = None
     ground_truth: GroundTruth
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)

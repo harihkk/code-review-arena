@@ -10,7 +10,7 @@ from pydantic import AfterValidator, StringConstraints
 from arena.core import limits
 from arena.core.errors import ImportFixError
 from arena.core.models import _StrictExternal
-from arena.security.paths import SafeRelativePath
+from arena.security.paths import SafeDirPath, SafeFilePath
 
 PROVENANCE_SCHEMA_VERSION: Literal["2"] = "2"
 DIFF_POLICY_VERSION = "1"
@@ -58,12 +58,12 @@ class Provenance(_StrictExternal):
     buggy_commit: _Hex
     fixed_commit: _Hex
     merge_base: _Hex
-    source_paths: list[SafeRelativePath]
-    tests_root: SafeRelativePath | None
-    buggy_source_files: list[SafeRelativePath]
-    fixed_source_files: list[SafeRelativePath]
-    fixed_test_files: list[SafeRelativePath]
-    changed_source_paths: list[SafeRelativePath]
-    changed_test_paths: list[SafeRelativePath]
+    source_paths: list[SafeFilePath]
+    tests_root: SafeDirPath | None
+    buggy_source_files: list[SafeFilePath]
+    fixed_source_files: list[SafeFilePath]
+    fixed_test_files: list[SafeFilePath]
+    changed_source_paths: list[SafeFilePath]
+    changed_test_paths: list[SafeFilePath]
     pr_diff_sha256: str
     reference_patch_sha256: str
