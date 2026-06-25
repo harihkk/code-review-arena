@@ -135,6 +135,24 @@ arena lint-cases <candidate-pack> --strict
 arena certify-pack <candidate-pack>
 ```
 
+## Contamination scans both sides of the review diff
+
+The contamination scan treats the whole `pr.diff` as review surface, not just its
+added lines. In an inverse RealFix diff (`F -> B`) the removed lines are the
+historical fixed implementation, so a removed line, including a comment or
+docstring carried over from the fix, can hand the reviewer the defect, its cause,
+or its repair just as an added line can. The scan reports added-line and
+removed-line hits under distinct surfaces (`diff_added_line`, `diff_removed_line`)
+alongside after-tree comments and test names.
+
+`arena lint-cases --strict` fails on the answer surfaces a reviewer could echo
+without reasoning (added lines, comments, test names) and reports removed-line
+matches for audit rather than failing on them: on a forward-review diff a removed
+line is the prior correct code the reviewer is meant to see. On an inverse RealFix
+diff a removed line can instead carry the fix, so the import gate rejects a
+removed-line leak at build time and the manual case audit reviews removed-line
+matches before a case is accepted.
+
 ## Limitations of this first version
 
 - Local repositories only; no hosted GitHub/GitLab ingestion or network access.

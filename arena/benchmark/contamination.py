@@ -1,10 +1,16 @@
 """Contamination scan: does the presented case reveal its own answer?
 
-A case leaks when the surfaces a reviewer sees (added diff lines, comments in
-the after tree, or test names that show up in pre-patch test output) contain
-the curated ground-truth vocabulary (must_mention, concepts,
+A case leaks when the surfaces a reviewer sees (added or removed diff lines,
+comments in the after tree, or test names that show up in pre-patch test
+output) contain the curated ground-truth vocabulary (must_mention, concepts,
 acceptable_fix_keywords). Leaks make detection scores measure reading
 comprehension instead of code review.
+
+Both sides of the diff are review surface. In an inverse RealFix review diff
+(fixed -> buggy), the removed lines are the historical fixed implementation, so
+a removed line can hand the reviewer the defect, its cause, or its repair just
+as an added line can. Added and removed hits are reported under distinct
+surfaces so they can be judged separately.
 """
 
 from __future__ import annotations
@@ -27,7 +33,7 @@ _MIN_PHRASE_LENGTH = 3
 @dataclass(frozen=True)
 class ContaminationWarning:
     case_id: str
-    surface: str  # diff_added_line | after_comment | test_name
+    surface: str  # diff_added_line | diff_removed_line | after_comment | test_name
     phrase: str
     location: str
 
@@ -59,10 +65,23 @@ def _added_lines(diff: str) -> list[tuple[int, str]]:
     ]
 
 
+def _removed_lines(diff: str) -> list[tuple[int, str]]:
+    # Mirror of _added_lines for the deletion side: content lines start with a
+    # single "-" but not the "---" file header. Hunk headers ("@@") and context
+    # lines (leading space) are excluded by the prefix test.
+    return [
+        (number, line[1:])
+        for number, line in enumerate(diff.splitlines(), start=1)
+        if line.startswith("-") and not line.startswith("---")
+    ]
+
+
 def scan_case(case: BenchmarkCase) -> list[ContaminationWarning]:
     assert case.case_dir is not None
     warnings: list[ContaminationWarning] = []
-    phrases = _phrases(case)
+    # Sort phrases so warning order is deterministic when several phrases match
+    # the same line, independent of set hash ordering.
+    phrases = sorted(_phrases(case))
 
     diff = load_diff(case.case_dir / case.input.diff)
     for number, content in _added_lines(diff):
@@ -71,6 +90,14 @@ def scan_case(case: BenchmarkCase) -> list[ContaminationWarning]:
                 warnings.append(
                     ContaminationWarning(
                         case.id, "diff_added_line", phrase, f"{case.input.diff}:{number}"
+                    )
+                )
+    for number, content in _removed_lines(diff):
+        for phrase in phrases:
+            if _phrase_in(phrase, content):
+                warnings.append(
+                    ContaminationWarning(
+                        case.id, "diff_removed_line", phrase, f"{case.input.diff}:{number}"
                     )
                 )
 

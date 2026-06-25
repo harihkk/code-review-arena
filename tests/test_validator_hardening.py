@@ -174,9 +174,121 @@ def test_contamination_scan_flags_seeded_leaks(tmp_path):
     assert surfaces == {"diff_added_line", "after_comment", "test_name"}
 
 
+def _scan_pr_diff(tmp_path, diff_text, *, must_mention, concepts=("neutralconcept",)):
+    case_dir = tmp_path / "diff_case"
+    (case_dir / "after").mkdir(parents=True)
+    (case_dir / "before").mkdir()
+    (case_dir / "after" / "mod.py").write_text("value = 1\n", encoding="utf-8")
+    (case_dir / "pr.diff").write_text(diff_text, encoding="utf-8")
+    case = BenchmarkCase.model_validate(
+        {
+            "id": "diff_case",
+            "title": "Diff",
+            "category": "logic",
+            "severity": "low",
+            "stack": ["python"],
+            "description": "diff probe",
+            "input": {},
+            "ground_truth": {
+                "bugs": [
+                    {
+                        "summary": "s",
+                        "files": [{"path": "mod.py", "line_ranges": [{"start": 1, "end": 1}]}],
+                        "concepts": list(concepts),
+                        "must_mention": list(must_mention),
+                    }
+                ]
+            },
+        }
+    )
+    case.case_dir = case_dir
+    return scan_case(case)
+
+
+def test_added_diff_line_vocabulary_is_detected(tmp_path):
+    diff = "--- a/mod.py\n+++ b/mod.py\n@@ -1 +1 @@\n-x = 0\n+the alpha path\n"
+    warnings = _scan_pr_diff(tmp_path, diff, must_mention=["alpha"])
+    hits = [(w.surface, w.phrase) for w in warnings]
+    assert ("diff_added_line", "alpha") in hits
+    assert not any(w.surface == "diff_removed_line" for w in warnings)
+
+
+def test_removed_diff_line_vocabulary_is_detected(tmp_path):
+    # The inverse-RealFix blind spot: the same phrase on a removed line.
+    diff = "--- a/mod.py\n+++ b/mod.py\n@@ -1 +1 @@\n-the alpha guard\n+x = 1\n"
+    warnings = _scan_pr_diff(tmp_path, diff, must_mention=["alpha"])
+    hits = [(w.surface, w.phrase) for w in warnings]
+    assert ("diff_removed_line", "alpha") in hits
+    assert not any(w.surface == "diff_added_line" for w in warnings)
+
+
+def test_diff_headers_are_not_scanned_as_content(tmp_path):
+    # 'alpha' appears only in the ---/+++ file headers, never on a content line.
+    diff = "--- a/alpha.py\n+++ b/alpha.py\n@@ -1 +1 @@\n-x = 0\n+x = 1\n"
+    warnings = _scan_pr_diff(tmp_path, diff, must_mention=["alpha"])
+    assert warnings == [], [w.render() for w in warnings]
+
+
+def test_hunk_context_lines_are_not_scanned(tmp_path):
+    # 'alpha' appears only on a context line (leading space), not on +/- lines.
+    diff = "--- a/mod.py\n+++ b/mod.py\n@@ -1,3 +1,3 @@\n the alpha value stays\n-x = 0\n+x = 1\n"
+    warnings = _scan_pr_diff(tmp_path, diff, must_mention=["alpha"])
+    assert warnings == [], [w.render() for w in warnings]
+
+
+def test_after_comment_and_test_name_detection_still_works(tmp_path):
+    case_dir = tmp_path / "comment_case"
+    (case_dir / "after").mkdir(parents=True)
+    (case_dir / "before").mkdir()
+    (case_dir / "tests").mkdir()
+    (case_dir / "after" / "mod.py").write_text(
+        "# guards the alpha boundary\nx = 1\n", encoding="utf-8"
+    )
+    (case_dir / "tests" / "test_mod.py").write_text(
+        "def test_alpha_boundary():\n    pass\n", encoding="utf-8"
+    )
+    # The diff itself carries no ground-truth vocabulary.
+    (case_dir / "pr.diff").write_text(
+        "--- a/mod.py\n+++ b/mod.py\n@@ -1 +1 @@\n-x = 0\n+x = 2\n", encoding="utf-8"
+    )
+    case = BenchmarkCase.model_validate(
+        {
+            "id": "comment_case",
+            "title": "Comment",
+            "category": "logic",
+            "severity": "low",
+            "stack": ["python"],
+            "description": "comment probe",
+            "input": {},
+            "ground_truth": {
+                "bugs": [
+                    {
+                        "summary": "s",
+                        "files": [{"path": "mod.py", "line_ranges": [{"start": 1, "end": 1}]}],
+                        "concepts": ["neutralconcept"],
+                        "must_mention": ["alpha"],
+                    }
+                ]
+            },
+        }
+    )
+    case.case_dir = case_dir
+    surfaces = {warning.surface for warning in scan_case(case)}
+    assert "after_comment" in surfaces
+    assert "test_name" in surfaces
+    assert "diff_added_line" not in surfaces
+    assert "diff_removed_line" not in surfaces
+
+
 @pytest.mark.parametrize("pack", ["v1", "audit_v1", "audit_v2"])
-def test_shipped_packs_are_contamination_free(pack):
-    # Every shipped pack is authored leak-free; this guards against a regression
-    # that lets ground-truth vocabulary back into the diff, comments, or test names.
+def test_shipped_packs_have_no_answer_surface_leak(pack):
+    # The shipped synthetic packs are forward-review diffs: their removed lines
+    # are pre-existing correct code the reviewer is meant to see, so removed-line
+    # vocabulary is expected and is reported under the distinct diff_removed_line
+    # surface. The authored guarantee these packs must keep is that the answer
+    # surfaces a reviewer could echo without reasoning - added diff lines,
+    # after-tree comments, and test names - stay free of ground-truth vocabulary.
+    answer_surfaces = {"diff_added_line", "after_comment", "test_name"}
     warnings = scan_benchmark(Path("benchmark_sets") / pack)
-    assert warnings == [], [warning.render() for warning in warnings]
+    leaks = [w for w in warnings if w.surface in answer_surfaces]
+    assert leaks == [], [w.render() for w in leaks]

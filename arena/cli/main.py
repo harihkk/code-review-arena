@@ -279,25 +279,42 @@ def certify_pack(
 def lint_cases(
     benchmark_set: Path = typer.Argument(DEFAULT_BENCHMARK_SET),
     strict: bool = typer.Option(
-        False, "--strict", help="Exit nonzero when any contamination is found."
+        False,
+        "--strict",
+        help="Exit nonzero when answer-surface contamination is found.",
     ),
 ) -> None:
     """Scan cases for ground-truth vocabulary leaking into reviewer-visible surfaces."""
     from arena.benchmark.contamination import scan_benchmark
 
+    # Added diff lines, after-tree comments, and test names are answer surfaces a
+    # reviewer could echo without reasoning, so they fail a strict run. Removed
+    # diff lines are the other side of the review: in a forward-review diff they
+    # are legitimate context (the code being changed), so they are reported but do
+    # not by themselves fail a strict run. For inverse RealFix diffs a removed
+    # line can carry the historical fix; the import gate rejects such cases at
+    # build time and the case audit reviews them, so they are surfaced here too.
+    blocking_surfaces = {"diff_added_line", "after_comment", "test_name"}
     warnings = scan_benchmark(resolve_benchmark_path(benchmark_set))
     for warning in warnings:
         typer.echo(warning.render())
-    if warnings:
+    blocking = [warning for warning in warnings if warning.surface in blocking_surfaces]
+    removed = [warning for warning in warnings if warning.surface == "diff_removed_line"]
+    if blocking:
         typer.echo(
-            f"{len(warnings)} potential leak(s); leaked phrases hand reviewers the answer "
-            "(test names appear in pre-patch test output).",
+            f"{len(blocking)} answer-surface leak(s); leaked phrases hand reviewers "
+            "the answer (test names appear in pre-patch test output).",
             err=True,
         )
-        if strict:
-            raise typer.Exit(code=1)
-    else:
+    if removed:
+        typer.echo(
+            f"{len(removed)} removed-diff-line match(es) reported for review-surface audit.",
+            err=True,
+        )
+    if not warnings:
         typer.echo("No contamination found.")
+    if strict and blocking:
+        raise typer.Exit(code=1)
 
 
 @app.command()
