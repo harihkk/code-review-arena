@@ -12,16 +12,19 @@ and the continued rejection of the unsafe forms.
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 
 from arena.benchmark.pack_hash import pack_checksum, stored_checksum, write_checksum
 from arena.benchmark.snapshot import manifest_digest, snapshot_pack
 from arena.core.errors import ValidationError
+from arena.core.models import CaseInput, GroundTruthFile
 from arena.patching.patch_applier import PatchApplier
 from arena.patching.patch_models import PatchApplyRequest
 from arena.patching.patch_parser import touched_files
 from arena.security.paths import (
     admit_reviewer_path,
     validate_case_id,
+    validate_dir_path,
     validate_relative_path,
 )
 
@@ -133,10 +136,105 @@ def test_patch_application_handles_upstream_paths(tmp_path, monkeypatch, path):
 # -- 7. reviewer-path admission ------------------------------------------------
 
 
-@pytest.mark.parametrize("path", UPSTREAM_PATHS)
-def test_reviewer_path_admission_accepts(path):
-    assert admit_reviewer_path(path) == path
-    assert admit_reviewer_path(f"./{path}") == path
+def test_reviewer_path_admission_accepts_non_dot_without_known_paths():
+    # An ordinary (non-dot) file is admitted without known-path context.
+    assert admit_reviewer_path(PLUS_PATH) == PLUS_PATH
+    assert admit_reviewer_path(f"./{PLUS_PATH}") == PLUS_PATH
+
+
+def test_reviewer_dotfile_requires_known_file():
+    known = frozenset({DOTFILE})
+    # 1-2. accepted when it exactly appears in known_paths
+    assert admit_reviewer_path(DOTFILE, known) == DOTFILE
+    assert admit_reviewer_path(".coveragerc", frozenset({".coveragerc"})) == ".coveragerc"
+    assert admit_reviewer_path(f"./{DOTFILE}", known) == DOTFILE
+    # 3. rejected without known_paths
+    with pytest.raises(ValueError):
+        admit_reviewer_path(DOTFILE)
+    # 4. unknown hidden path rejected even with a known set that lacks it
+    with pytest.raises(ValueError):
+        admit_reviewer_path(".hidden", known)
+
+
+def test_reviewer_known_path_prefix_and_ambiguity_preserved():
+    # 5. a/ and b/ and ./ normalization still works against known paths
+    known = frozenset({"app/x.py"})
+    assert admit_reviewer_path("b/app/x.py", known) == "app/x.py"
+    assert admit_reviewer_path("./app/x.py") == "app/x.py"
+    # 6. ambiguous normalized matches remain rejected
+    ambiguous = frozenset({"a/x.py", "x.py"})
+    with pytest.raises(ValueError):
+        admit_reviewer_path("a/x.py", ambiguous)
+
+
+# -- 8. directory-valued model fields reject every dot-prefixed component -------
+
+DOT_DIRS = [".hidden", "src/.hidden", ".tests", "tests/.fixtures"]
+
+
+@pytest.mark.parametrize("value", DOT_DIRS)
+def test_directory_validator_rejects_dot_components(value):
+    with pytest.raises(ValidationError):
+        validate_dir_path(value)
+
+
+@pytest.mark.parametrize("value", DOT_DIRS)
+@pytest.mark.parametrize("field", ["before_dir", "after_dir", "tests_dir"])
+def test_case_input_directory_fields_reject_dot_dirs(field, value):
+    with pytest.raises(PydanticValidationError):
+        CaseInput(**{field: value})
+
+
+def test_case_input_directory_fields_accept_normal_dirs():
+    ci = CaseInput(before_dir="before", after_dir="after", tests_dir="tests")
+    assert (ci.before_dir, ci.after_dir, ci.tests_dir) == ("before", "after", "tests")
+
+
+def test_directory_field_rejects_dot_leaf_that_a_file_field_accepts():
+    # The exact file-vs-directory distinction: a final dot-leaf is a valid FILE path
+    # but rejected as a directory path.
+    assert validate_relative_path("tests/.coveragerc") == "tests/.coveragerc"
+    assert GroundTruthFile(path="tests/.coveragerc", line_ranges=[{"start": 1, "end": 1}]).path == (
+        "tests/.coveragerc"
+    )
+    with pytest.raises(ValidationError):
+        validate_dir_path("tests/.coveragerc")
+    with pytest.raises(PydanticValidationError):
+        CaseInput(tests_dir="tests/.coveragerc")
+
+
+# -- 9. repository-control names rejected case-insensitively -------------------
+
+CONTROL_NAMES = [".git", ".hg", ".svn", ".gitignore", ".gitattributes", ".gitmodules"]
+
+
+def _casings(name):
+    return [name, name.upper(), "." + name[1:].capitalize()]
+
+
+@pytest.mark.parametrize("name", CONTROL_NAMES)
+def test_control_names_rejected_all_casings_as_file_and_dir(name):
+    for variant in _casings(name):
+        # rejected as a bare leaf, nested leaf, and directory component
+        with pytest.raises(ValidationError):
+            validate_relative_path(variant)
+        with pytest.raises(ValidationError):
+            validate_relative_path(f"tests/{variant}/config")
+        with pytest.raises(ValidationError):
+            validate_dir_path(f"tests/{variant}")
+
+
+def test_specific_mixed_case_control_names_rejected():
+    for value in [
+        ".Git",
+        ".GIT",
+        "tests/.Git/config",
+        ".GitIgnore",
+        "tests/.GITATTRIBUTES",
+        ".GitModules",
+    ]:
+        with pytest.raises(ValidationError):
+            validate_relative_path(value)
 
 
 # -- rejection: unsafe forms stay rejected -------------------------------------

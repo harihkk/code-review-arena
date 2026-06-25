@@ -160,6 +160,25 @@ def read_tree(repo: Repo, commit: str, prefixes: list[str]) -> dict[str, tuple[s
     return entries
 
 
+def classify_tree_path(repo: Repo, commit: str, path: str) -> str:
+    """Classify an exact committed path: 'file', 'dir', 'missing', or 'other'.
+
+    Uses ``cat-file -t`` on ``<commit>:<path>`` so an exact path resolves to a blob
+    (regular file), a tree (directory), or nothing (missing); a gitlink/symlink at
+    the exact path reports 'other'. Used to prove a dot-prefixed source selector
+    resolves to exactly one regular file rather than a hidden directory.
+    """
+    rc, out, _e = _run_git(repo.ctx, ["cat-file", "-t", f"{commit}:{path}"])
+    if rc != 0:
+        return "missing"
+    kind = _text(out)
+    if kind == "blob":
+        return "file"
+    if kind == "tree":
+        return "dir"
+    return "other"
+
+
 def cat_blob(repo: Repo, oid: str) -> bytes:
     """Exact blob bytes (bounded by the Git runner's output ceiling)."""
     return _git(repo, ["cat-file", "blob", oid], "file_too_large")

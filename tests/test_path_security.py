@@ -24,7 +24,7 @@ from arena.patching.patch_applier import PatchApplier
 from arena.patching.patch_models import PatchApplyRequest
 from arena.security.paths import (
     _WINDOWS_RESERVED,
-    SafeRelativePath,
+    SafeFilePath,
     _relative_path_error,
     assert_safe_delete_target,
     resolve_under,
@@ -32,7 +32,7 @@ from arena.security.paths import (
     validate_relative_path,
 )
 
-# (label, value) adversarial relative paths the SafeRelativePath policy must reject.
+# (label, value) adversarial relative paths the file-path policy must reject.
 UNSAFE_RELATIVE_PATHS = [
     ("empty", ""),
     ("absolute_posix", "/etc/passwd"),
@@ -201,7 +201,7 @@ def test_default_path_values_are_valid():
 
 
 def test_type_adapter_validates_and_emits_json_schema():
-    adapter = TypeAdapter(SafeRelativePath)
+    adapter = TypeAdapter(SafeFilePath)
     assert adapter.validate_python("app/x.py") == "app/x.py"
     with pytest.raises(PydanticValidationError):
         adapter.validate_python("../x")

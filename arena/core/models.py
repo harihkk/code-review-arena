@@ -17,7 +17,7 @@ from pydantic import (
 )
 
 from arena.core import limits
-from arena.security.paths import SafeCaseId, SafeRelativePath
+from arena.security.paths import SafeCaseId, SafeDirPath, SafeFilePath
 
 Severity = Literal["critical", "high", "medium", "low"]
 Risk = Literal["critical", "high", "medium", "low", "none"]
@@ -89,7 +89,7 @@ class LineRange(_StrictExternal):
 
 
 class GroundTruthFile(_StrictExternal):
-    path: SafeRelativePath
+    path: SafeFilePath
     line_ranges: list[LineRange] = Field(min_length=1, max_length=limits.LINE_RANGES_PER_FILE)
 
     @model_validator(mode="after")
@@ -137,7 +137,7 @@ PrimaryBug = GroundTruthBug
 class AcceptableFinding(_StrictExternal):
     """A known-good extra finding that is scored neutral, not as a false positive."""
 
-    path: SafeRelativePath | None = None
+    path: SafeFilePath | None = None
     concepts: list[BoundedConcept] = Field(min_length=1, max_length=limits.CONCEPTS_PER_BUG)
 
 
@@ -194,10 +194,10 @@ class GroundTruth(_StrictExternal):
 
 
 class CaseInput(_StrictExternal):
-    diff: SafeRelativePath = "pr.diff"
-    before_dir: SafeRelativePath = "before"
-    after_dir: SafeRelativePath = "after"
-    tests_dir: SafeRelativePath | None = "tests"
+    diff: SafeFilePath = "pr.diff"
+    before_dir: SafeDirPath = "before"
+    after_dir: SafeDirPath = "after"
+    tests_dir: SafeDirPath | None = "tests"
 
 
 # A pack-controlled command string (test_command / static_analysis_command). A
@@ -252,7 +252,7 @@ class ValidationConfig(_StrictExternal):
         default_factory=list, max_length=limits.STRUCTURAL_VALIDATORS_PER_CASE
     )
     max_false_positives: int = Field(default=0, ge=0, le=limits.FINDINGS_PER_RESPONSE)
-    protected_paths: list[SafeRelativePath] = Field(
+    protected_paths: list[SafeFilePath] = Field(
         default_factory=list, max_length=limits.PROTECTED_PATHS_PER_CASE
     )
     # Detection completeness required for a deterministic pass. Defaults to
