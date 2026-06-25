@@ -61,12 +61,18 @@ UNSAFE_RELATIVE_PATHS = [
     ("windows_com1", "COM1"),
     ("windows_reserved_nested", "src/aux/x.py"),
     ("too_long_component", "a" * 256),
-    # Dot-prefixed components are omitted by the current pack checksum, so they
-    # are rejected until Phase 1C snapshot hashing covers every regular file.
-    ("dot_hidden", ".hidden"),
+    # Dot-prefixed DIRECTORY components stay rejected (a hidden directory's contents
+    # are easy to overlook in review); an ordinary final leaf file like ``.coveragerc``
+    # is admitted instead -- see test_safe_upstream_paths.
     ("dot_hidden_file", ".hidden/file.py"),
-    ("nested_dot_hidden", "src/.hidden"),
     ("nested_dot_hidden_file", "src/.hidden/file.py"),
+    # Reserved repository-control names are rejected wherever they appear (leaf or
+    # directory) so a VCS-control file cannot steer patch application.
+    ("git_dir", ".git"),
+    ("git_dir_nested", "tests/.git/config"),
+    ("gitignore_leaf", ".gitignore"),
+    ("gitattributes_leaf", "tests/.gitattributes"),
+    ("gitmodules_leaf", ".gitmodules"),
     ("bare_dot", "."),
     ("bare_dotdot", ".."),
 ]
@@ -243,7 +249,9 @@ def test_generated_portable_paths_are_accepted(parts):
 
 @given(st.text(min_size=1, max_size=40))
 def test_any_string_outside_the_ascii_profile_is_rejected(text):
-    if any(ch not in (_PATH_ALPHABET + "ghijklmnopqrstuvwxyzGHIJKLMNOPQRSTUVWXYZ/") for ch in text):
+    # '+' is part of the relative-path component profile; '/' is the separator.
+    profile = _PATH_ALPHABET + "ghijklmnopqrstuvwxyzGHIJKLMNOPQRSTUVWXYZ+/"
+    if any(ch not in profile for ch in text):
         assert _relative_path_error(text) is not None
 
 
