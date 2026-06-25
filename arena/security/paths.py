@@ -14,12 +14,21 @@ Two layers are provided:
   Arena's ``ValidationError`` for callers at filesystem/I/O boundaries.
 
 Path policy is a deliberately strict, portable ASCII profile: only ASCII letters,
-digits, ``_``, ``-``, ``.`` and ``/``. We do not support Unicode filenames in pack
-paths (no concrete need), which removes whole classes of confusable and
+digits, ``_``, ``-``, ``.``, ``+`` and ``/``. We do not support Unicode filenames
+in pack paths (no concrete need), which removes whole classes of confusable and
 normalization attacks rather than blacklisting examples. Case-insensitive and
 Unicode-normalization collisions are enforced again at snapshot construction
 (Phase 1C). If Unicode paths ever become a requirement, the exact normalization
 and confusable profile must be defined before relaxing this.
+
+A dot-prefixed component is admitted only as an ordinary final leaf filename (for
+example ``tests/.coveragerc``); dot-prefixed directory components and the reserved
+repository-control names (``.git``, ``.hg``, ``.svn``, ``.gitignore``,
+``.gitattributes``, ``.gitmodules``) stay rejected, so a hidden directory or a
+VCS-control file cannot enter a pack or influence patch application. The pack
+checksum covers every regular file including hidden leaf files (Phase 1C), so a
+hidden leaf is not outside the digest. A case id is stricter still (see
+``_check_case_id``): it admits no ``+`` and no leading dot.
 """
 
 from __future__ import annotations
@@ -32,12 +41,13 @@ from pydantic import AfterValidator
 
 from arena.core.errors import ValidationError
 
-# A case id is one path component: a slug, never a relative path.
-# Portable ASCII profile: a single path component may contain only these
-# characters (no separator). Both a relative path (split on "/") and a case id
-# (which is exactly one component, so it becomes a directory name) are checked
-# through the SAME component validator, so their filesystem rules cannot drift.
-_ALLOWED_COMPONENT_CHARS = re.compile(r"\A[A-Za-z0-9_.-]+\Z")
+# Two ASCII component profiles. Ordinary relative-path components admit '+' (e.g.
+# upstream fixture directories such as ``html+django``); a case id, which becomes a
+# physical directory name and an identifier, stays on the narrower profile and
+# admits no '+'. The two share the structural checks in ``_component_common_error``
+# so their filesystem rules cannot drift.
+_ALLOWED_PATH_COMPONENT_CHARS = re.compile(r"\A[A-Za-z0-9_.+-]+\Z")
+_ALLOWED_CASE_ID_CHARS = re.compile(r"\A[A-Za-z0-9_.-]+\Z")
 _MAX_PATH_LENGTH = 1024
 _MAX_COMPONENT_LENGTH = 255
 # A case id becomes a directory name, so it is the strictest: a single component
@@ -51,27 +61,68 @@ _WINDOWS_RESERVED = frozenset(
     | {f"COM{i}" for i in range(1, 10)}
     | {f"LPT{i}" for i in range(1, 10)}
 )
+# Repository-control names whose mere presence can steer a VCS during patch
+# application (``git add``/``apply`` reads ``.gitignore``/``.gitattributes``/
+# ``.gitmodules``; a ``.git`` tree is the repository itself). Rejected wherever they
+# appear -- leaf or directory -- so an upstream tree cannot smuggle one in.
+_RESERVED_CONTROL_NAMES = frozenset(
+    {".git", ".hg", ".svn", ".gitignore", ".gitattributes", ".gitmodules"}
+)
 
 
-def _component_error(component: object) -> str | None:
-    """Return why a single path component is unsafe, or None. Shared by paths and ids."""
+def _component_common_error(component: object) -> str | None:
+    """Structural checks shared by every path component and case id (charset aside)."""
     if not isinstance(component, str) or not component:
         return "empty component"
     if len(component) > _MAX_COMPONENT_LENGTH:
         return f"component longer than {_MAX_COMPONENT_LENGTH} characters"
     if component in {".", ".."}:
         return "'.' and '..' are not valid components"
-    # A dot-prefixed component is excluded by the current pack checksum, so content
-    # under it would not be covered by the pack digest. Reject it until snapshot
-    # hashing (Phase 1C) covers every regular file.
-    if component.startswith("."):
-        return "a component may not start with a dot (it is omitted from the pack checksum)"
-    if not _ALLOWED_COMPONENT_CHARS.match(component):
-        return "only ASCII letters, digits, '_', '-', and '.' are allowed"
+    if component in _RESERVED_CONTROL_NAMES:
+        return f"'{component}' is a reserved repository-control name"
     if component.endswith(".") or component.endswith(" "):
         return "a component may not end with a dot or space"
     if component.split(".")[0].upper() in _WINDOWS_RESERVED:
         return f"'{component}' uses a reserved device name"
+    return None
+
+
+def _path_component_error(component: object, *, is_final: bool) -> str | None:
+    """Return why a relative-path component is unsafe, or None.
+
+    Profile: ASCII letters, digits, ``_``, ``-``, ``.`` and ``+``. A dot-prefixed
+    component is admitted only as an ordinary final leaf filename with a name after
+    the dot (e.g. ``.coveragerc``); dot-prefixed directory components and reserved
+    control names stay rejected.
+    """
+    error = _component_common_error(component)
+    if error is not None:
+        return error
+    assert isinstance(component, str)  # narrowed by _component_common_error
+    if component.startswith("."):
+        if not is_final:
+            return "a dot-prefixed component may only be a final leaf filename"
+        if len(component) < 2:
+            return "a dot-prefixed component must have a name after the dot"
+    if not _ALLOWED_PATH_COMPONENT_CHARS.match(component):
+        return "only ASCII letters, digits, '_', '-', '.', and '+' are allowed"
+    return None
+
+
+def _case_id_component_error(component: object) -> str | None:
+    """Return why a case-id component is unsafe, or None.
+
+    Stricter than a path component: no ``+`` and no leading dot (no hidden/leaf
+    exception), because a case id becomes a physical directory name and identifier.
+    """
+    error = _component_common_error(component)
+    if error is not None:
+        return error
+    assert isinstance(component, str)  # narrowed by _component_common_error
+    if component.startswith("."):
+        return "a case id may not start with a dot"
+    if not _ALLOWED_CASE_ID_CHARS.match(component):
+        return "only ASCII letters, digits, '_', '-', and '.' are allowed"
     return None
 
 
@@ -83,8 +134,10 @@ def _relative_path_error(value: object) -> str | None:
         return f"path longer than {_MAX_PATH_LENGTH} characters"
     if value.startswith("/") or value.endswith("/"):
         return "leading or trailing '/' is not allowed"
-    for component in value.split("/"):
-        error = _component_error(component)
+    components = value.split("/")
+    final_index = len(components) - 1
+    for index, component in enumerate(components):
+        error = _path_component_error(component, is_final=index == final_index)
         if error is not None:
             return error
     return None
@@ -149,13 +202,14 @@ def admit_reviewer_path(value: object, known_paths: frozenset[str] | None = None
 def _check_case_id(value: str) -> str:
     """Pydantic-facing validator: a case id is exactly one safe path component.
 
-    It becomes a physical directory name, so it goes through the same component
-    policy as a path segment (ASCII profile, no separators, no reserved device
-    names even with an extension, no trailing dot or space, no leading dot) and is
-    additionally required to start with an ASCII alphanumeric and stay within the
-    case-id length bound.
+    It becomes a physical directory name, so it goes through the stricter case-id
+    component policy (narrower ASCII profile with no ``+``, no separators, no
+    reserved device or repository-control names, no trailing dot or space, no
+    leading dot) and is additionally required to start with an ASCII alphanumeric
+    and stay within the case-id length bound. Unlike an ordinary relative-path leaf,
+    a case id never admits a dot-prefixed name.
     """
-    error = _component_error(value)
+    error = _case_id_component_error(value)
     if error is not None:
         raise ValueError(f"unsafe case id {value!r}: {error}")
     if len(value) > _MAX_CASE_ID_LENGTH:
