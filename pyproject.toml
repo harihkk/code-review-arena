@@ -5,11 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "codereview-arena"
 version = "0.1.0"
-description = "Local, execution-backed benchmark harness for AI code reviewers (code-review-arena)."
+description = "Local benchmark harness for execution-backed code-review evaluation."
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
-authors = [{name = "CodeReview Arena contributors"}]
+authors = [{name = "Hari Kancharla"}]
 dependencies = [
   "fastapi>=0.110",
   "httpx>=0.27",
